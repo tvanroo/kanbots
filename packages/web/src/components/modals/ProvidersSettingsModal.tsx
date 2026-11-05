@@ -513,6 +513,7 @@ function ProviderSection({ spec, config, onChanged }: SectionProps) {
         const out: TestState = { kind: 'ok' };
         if (result.models !== undefined) out.models = result.models;
         setTestState(out);
+        onChanged(await api.getProviders());
       } else {
         setTestState({ kind: 'error', message: result.error ?? 'unknown error' });
       }
@@ -532,7 +533,7 @@ function ProviderSection({ spec, config, onChanged }: SectionProps) {
     }
     setLoginState({ kind: 'running' });
     try {
-      const result = await runLoginForProvider(bridge, spec.id);
+      const result = spec.id === 'claude-code' ? await bridge.claudeLoginStart(config.cliAvailable === false) : await runLoginForProvider(bridge, spec.id);
       if (!result.ok) {
         setLoginState({ kind: 'error', message: result.error });
         return;
@@ -600,7 +601,7 @@ function ProviderSection({ spec, config, onChanged }: SectionProps) {
             onClick={() => void handleSignIn()}
             disabled={loginState.kind === 'running'}
           >
-            {loginState.kind === 'running' ? 'Waiting for browser…' : spec.signInLabel}
+            {loginState.kind === 'running' ? (config.cliAvailable === false ? 'Installing, then opening sign-in…' : 'Waiting for browser…') : spec.id === 'claude-code' && config.cliAvailable === false ? 'Install Claude Code & sign in' : spec.signInLabel}
           </button>
           {loginState.kind === 'running' ? (
             <button type="button" className="kb-btn ghost" onClick={handleCancelSignIn}>
@@ -660,7 +661,7 @@ function ProviderSection({ spec, config, onChanged }: SectionProps) {
         <div className="kb-sentry-error">{testState.message}</div>
       ) : null}
       {localError ? <div className="kb-sentry-error">{localError}</div> : null}
-      {config.lastError ? (
+      {config.lastError && testState.kind !== 'ok' && testState.kind !== 'running' ? (
         <div className="kb-sentry-error">Last error: {config.lastError}</div>
       ) : null}
 

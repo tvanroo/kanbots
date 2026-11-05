@@ -1,3 +1,4 @@
+import { createPortal } from 'react-dom';
 import { useEffect, useRef, useState, type MouseEvent } from 'react';
 
 export interface BoardFiltersStats {
@@ -180,12 +181,32 @@ function ViewsDropdown({ views }: { views: BoardFiltersViewsAPI }) {
   const [savePromptOpen, setSavePromptOpen] = useState(false);
   const [draftName, setDraftName] = useState('');
   const wrapRef = useRef<HTMLDivElement | null>(null);
+  const menuRef = useRef<HTMLDivElement | null>(null);
+  const [position, setPosition] = useState({ top: 0, left: 0 });
+
+  useEffect(() => {
+    if (!open) return;
+    const close = () => setOpen(false);
+    const onScroll = (event: Event) => {
+      if (event.target instanceof Node && menuRef.current?.contains(event.target)) return;
+      close();
+    };
+    const onKey = (event: KeyboardEvent) => { if (event.key === 'Escape') close(); };
+    window.addEventListener('resize', close);
+    document.addEventListener('scroll', onScroll, true);
+    document.addEventListener('keydown', onKey);
+    return () => {
+      window.removeEventListener('resize', close);
+      document.removeEventListener('scroll', onScroll, true);
+      document.removeEventListener('keydown', onKey);
+    };
+  }, [open]);
 
   useEffect(() => {
     if (!open && !savePromptOpen) return;
     function onDoc(e: globalThis.MouseEvent): void {
       const target = e.target as Node | null;
-      if (target && wrapRef.current?.contains(target)) return;
+      if (target && (wrapRef.current?.contains(target) || menuRef.current?.contains(target))) return;
       setOpen(false);
       setSavePromptOpen(false);
     }
@@ -222,13 +243,19 @@ function ViewsDropdown({ views }: { views: BoardFiltersViewsAPI }) {
       <button
         type="button"
         className="kb-board-sort-select"
-        onClick={() => setOpen((v) => !v)}
+        aria-expanded={open}
+        aria-haspopup="menu"
+        onClick={() => {
+          const rect = wrapRef.current?.getBoundingClientRect();
+          if (rect) setPosition({ top: rect.bottom + 6, left: Math.max(8, Math.min(rect.left, window.innerWidth - 288)) });
+          setOpen((v) => !v);
+        }}
         title="Switch saved views"
       >
         View: {label}
       </button>
-      {open ? (
-        <div className="kb-board-views-menu" role="menu">
+      {open ? createPortal(
+        <div ref={menuRef} className="kb-board-views-menu" role="menu" style={{ position: 'fixed', ...position, maxHeight: `calc(100vh - ${position.top + 8}px)`, overflowY: 'auto', maxWidth: 'calc(100vw - 16px)' }}>
           {views.views.length === 0 ? (
             <div className="kb-board-views-empty">No saved views yet</div>
           ) : (
@@ -294,7 +321,7 @@ function ViewsDropdown({ views }: { views: BoardFiltersViewsAPI }) {
           >
             Manage views…
           </button>
-        </div>
+        </div>, document.body
       ) : null}
     </div>
   );

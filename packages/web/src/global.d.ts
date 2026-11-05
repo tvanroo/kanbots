@@ -64,7 +64,7 @@ export interface KanbotsBridge {
   toggleMaximizeWindow(): Promise<void>;
   closeWindow(): Promise<void>;
   claudeAuthStatus(): Promise<{ authed: boolean }>;
-  claudeLoginStart(): Promise<{ ok: true } | { ok: false; error: string }>;
+  claudeLoginStart(installIfMissing?: boolean): Promise<{ ok: true } | { ok: false; error: string }>;
   claudeLoginCancel(): Promise<void>;
   codexAuthStatus(): Promise<{ authed: boolean }>;
   codexLoginStart(): Promise<{ ok: true } | { ok: false; error: string }>;

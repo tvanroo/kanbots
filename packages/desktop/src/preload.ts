@@ -48,8 +48,8 @@ const api: KanbotsBridge = {
   closeWindow: () => ipcRenderer.invoke('kanbots:window-close') as Promise<void>,
   claudeAuthStatus: () =>
     ipcRenderer.invoke('kanbots:claude-auth-status') as Promise<{ authed: boolean }>,
-  claudeLoginStart: () =>
-    ipcRenderer.invoke('kanbots:claude-login-start') as Promise<
+  claudeLoginStart: (installIfMissing?: boolean) =>
+    ipcRenderer.invoke('kanbots:claude-login-start', installIfMissing) as Promise<
       { ok: true } | { ok: false; error: string }
     >,
   claudeLoginCancel: () => ipcRenderer.invoke('kanbots:claude-login-cancel') as Promise<void>,

@@ -1236,8 +1236,8 @@ function registerIpc(): void {
 
   ipcMain.handle(
     'kanbots:claude-login-start',
-    async (): Promise<{ ok: true } | { ok: false; error: string }> => {
-      return startClaudeLogin();
+    async (_event, installIfMissing?: boolean): Promise<{ ok: true } | { ok: false; error: string }> => {
+      return startClaudeLogin(installIfMissing === true);
     },
   );
 

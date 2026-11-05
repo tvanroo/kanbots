@@ -225,6 +225,7 @@ export interface CodexSubscriptionUsage {
 }
 
 export interface ProviderConfigPayload {
+  cliAvailable?: boolean;
   subscriptionUsage?: CodexSubscriptionUsage;
   subscriptionUsageError?: string;
   priority?: number;
