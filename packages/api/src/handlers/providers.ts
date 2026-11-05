@@ -56,9 +56,26 @@ const connectionSchema = z.object({
   if (value.keyExpirationMode === 'date' && !value.keyExpiresAt) context.addIssue({ code: 'custom', path: ['keyExpiresAt'], message: 'Choose a key expiration date.' });
 });
 
+const fundingPoolSchema = z.object({
+  importedConnectionIds: z.array(z.string().uuid()).max(100).optional(),
+  id: z.string().uuid(), name: z.string().trim().min(1).max(100),
+  kind: z.enum(['unknown', 'paid-credit', 'grant', 'subscription-credit', 'budget']), enabled: z.boolean(),
+  amount: z.number().finite().nonnegative().nullable(), remaining: z.number().finite().nullable(),
+  acquiredAt: z.string().datetime().nullable(),
+  expirationMode: z.enum(['unknown', 'never', 'date']), expiresAt: z.string().datetime().nullable(),
+  renewal: z.enum(['unknown', 'none', 'weekly', 'monthly', 'yearly']), renewsAt: z.string().datetime().nullable(),
+}).strict().superRefine((value, ctx) => {
+  if (value.expirationMode === 'date' && !value.expiresAt) ctx.addIssue({ code: 'custom', path: ['expiresAt'], message: 'Choose an expiration date, or select Unknown.' });
+});
+const fundingAccountSchema = z.object({
+  provider: z.enum(['openai', 'anthropic']), organizationId: z.string().regex(/^[a-zA-Z0-9_-]{1,160}$/),
+  pools: z.array(fundingPoolSchema).max(100),
+}).strict().refine(value => new Set(value.pools.map(p => p.id)).size === value.pools.length, 'Each balance must have a unique ID.');
+
 const saveSchema = z
   .object({
     id: PROVIDER_ID_SCHEMA,
+    fundingAccount: fundingAccountSchema.optional(),
     priority: z.number().int().min(0).max(999).optional(),
     reportingAction: z.enum(['connect', 'refresh']).optional(),
     approveReportingInstall: z.boolean().optional(),
@@ -97,6 +114,11 @@ export async function save(
 ): Promise<ProvidersPayload> {
   const parsed = parseArgs(saveSchema, args);
   const id = parsed.id as ProviderId;
+  if (parsed.fundingAccount) {
+    if (!deps.providers.saveFundingAccount || (id === 'codex-cli' ? 'openai' : id === 'claude-code' ? 'anthropic' : null) !== parsed.fundingAccount.provider) throw badRequest('Choose a supported API account.');
+    await deps.providers.saveFundingAccount(parsed.fundingAccount);
+    return readPayload(deps);
+  }
   if (parsed.reportingAction) {
     if (id === 'codex-cli' && deps.providers.updateOpenAIReporting) await deps.providers.updateOpenAIReporting(parsed.reportingAction, parsed.reportingKey);
     else if (id === 'claude-code' && deps.providers.updateAnthropicReporting) await deps.providers.updateAnthropicReporting(parsed.reportingAction, parsed.approveReportingInstall, parsed.reportingOrganizationId, parsed.reportingSwitchAccount);
@@ -208,6 +230,7 @@ async function readPayload(deps: ProvidersHandlerDeps): Promise<ProvidersPayload
   return {
     providers,
     apiConnections: deps.providers.listApiConnections?.() ?? [],
+    fundingAccounts: deps.providers.getFundingAccounts?.() ?? [],
     anthropicReportingAccounts: deps.providers.getAnthropicReportingAccounts?.() ?? [],
     ...(deps.providers.getOpenAIReporting ? { openaiReporting: deps.providers.getOpenAIReporting() } : {}),
     ...(deps.providers.getAnthropicReporting ? { anthropicReporting: deps.providers.getAnthropicReporting() } : {}),

@@ -29,12 +29,12 @@ export function ApiConnections({ provider, connections, onChanged, openaiReport 
 function ConnectionEditor({ provider, initial, onChanged, onCancel, openaiReport }: { openaiReport?: OpenAIReporting | undefined; provider: Props['provider']; initial?: ApiConnection; onChanged: Props['onChanged']; onCancel?: () => void }) {
   const [form, setForm] = useState<ApiConnectionInput>(() => ({
     id: initial?.id ?? crypto.randomUUID(), provider, name: initial?.name ?? '', enabled: initial?.enabled ?? true,
-    priority: initial?.priority ?? 1, funding: initial?.funding ?? 'unknown', budget: initial?.budget ?? null,
+    priority: initial?.priority ?? 1, funding: !initial || initial.funding === 'unknown' ? 'paid' : initial.funding, budget: initial?.budget ?? null,
     remaining: initial?.remaining ?? null, expiresAt: initial?.expiresAt ?? null,
     expirationMode: initial?.expirationMode ?? (initial?.expiresAt ? 'date' : 'unknown'),
     timeZone: initial?.timeZone ?? 'UTC',
     keyExpirationMode: initial?.keyExpirationMode ?? 'unknown', keyExpiresAt: initial?.keyExpiresAt ?? null,
-    renewal: initial?.renewal ?? 'unknown', renewsAt: initial?.renewsAt ?? null,
+    renewal: initial?.renewal ?? 'monthly', renewsAt: initial?.renewsAt ?? null,
     expired: initial?.expired ?? false, pool: initial?.pool ?? '', defaultModel: initial?.defaultModel ?? null,
   }));
   const [savedForm, setSavedForm] = useState(form);
@@ -136,8 +136,9 @@ function ConnectionEditor({ provider, initial, onChanged, onCancel, openaiReport
       {form[modeField] === 'date' ? dateInput(dateField, `Expiration date (${form.timeZone ?? 'UTC'})`) : null}
     </>;
   }
-  const expired = initial?.expired || (initial?.expiresAt && Date.parse(initial.expiresAt) <= Date.now()) || (initial?.keyExpiresAt && Date.parse(initial.keyExpiresAt) <= Date.now());
+  const expired = initial?.expired || (initial?.funding !== 'paid' && initial?.expiresAt && Date.parse(initial.expiresAt) <= Date.now()) || (initial?.keyExpiresAt && Date.parse(initial.keyExpiresAt) <= Date.now());
   const status = !initial ? 'New connection' : !initial.enabled ? 'Disabled' : expired ? 'Expired' : initial.status.startsWith('Connected') ? 'Models connected' : initial.checkedAt ? 'Needs attention' : 'Not checked';
+  const monthEnd = new Date(); monthEnd.setUTCDate(1); monthEnd.setUTCHours(0, 0, 0, 0); monthEnd.setUTCMonth(monthEnd.getUTCMonth() + 1);
   const coverage = !initial || provider !== 'openai' ? null
     : !openaiReport?.keyPreview ? 'Usage visibility: not connected. Connect an OpenAI Admin key above.'
     : !initial.organizationId || !openaiReport.organizationId ? 'Usage visibility: account match not yet confirmed. Refresh this key and organization reports to check.'
@@ -151,9 +152,10 @@ function ConnectionEditor({ provider, initial, onChanged, onCancel, openaiReport
       {initial ? <div className="kb-api-card-actions"><button type="button" className="kb-btn ghost" disabled={busy || dirty} onClick={() => void save(true)}>{busy ? 'Checking…' : 'Refresh'}</button>{!expanded ? <button type="button" className="kb-btn" onClick={() => setExpanded(true)}>Edit</button> : null}</div> : null}
     </div>
     {coverage ? <p className="kb-provider-desc" role="status">{coverage}</p> : null}
+    {initial && ['paid', 'unknown'].includes(initial.funding) ? <p className="kb-provider-desc">Monthly tracking rolls over {monthEnd.toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', timeZone: 'UTC', timeZoneName: 'short' })}. Provider spending cap: not reported.{initial.budget !== null ? ` Entered budget target: $${initial.budget.toFixed(2)}; not enforced.` : ''}</p> : null}
     {initial && !expanded ? <div className="kb-api-summary">
       <span>{initial.models.length} models</span>
-      <span>{expirationLabel(initial.expirationMode ?? (initial.expiresAt ? 'date' : 'unknown'), initial.expiresAt, 'Credit')}</span>
+      <span>{['paid', 'unknown'].includes(initial.funding) ? 'Pay-as-you-go · monthly tracking' : initial.organizationId ? 'Shared account credits above' : expirationLabel(initial.expirationMode ?? (initial.expiresAt ? 'date' : 'unknown'), initial.expiresAt, 'Credit')}</span>
       {initial.organizationId ? <span>Account identified · {initial.workspaceId ? 'workspace identified' : 'organization scope'}</span> : null}
       {initial.reportedSpend !== null ? <span>Organization spend ${initial.reportedSpend.toFixed(2)} · reported</span> : null}
     </div> : null}
@@ -166,20 +168,26 @@ function ConnectionEditor({ provider, initial, onChanged, onCancel, openaiReport
       <p className="kb-provider-desc">Saving a new key automatically checks models and available organization costs. No model request is made.</p>
       {initial ? <div className="kb-api-reported"><strong>Provider-reported details</strong><p>{initial.status}</p><p>{initial.billingStatus}</p>{initial.reportedSpend !== null ? <p>Organization spend this calendar month: ${initial.reportedSpend.toFixed(2)} USD. Last reported {initial.spendCheckedAt ? new Date(initial.spendCheckedAt).toLocaleString() : 'unknown'}.</p> : null}<p>Grant balance, budget, and renewal are not supplied by the standard model API. Key expiration is also unknown unless entered below; Anthropic exposes it separately through its Admin API.</p><a href={provider === 'openai' ? 'https://platform.openai.com/settings/organization/billing/overview' : 'https://platform.claude.com/settings/billing'} target="_blank" rel="noreferrer">Open provider billing</a></div> : null}
       <details ref={manual} className="kb-api-manual">
-        <summary>Optional funding and expiration details <span>User-entered</span></summary>
+        <summary>{initial?.organizationId ? 'Optional key settings' : 'Billing model & optional budget'} <span>User-entered</span></summary>
+        {initial?.organizationId ? <p className="kb-provider-desc">Credit balances, grants, and renewal belong to the shared account. Manage them once in API credits &amp; budget above.</p> : null}
+        {form.funding === 'paid' ? <p className="kb-provider-desc">Pay-as-you-go tracks usage and spend, not a credit balance. The tracking period is the calendar month in UTC. Any entered budget is a target, not yet an enforced app limit.</p> : null}
         <p className="kb-provider-desc">Only fill what you know. Unknown is different from zero or no expiration. Credit expiration and key expiration are independent.</p>
         <div className="kb-api-grid">
-          {field('funding', 'Funding', <select {...attributes('funding')} value={form.funding} onChange={e => { const funding = e.target.value as ApiConnectionInput['funding']; setForm(old => ({ ...old, funding, renewal: old.renewal === 'unknown' && funding === 'subscription-credit' ? 'monthly' : old.renewal })); }}><option value="unknown">Unknown</option><option value="paid">Paid budget</option><option value="grant">Grant / promotional credit</option><option value="subscription-credit">Credit included with subscription</option></select>)}
-          {field('pool', 'Shared billing pool', <input {...attributes('pool')} type="text" maxLength={120} value={form.pool} onChange={e => change('pool', e.target.value)} placeholder="Organization or workspace (optional)" />)}
-          {field('budget', 'Budget / grant amount (USD)', <input {...attributes('budget')} type="number" min="0" step="any" value={form.budget ?? ''} onChange={e => change('budget', e.target.value === '' ? null : Number(e.target.value))} placeholder="Unknown" />)}
-          {field('remaining', 'Remaining credit (USD)', <input {...attributes('remaining')} type="number" min="0" step="any" value={form.remaining ?? ''} onChange={e => change('remaining', e.target.value === '' ? null : Number(e.target.value))} placeholder="Unknown" />)}
-          {field('timeZone', 'Time zone for dates', <select {...attributes('timeZone')} value={form.timeZone ?? 'UTC'} onChange={e => change('timeZone', e.target.value)}>{Array.from(new Set(['UTC', Intl.DateTimeFormat().resolvedOptions().timeZone, ...Intl.supportedValuesOf('timeZone')])).map(zone => <option key={zone} value={zone}>{zone === 'UTC' ? 'UTC — provider timestamps' : zone.replaceAll('_', ' ')}</option>)}</select>, true)}
-          {expiry('credit')}{expiry('key')}
+          {!initial?.organizationId ? <>
+          {field('funding', 'Funding', <select {...attributes('funding')} value={form.funding} onChange={e => { const funding = e.target.value as ApiConnectionInput['funding']; setForm(old => ({ ...old, funding, renewal: old.renewal === 'unknown' && funding === 'subscription-credit' ? 'monthly' : old.renewal })); }}><option value="unknown">Unknown</option><option value="paid">Pay-as-you-go (default)</option><option value="grant">Grant / promotional credit</option><option value="subscription-credit">Credit included with subscription</option></select>)}
+          {form.funding !== 'paid' ? field('pool', 'Shared billing pool', <input {...attributes('pool')} type="text" maxLength={120} value={form.pool} onChange={e => change('pool', e.target.value)} placeholder="Organization or workspace (optional)" />) : null}
+          {field('budget', form.funding === 'paid' ? 'Monthly budget target (USD, optional)' : 'Budget / grant amount (USD)', <input {...attributes('budget')} type="number" min="0" step="any" value={form.budget ?? ''} onChange={e => change('budget', e.target.value === '' ? null : Number(e.target.value))} placeholder="Unknown" />)}
+          {form.funding !== 'paid' ? field('remaining', 'Remaining credit (USD)', <input {...attributes('remaining')} type="number" min="0" step="any" value={form.remaining ?? ''} onChange={e => change('remaining', e.target.value === '' ? null : Number(e.target.value))} placeholder="Unknown" />) : null}
+          </> : null}
+          {form.funding !== 'paid' ? field('timeZone', 'Time zone for dates', <select {...attributes('timeZone')} value={form.timeZone ?? 'UTC'} onChange={e => change('timeZone', e.target.value)}>{Array.from(new Set(['UTC', Intl.DateTimeFormat().resolvedOptions().timeZone, ...Intl.supportedValuesOf('timeZone')])).map(zone => <option key={zone} value={zone}>{zone === 'UTC' ? 'UTC — provider timestamps' : zone.replaceAll('_', ' ')}</option>)}</select>, true) : null}
+          {!initial?.organizationId && form.funding !== 'paid' ? expiry('credit') : null}<details className="kb-api-manual"><summary>Advanced key expiration</summary>{expiry('key')}</details>
+          {!initial?.organizationId && form.funding !== 'paid' ? <>
           {field('renewal', 'Credit renewal', <select {...attributes('renewal')} value={form.renewal} onChange={e => change('renewal', e.target.value as ApiConnectionInput['renewal'])}><option value="unknown">Unknown</option><option value="none">Does not renew</option><option value="weekly">Weekly</option><option value="monthly">Monthly</option><option value="yearly">Yearly</option></select>)}
           {['weekly', 'monthly', 'yearly'].includes(form.renewal) ? dateInput('renewsAt', 'Next credit renewal (optional)') : null}
+          </> : null}
           <label className="kb-api-toggle"><input type="checkbox" checked={form.expired} onChange={e => change('expired', e.target.checked)} />Mark connection expired</label>
         </div>
-        {form.funding === 'subscription-credit' ? <p className="kb-provider-desc">Monthly renewal is suggested for subscription credits. Use the date in your provider’s billing page.{provider === 'openai' ? ' Annually billed Business grants can renew annually; adjust the schedule to match.' : ''}</p> : null}
+        {!initial?.organizationId && form.funding === 'subscription-credit' ? <p className="kb-provider-desc">Monthly renewal is suggested for subscription credits. Use the date in your provider’s billing page.{provider === 'openai' ? ' Annually billed Business grants can renew annually; adjust the schedule to match.' : ''}</p> : null}
         <p className="kb-provider-desc">Keys in the same organization may share one balance. These fields describe capacity; they do not enforce a spending limit.</p>
       </details>
       {initial?.models.length ? field('defaultModel', 'Preferred API model (optional)', <select {...attributes('defaultModel')} value={form.defaultModel ?? ''} onChange={e => change('defaultModel', e.target.value || null)}><option value="">No preference</option>{form.defaultModel && !initial.models.some(m => m.id === form.defaultModel) ? <option value={form.defaultModel}>{form.defaultModel} (saved)</option> : null}{initial.models.map(m => <option key={m.id} value={m.id}>{m.label}</option>)}</select>) : null}

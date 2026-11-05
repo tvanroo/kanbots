@@ -311,7 +311,35 @@ export interface OpenAIReporting {
   costPeriodStart?: string;
 }
 
+export interface FundingPool {
+  importedConnectionIds?: string[] | undefined;
+  id: string;
+  name: string;
+  kind: 'unknown' | 'paid-credit' | 'grant' | 'subscription-credit' | 'budget';
+  enabled: boolean;
+  amount: number | null;
+  remaining: number | null;
+  acquiredAt: string | null;
+  expirationMode: 'unknown' | 'never' | 'date';
+  expiresAt: string | null;
+  renewal: 'unknown' | 'none' | 'monthly' | 'yearly' | 'weekly';
+  renewsAt: string | null;
+}
+export interface FundingAccountInput {
+  provider: 'openai' | 'anthropic';
+  organizationId: string;
+  pools: FundingPool[];
+}
+export interface FundingAccount extends FundingAccountInput {
+  connectionNames: string[];
+  updatedAt: string | null;
+  legacy: Array<{ connectionId: string; connectionNames: string[]; pool: FundingPool }>;
+  // Credit ledgers are not exposed by the documented reporting integrations.
+  balanceSource: 'manual';
+}
+
 export interface ProvidersPayload {
+  fundingAccounts?: FundingAccount[];
   openaiReporting?: OpenAIReporting;
   anthropicReporting?: AnthropicReporting;
   anthropicReportingAccounts?: Array<{ organizationId: string; connectionNames: string[]; report: AnthropicReporting }>;
@@ -324,6 +352,7 @@ export interface ProvidersPayload {
 }
 
 export interface ProviderSaveInput {
+  fundingAccount?: FundingAccountInput;
   reportingAction?: 'connect' | 'refresh';
   approveReportingInstall?: boolean;
   reportingOrganizationId?: string;

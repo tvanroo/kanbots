@@ -1,3 +1,4 @@
+import { getFundingAccounts, saveFundingAccount } from './account-funding.js';
 import { getOpenAIReporting, updateOpenAIReporting } from './openai-reporting.js';
 import { getAnthropicReporting, getAnthropicReportingAccounts, updateAnthropicReporting } from './anthropic-reporting.js';
 import { getClaudeDetails } from './claude-auth.js';
@@ -44,6 +45,7 @@ export function registerProvidersIpc(): void {
     hasCodexCredentials: isCodexAuthenticated,
     getCodexDetails, getClaudeDetails,
     getAnthropicReporting, getAnthropicReportingAccounts, updateAnthropicReporting,
+    getFundingAccounts, saveFundingAccount,
     getOpenAIReporting, updateOpenAIReporting,
     listApiConnections, saveApiConnection, refreshApiConnection, subscriptionPriorities, saveSubscriptionPriority,
   };

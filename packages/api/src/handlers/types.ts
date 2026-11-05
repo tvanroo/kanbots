@@ -33,6 +33,8 @@ export interface SentryRuntime {
 }
 
 export interface ProvidersRuntime {
+  getFundingAccounts?(): import('../bridge.js').FundingAccount[];
+  saveFundingAccount?(input: import('../bridge.js').FundingAccountInput): Promise<void>;
   getOpenAIReporting?(): import('../bridge.js').OpenAIReporting;
   updateOpenAIReporting?(action: 'connect' | 'refresh', apiKey?: string): Promise<void>;
   getAnthropicReportingAccounts?(): NonNullable<import('../bridge.js').ProvidersPayload['anthropicReportingAccounts']>;

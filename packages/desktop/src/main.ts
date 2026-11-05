@@ -1,3 +1,4 @@
+import { getFundingAccounts, saveFundingAccount } from './account-funding.js';
 import { readClaudeSubscriptionUsage } from '@kanbots/api';
 import { getOpenAIReporting, updateOpenAIReporting } from './openai-reporting.js';
 import { getAnthropicReporting, getAnthropicReportingAccounts, updateAnthropicReporting } from './anthropic-reporting.js';
@@ -554,6 +555,7 @@ async function openWorkspaceInternal(repoPath: string): Promise<ActiveWorkspaceI
     hasCodexCredentials: isCodexAuthenticated,
     getCodexDetails, getClaudeDetails,
     getAnthropicReporting, getAnthropicReportingAccounts, updateAnthropicReporting,
+    getFundingAccounts, saveFundingAccount,
     getOpenAIReporting, updateOpenAIReporting,
     listApiConnections, saveApiConnection, refreshApiConnection, subscriptionPriorities, saveSubscriptionPriority,
   };

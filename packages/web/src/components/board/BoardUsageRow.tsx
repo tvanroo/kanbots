@@ -1,3 +1,4 @@
+import { QuotaMeter } from '../usage/QuotaMeter.js';
 export interface UsageWindow {
   pct: number;
   resetsAt: string | null;
@@ -39,7 +40,7 @@ function UsageMeter({ label, usage }: { label: string; usage: UsageWindow | null
   if (usage.resetsAt && Date.parse(usage.resetsAt) <= Date.now()) return <div className="kb-usage-meter is-empty"><span className="kb-usage-label">{label}</span><span>Updating quota…</span></div>;
   const pct = Math.max(0, Math.min(1, usage.pct));
   const tone = pct >= 0.9 ? 'danger' : pct >= 0.7 ? 'warn' : 'ok';
-  const display = `${Math.round((1 - pct) * 100)}% left`;
+  const display = `${Math.round(pct * 100)}% quota used`;
   const reset = usage.resetsAt ? formatResetCountdown(usage.resetsAt) : null;
   const title = usage.resetsAt
     ? `${label} window · ${display} · resets ${new Date(usage.resetsAt).toLocaleString()}`
@@ -47,10 +48,7 @@ function UsageMeter({ label, usage }: { label: string; usage: UsageWindow | null
   return (
     <div className={`kb-usage-meter tone-${tone}`} title={title}>
       <span className="kb-usage-label">{label}</span>
-      <span className="kb-usage-bar" aria-hidden>
-        <span className="kb-usage-bar-fill" style={{ width: `${(1 - pct) * 100}%` }} />
-      </span>
-      <span className="kb-usage-pct">{display}</span>
+      <QuotaMeter label={`${label} quota`} usedPercent={pct * 100} />
       {reset ? <span className="kb-usage-reset">Resets in {reset}</span> : null}
     </div>
   );

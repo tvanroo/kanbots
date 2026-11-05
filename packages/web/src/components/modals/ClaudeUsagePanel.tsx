@@ -1,3 +1,4 @@
+import { QuotaMeter } from '../usage/QuotaMeter.js';
 import { useEffect, useState } from 'react';
 import type { CostUsageResult, CostUsageWindow } from '@kanbots/api';
 import { getBridge } from '../../desktop-bridge.js';
@@ -42,8 +43,7 @@ function QuotaWindow({ label, value, now, stale }: { label: string; value: CostU
   const remaining = value ? Math.max(0, 100 - value.pct * 100) : null;
   return <div className="kb-api-summary">
     <strong>{label}</strong>
-    <span>{remaining === null ? 'Not reported' : resetPassed ? 'Awaiting updated quota' : `${Number(remaining.toFixed(1))}% remaining${stale ? ' · last known' : ''}`}</span>
-    {remaining !== null && !resetPassed ? <span className={`kb-usage-meter tone-${remaining <= 10 ? 'danger' : remaining <= 30 ? 'warn' : 'ok'}`}><span className="kb-usage-bar" role="meter" aria-label={`${label} remaining`} aria-valuemin={0} aria-valuemax={100} aria-valuenow={remaining}><span className="kb-usage-bar-fill" style={{ width: `${remaining}%` }} /></span></span> : null}
+    {remaining === null ? <span>Not reported</span> : resetPassed ? <span>Awaiting updated quota</span> : <><QuotaMeter label={label} usedPercent={100 - remaining} />{stale ? <span>Last known reading</span> : null}</>}
     <span>{value?.resetsAt ? `${resetPassed ? 'Last reset' : 'Resets'} ${new Date(value.resetsAt).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', timeZoneName: 'short' })}` : 'Reset time not reported'}</span>
   </div>;
 }

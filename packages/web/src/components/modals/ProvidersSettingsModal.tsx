@@ -1,3 +1,4 @@
+import { AccountFunding } from './AccountFunding.js';
 import { ClaudeUsagePanel } from './ClaudeUsagePanel.js';
 import { OpenAIReportingPanel, CodexUsagePanel } from './OpenAIReportingPanel.js';
 import { AnthropicReportingSetup } from './AnthropicReportingPanel.js';
@@ -448,6 +449,7 @@ export function ProvidersSettingsModal({ onClose }: ProvidersSettingsModalProps)
                       <ProviderSection spec={spec} config={cfg} onChanged={(next) => setPayload(next)} />
                       {spec.id === 'codex-cli' ? <OpenAIReportingPanel report={payload.openaiReporting} onChanged={setPayload} /> : null}
                       {spec.id === 'claude-code' ? <AnthropicReportingSetup payload={payload} onChanged={setPayload} /> : null}
+                      {spec.id === 'codex-cli' || spec.id === 'claude-code' ? <AccountFunding provider={spec.id === 'codex-cli' ? 'openai' : 'anthropic'} payload={payload} onChanged={setPayload} /> : null}
                       {spec.id === 'codex-cli' || spec.id === 'claude-code' ? <ApiConnections provider={spec.id === 'codex-cli' ? 'openai' : 'anthropic'} connections={payload.apiConnections ?? []} openaiReport={payload.openaiReporting} onChanged={setPayload} /> : null}
                     </div>
                   );
