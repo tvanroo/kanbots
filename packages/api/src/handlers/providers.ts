@@ -106,7 +106,14 @@ export async function testConnection(
     creds = { kind: 'api-key', apiKey: '' };
   }
 
-  const result = await validateProvider(id, creds);
+  const authCheck = id === 'claude-code'
+    ? deps.providers.hasClaudeCodeCredentials
+    : id === 'codex-cli' ? deps.providers.hasCodexCredentials : undefined;
+  const result = authCheck
+    ? (await authCheck()
+        ? { ok: true, models: undefined }
+        : { ok: false, error: 'CLI unavailable or signed out. Install the CLI and sign in, then retry.', models: undefined })
+    : await validateProvider(id, creds);
   deps.store.providers.update(id, {
     lastValidatedAt: new Date().toISOString(),
     lastError: result.ok ? null : (result.error ?? 'unknown error'),
@@ -132,19 +139,19 @@ export async function setDefaults(
   return readPayload(deps);
 }
 
-function readPayload(deps: ProvidersHandlerDeps): ProvidersPayload {
+async function readPayload(deps: ProvidersHandlerDeps): Promise<ProvidersPayload> {
   const rows = deps.store.providers.list();
   const settings = deps.store.providerSettings.get();
 
-  const providers = rows.map((row) => ({
+  const providers = await Promise.all(rows.map(async (row) => ({
     id: row.id,
     enabled: row.enabled,
-    hasKey: detectProviderCredentials(row.id, deps),
+    hasKey: await detectProviderCredentials(row.id, deps),
     defaultModel: row.defaultModel,
     keyEncryption: row.keyEncryption,
     lastValidatedAt: row.lastValidatedAt,
     lastError: row.lastError,
-  }));
+  })));
 
   // `hasKey` reflects detected CLI credentials (~/.claude/.credentials.json,
   // ~/.codex/auth.json, or OPENAI_API_KEY). If either CLI is signed in we
@@ -293,12 +300,12 @@ function apiKeyHintFor(id: ProviderId): string {
 function detectProviderCredentials(
   id: ProviderId,
   deps: ProvidersHandlerDeps,
-): boolean {
+): boolean | Promise<boolean> {
   switch (id) {
     case 'claude-code':
       return deps.providers.hasClaudeCodeCredentials();
     case 'codex-cli':
-      return hasCodexCliCredentials();
+      return deps.providers.hasCodexCredentials?.() ?? hasCodexCliCredentials();
     case 'gemini-cli':
       return hasGeminiCliCredentials();
     case 'amp-cli':

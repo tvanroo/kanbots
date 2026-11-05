@@ -1,14 +1,5 @@
-import { spawn, type ChildProcess } from 'node:child_process';
-import { existsSync } from 'node:fs';
-import { homedir } from 'node:os';
-import { join } from 'node:path';
+import { execFile, spawn, type ChildProcess } from 'node:child_process';
 import { shell } from 'electron';
-
-// codex writes auth state to ~/.codex/auth.json after `codex login` succeeds;
-// the file's existence is a cheap signal but `codex login status` is the
-// authoritative check (it parses tokens and returns non-zero if expired or
-// otherwise unusable).
-export const CODEX_AUTH_PATH = join(homedir(), '.codex', 'auth.json');
 
 const LOGIN_TIMEOUT_MS = 5 * 60 * 1000;
 
@@ -23,28 +14,8 @@ interface PendingLogin {
 }
 
 export async function isCodexAuthenticated(): Promise<boolean> {
-  // Cheap fast-path: bail early when neither auth path is plausibly set.
-  // OPENAI_API_KEY in the ambient env is the second supported path — codex
-  // login status returns 0 in that case even without auth.json.
-  if (!existsSync(CODEX_AUTH_PATH) && !process.env.OPENAI_API_KEY) return false;
-  return new Promise<boolean>((resolve) => {
-    let settled = false;
-    const finish = (ok: boolean): void => {
-      if (settled) return;
-      settled = true;
-      resolve(ok);
-    };
-    let child: ChildProcess;
-    try {
-      child = spawn('codex', ['login', 'status'], {
-        stdio: ['ignore', 'ignore', 'ignore'],
-      });
-    } catch {
-      finish(false);
-      return;
-    }
-    child.on('error', () => finish(false));
-    child.on('close', (code) => finish(code === 0));
+  return new Promise((resolve) => {
+    execFile('codex', ['login', 'status'], { timeout: 5000 }, (error) => resolve(!error));
   });
 }
 

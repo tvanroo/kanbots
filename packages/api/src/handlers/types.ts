@@ -35,7 +35,8 @@ export interface SentryRuntime {
 export interface ProvidersRuntime {
   safeStorageAvailable(): boolean;
   /** True if Claude Code CLI OAuth credentials are present on disk. */
-  hasClaudeCodeCredentials(): boolean;
+  hasClaudeCodeCredentials(): boolean | Promise<boolean>;
+  hasCodexCredentials?(): Promise<boolean>;
 }
 
 export interface ChatToolRuntime {

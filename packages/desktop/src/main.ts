@@ -1,7 +1,8 @@
 import { existsSync } from 'node:fs';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
-import { basename, join } from 'node:path';
+import { homedir } from 'node:os';
+import { basename, delimiter, join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { app, BrowserWindow, dialog, ipcMain, Menu, Notification, shell } from 'electron';
 import {
@@ -52,7 +53,6 @@ import {
 } from './claude-auth.js';
 import {
   cancelCodexLogin,
-  CODEX_AUTH_PATH,
   isCodexAuthenticated,
   startCodexLogin,
 } from './codex-auth.js';
@@ -160,6 +160,7 @@ import {
 import { registerHandlers } from './ipc/register.js';
 import {
   closeProvidersStoreForShutdown,
+  getAppStore,
   registerProvidersIpc,
 } from './providers-ipc.js';
 import { registerCloudComposerHandlers } from './cloud-composer.js';
@@ -175,7 +176,6 @@ import {
   envTokenOverride,
   safeStorageAvailable,
 } from './sentry-token.js';
-import { hasClaudeCodeCredentials } from './providers-key.js';
 import type {
   ActiveCloudWorkspaceInfo,
   ActiveWorkspaceInfo,
@@ -544,7 +544,8 @@ async function openWorkspaceInternal(repoPath: string): Promise<ActiveWorkspaceI
 
   const providersRuntime = {
     safeStorageAvailable,
-    hasClaudeCodeCredentials,
+    hasClaudeCodeCredentials: isClaudeAuthenticated,
+    hasCodexCredentials: isCodexAuthenticated,
   };
 
   const containmentEnv = process.env.KANBOTS_CONTAINMENT_MODE;
@@ -571,6 +572,7 @@ async function openWorkspaceInternal(repoPath: string): Promise<ActiveWorkspaceI
 
   const rawSupervisor = await createSupervisor({
     store,
+    providerConfig: getAppStore,
     repoPath: gitRoot,
     containmentMode,
     defaultRunCostBudgetUsd: () => budgetsState.runCostBudgetUsd,
@@ -1013,6 +1015,7 @@ async function ensureDeviceChat(): Promise<{
   const store = openStore({ path: deviceChatDbPath() });
   const supervisor = await createSupervisor({
     store,
+    providerConfig: getAppStore,
     repoPath: resolveChatCwd,
   });
   deviceChatStore = store;
@@ -1025,7 +1028,7 @@ function registerDeviceChatIpc(): void {
   async function getHandlers(): Promise<ChatHandlers> {
     if (handlers !== null) return handlers;
     const { store, supervisor } = await ensureDeviceChat();
-    handlers = createChatHandlers({ store, supervisor });
+    handlers = createChatHandlers({ store: { ...store, providerSettings: getAppStore().providerSettings }, supervisor });
     return handlers;
   }
   const channels: Array<keyof ChatHandlers> = [
@@ -1150,18 +1153,17 @@ function registerIpc(): void {
   registerDeviceChatIpc();
 
   ipcMain.handle('kanbots:bootstrap', async (): Promise<BootstrapPayload> => {
-    const [recents, cloudRecents, claudeAuthed, cloudStatus] = await Promise.all([
+    const [recents, cloudRecents, claudeAuthed, codexAuthed, cloudStatus] = await Promise.all([
       pruneMissingRecents(),
       readCloudRecents(),
       isClaudeAuthenticated(),
+      isCodexAuthenticated(),
       getCloudStatus(),
     ]);
     // Cheap file/env probes — running each CLI's full status command would
     // shell out and can take seconds. The deeper checks still run via the
     // dedicated `kanbots:<agent>-auth-status` channels and via the providers
     // handler once the renderer queries it.
-    const codexAuthed =
-      existsSync(CODEX_AUTH_PATH) || Boolean(process.env.OPENAI_API_KEY);
     const geminiAuthed =
       existsSync(GEMINI_AUTH_PATH) || Boolean(process.env.GEMINI_API_KEY);
     const ampAuthed =
@@ -2154,6 +2156,24 @@ function buildCodexMcpArgs(
 
 function tomlString(s: string): string {
   return `"${s.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`;
+}
+
+// Keep the fork's settings independent of the upstream install and its build version.
+app.setName('Kanbots Local');
+app.setPath(
+  'userData',
+  app.commandLine.getSwitchValue('user-data-dir') || join(app.getPath('appData'), 'Kanbots Local'),
+);
+
+// Finder launches with a short PATH. Keep the user's existing entries first.
+if (process.platform === 'darwin') {
+  process.env.PATH = [
+    process.env.PATH,
+    join(homedir(), '.local/bin'),
+    '/opt/homebrew/bin',
+    '/usr/local/bin',
+    '/Applications/ChatGPT.app/Contents/Resources/codex-cli/bin',
+  ].filter(Boolean).join(delimiter);
 }
 
 void app.whenReady().then(async () => {

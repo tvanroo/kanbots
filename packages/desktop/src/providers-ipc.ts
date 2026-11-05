@@ -9,10 +9,9 @@ import {
 import { openStore, type Store } from '@kanbots/local-store';
 import { CHANNEL_PREFIX } from './ipc/register.js';
 import { toIpcError } from './ipc/errors.js';
-import {
-  hasClaudeCodeCredentials,
-  safeStorageAvailable,
-} from './providers-key.js';
+import { safeStorageAvailable } from './providers-key.js';
+import { isClaudeAuthenticated } from './claude-auth.js';
+import { isCodexAuthenticated } from './codex-auth.js';
 
 /**
  * Provider config (Claude Code / Codex CLI defaults + last-validated state)
@@ -26,7 +25,7 @@ import {
 
 let appStore: Store | null = null;
 
-function getAppStore(): Store {
+export function getAppStore(): Store {
   if (appStore !== null) return appStore;
   const path = join(app.getPath('userData'), 'app-store.sqlite');
   appStore = openStore({ path });
@@ -36,7 +35,8 @@ function getAppStore(): Store {
 export function registerProvidersIpc(): void {
   const runtime: ProvidersRuntime = {
     safeStorageAvailable,
-    hasClaudeCodeCredentials,
+    hasClaudeCodeCredentials: isClaudeAuthenticated,
+    hasCodexCredentials: isCodexAuthenticated,
   };
   const deps: ProvidersHandlerDeps = {
     get store() {

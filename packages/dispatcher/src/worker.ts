@@ -137,7 +137,7 @@ export function startAgentRun(opts: StartAgentRunOptions): AgentRunHandle {
     ...(opts.resumeFromSessionId !== undefined ? { resumeFromSessionId: opts.resumeFromSessionId } : {}),
     ...(opts.allowedTools !== undefined ? { allowedTools: opts.allowedTools } : {}),
     ...(opts.appendSystemPrompt !== undefined ? { appendSystemPrompt: opts.appendSystemPrompt } : {}),
-    ...(opts.model !== undefined ? { model: opts.model } : {}),
+    ...(opts.model !== undefined && opts.model !== 'default' ? { model: opts.model } : {}),
     ...(opts.extraArgs !== undefined ? { extraArgs: opts.extraArgs } : {}),
   });
 

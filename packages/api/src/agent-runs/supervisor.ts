@@ -46,6 +46,7 @@ export type ContainmentMode = 'off' | 'warn' | 'pause';
 
 export interface CreateSupervisorOptions {
   store: Store;
+  providerConfig?: () => Pick<Store, 'providers' | 'providerSettings'>;
   /**
    * Working directory for agent runs. Pass a string for a fixed workspace,
    * or a function for the device-chat supervisor whose cwd follows whichever
@@ -333,7 +334,7 @@ export async function createSupervisor(
   ): import('@kanbots/dispatcher').AgentRunProvider {
     if (explicit) return explicit;
     try {
-      const def = store.providerSettings.get().defaultProvider;
+      const def = (opts.providerConfig?.() ?? store).providerSettings.get().defaultProvider;
       if (
         def === 'claude-code' ||
         def === 'codex-cli' ||
@@ -353,6 +354,15 @@ export async function createSupervisor(
       // settings row may not exist on first run — fall through
     }
     return 'claude-code';
+  }
+
+  function resolveModel(provider: ReturnType<typeof resolveProvider>, explicit?: string): string | undefined {
+    if (explicit !== undefined) return explicit;
+    const config = opts.providerConfig?.() ?? store;
+    const settings = config.providerSettings.get();
+    return (settings.defaultProvider === provider ? settings.defaultModel : null)
+      ?? config.providers.get(provider)?.defaultModel
+      ?? undefined;
   }
 
   // Any 'starting'/'running' rows on construction belong to a previous app
@@ -857,12 +867,13 @@ export async function createSupervisor(
     });
     const budget = resolveBudget(input.costBudgetUsd);
     const provider = resolveProvider(input.provider);
+    const model = resolveModel(provider, input.model);
     run = store.agentRuns.update(run.id, {
-      ...(input.model !== undefined ? { model: input.model } : {}),
+      ...(model !== undefined ? { model } : {}),
       provider,
       ...(budget !== null ? { costBudgetUsd: budget } : {}),
     });
-    store.threads.setLastModel(input.threadId, provider, input.model ?? null);
+    store.threads.setLastModel(input.threadId, provider, model ?? null);
     const composed = composeSystemPrompt(run.id, input.appendSystemPrompt);
     persistBriefing(run.id, composed.briefing);
     applyAcpWorkspaceCommand();
@@ -870,7 +881,7 @@ export async function createSupervisor(
       cwd: resolveRepoPath(),
       prompt: input.prompt,
       appendSystemPrompt: composed.prompt,
-      ...(input.model !== undefined ? { model: input.model } : {}),
+      ...(model !== undefined ? { model } : {}),
       provider,
       ...(input.extraArgs !== undefined ? { extraArgs: input.extraArgs } : {}),
       ...(input.env !== undefined ? { env: input.env } : {}),
@@ -1013,8 +1024,9 @@ export async function createSupervisor(
 
     const budget = resolveBudget(input.costBudgetUsd);
     const provider = resolveProvider(input.provider);
+    const model = resolveModel(provider, input.model);
     run = store.agentRuns.update(run.id, {
-      ...(input.model !== undefined ? { model: input.model } : {}),
+      ...(model !== undefined ? { model } : {}),
       provider,
       ...(budget !== null ? { costBudgetUsd: budget } : {}),
       ...(input.personaId !== undefined ? { personaId: input.personaId } : {}),
@@ -1027,7 +1039,7 @@ export async function createSupervisor(
         : {}),
     });
     // Persist last-used model on the thread for the model picker default.
-    store.threads.setLastModel(input.threadId, provider, input.model ?? null);
+    store.threads.setLastModel(input.threadId, provider, model ?? null);
 
     const composed = composeSystemPrompt(run.id, input.appendSystemPrompt);
     persistBriefing(run.id, composed.briefing);
@@ -1036,7 +1048,7 @@ export async function createSupervisor(
       cwd: worktreePath,
       prompt: input.prompt,
       appendSystemPrompt: composed.prompt,
-      ...(input.model !== undefined ? { model: input.model } : {}),
+      ...(model !== undefined ? { model } : {}),
       provider,
     });
 

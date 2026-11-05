@@ -1,6 +1,6 @@
 {
   "name": "@kanbots/desktop",
-  "version": "1.1.0",
+  "version": "1.1.1",
   "private": true,
   "description": "kanbots desktop app (Electron)",
   "main": "./dist/main.cjs",
@@ -19,6 +19,7 @@
     "package:win": "pnpm ensure:native && pnpm build && electron-builder --win",
     "package:dir": "pnpm ensure:native && pnpm build && electron-builder --dir",
     "release:linux": "pnpm ensure:native && pnpm build && electron-builder --linux --publish never",
+    "release:mac:local": "pnpm build && electron-builder --mac dmg --arm64 --publish never",
     "release:mac": "pnpm ensure:native && pnpm build && electron-builder --mac --publish never",
     "release:win": "pnpm ensure:native && pnpm build && electron-builder --win --publish never",
     "typecheck": "tsc --noEmit"
@@ -56,9 +57,9 @@
     "logLevel": "quiet"
   },
   "build": {
-    "appId": "io.kanbots.desktop",
-    "productName": "kanbots",
-    "executableName": "kanbots",
+    "appId": "com.tvanroo.kanbots.local",
+    "productName": "Kanbots Local",
+    "executableName": "Kanbots Local",
     "beforePack": "./scripts/before-pack.cjs",
     "asar": true,
     "asarUnpack": [
@@ -108,7 +109,7 @@
         }
       ],
       "category": "public.app-category.developer-tools",
-      "artifactName": "kanbots-${version}-mac-${arch}.${ext}",
+      "artifactName": "kanbots-local-${version}-mac-${arch}.${ext}",
       "identity": null,
       "hardenedRuntime": false,
       "gatekeeperAssess": false

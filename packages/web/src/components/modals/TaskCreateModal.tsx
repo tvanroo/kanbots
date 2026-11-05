@@ -379,7 +379,7 @@ export function TaskCreateModal({
           prompt: kickoff,
           ...(modelSelection
             ? { model: modelSelection.model, provider: modelSelection.provider }
-            : { model }),
+            : {}),
           ...(mode === 'spec' ? { appendSystemPrompt: SPEC_SYSTEM_PROMPT } : {}),
           ...(focusedRepoId !== null ? { repoId: focusedRepoId } : {}),
         });
