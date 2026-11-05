@@ -38,20 +38,29 @@ const PROVIDER_ID_SCHEMA = z.enum([
 ]);
 
 const connectionSchema = z.object({
-  id: z.string().uuid(), provider: z.enum(['openai', 'anthropic']), name: z.string().trim().min(1).max(100),
+  id: z.string().uuid(), provider: z.enum(['openai', 'anthropic']), name: z.string().trim().max(100),
   enabled: z.boolean(), priority: z.number().int().min(0).max(999),
   apiKey: z.string().trim().min(11).max(2000).optional(),
-  funding: z.enum(['paid', 'grant', 'subscription-credit']),
+  funding: z.enum(['unknown', 'paid', 'grant', 'subscription-credit']),
   budget: z.number().nonnegative().nullable(), remaining: z.number().nonnegative().nullable(),
-  expiresAt: z.string().datetime().nullable(), renewal: z.enum(['none', 'weekly', 'monthly', 'yearly']),
+  expirationMode: z.enum(['unknown', 'never', 'date']).optional(),
+  expiresAt: z.string().datetime().nullable(),
+  timeZone: z.string().max(100).refine(zone => { try { new Intl.DateTimeFormat('en', { timeZone: zone }); return true; } catch { return false; } }).optional(),
+  keyExpirationMode: z.enum(['unknown', 'never', 'date']).optional(),
+  keyExpiresAt: z.string().datetime().nullable().optional(),
+  renewal: z.enum(['unknown', 'none', 'weekly', 'monthly', 'yearly']),
   renewsAt: z.string().datetime().nullable(), expired: z.boolean(), pool: z.string().max(120),
   defaultModel: z.string().max(120).nullable(),
-}).strict();
+}).strict().superRefine((value, context) => {
+  if (value.expirationMode === 'date' && !value.expiresAt) context.addIssue({ code: 'custom', path: ['expiresAt'], message: 'Choose an expiration date.' });
+  if (value.keyExpirationMode === 'date' && !value.keyExpiresAt) context.addIssue({ code: 'custom', path: ['keyExpiresAt'], message: 'Choose a key expiration date.' });
+});
 
 const saveSchema = z
   .object({
     id: PROVIDER_ID_SCHEMA,
     priority: z.number().int().min(0).max(999).optional(),
+    reportingAction: z.enum(['connect', 'refresh']).optional(),
     connection: connectionSchema.optional(),
     refreshConnectionId: z.string().uuid().optional(),
     enabled: z.boolean().optional(),
@@ -84,6 +93,11 @@ export async function save(
 ): Promise<ProvidersPayload> {
   const parsed = parseArgs(saveSchema, args);
   const id = parsed.id as ProviderId;
+  if (parsed.reportingAction) {
+    if (id !== 'claude-code' || !deps.providers.updateAnthropicReporting) throw badRequest('Organization reporting requires the desktop app and Anthropic.');
+    await deps.providers.updateAnthropicReporting(parsed.reportingAction);
+    return readPayload(deps);
+  }
   if (parsed.connection || parsed.refreshConnectionId) {
     if (!deps.providers.saveApiConnection || !deps.providers.refreshApiConnection) throw badRequest('API connections require the desktop app.');
     if (parsed.connection) await deps.providers.saveApiConnection(parsed.connection);
@@ -189,6 +203,7 @@ async function readPayload(deps: ProvidersHandlerDeps): Promise<ProvidersPayload
   return {
     providers,
     apiConnections: deps.providers.listApiConnections?.() ?? [],
+    ...(deps.providers.getAnthropicReporting ? { anthropicReporting: deps.providers.getAnthropicReporting() } : {}),
     settings: {
       defaultProvider: settings.defaultProvider,
       defaultModel: settings.defaultModel,

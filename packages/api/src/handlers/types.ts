@@ -33,6 +33,8 @@ export interface SentryRuntime {
 }
 
 export interface ProvidersRuntime {
+  getAnthropicReporting?(): import('../bridge.js').AnthropicReporting;
+  updateAnthropicReporting?(action: 'connect' | 'refresh'): Promise<void>;
   getClaudeDetails?(): Promise<{ hasKey: boolean; authenticationLabel: string }>;
   subscriptionPriorities?(): Record<string, number>;
   saveSubscriptionPriority?(id: string, priority: number): void;

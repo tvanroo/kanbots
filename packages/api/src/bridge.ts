@@ -243,11 +243,15 @@ export interface ApiConnection {
   enabled: boolean;
   priority: number;
   keyPreview: string;
-  funding: 'paid' | 'grant' | 'subscription-credit';
+  funding: 'unknown' | 'paid' | 'grant' | 'subscription-credit';
   budget: number | null;
   remaining: number | null;
+  expirationMode?: 'unknown' | 'never' | 'date' | undefined;
   expiresAt: string | null;
-  renewal: 'none' | 'weekly' | 'monthly' | 'yearly';
+  timeZone?: string | undefined;
+  keyExpirationMode?: 'unknown' | 'never' | 'date' | undefined;
+  keyExpiresAt?: string | null | undefined;
+  renewal: 'unknown' | 'none' | 'weekly' | 'monthly' | 'yearly';
   renewsAt: string | null;
   expired: boolean;
   pool: string;
@@ -262,7 +266,20 @@ export interface ApiConnection {
 
 export type ApiConnectionInput = Omit<ApiConnection, 'keyPreview' | 'models' | 'checkedAt' | 'status' | 'reportedSpend' | 'spendCheckedAt' | 'billingStatus'> & { apiKey?: string | undefined };
 
+export interface AnthropicReporting {
+  connected: boolean;
+  status: string;
+  organizationId?: string;
+  organizationName?: string;
+  checkedAt?: string;
+  tokens?: number | null;
+  costUsd?: number | null;
+  usageAsOf?: string | null;
+  costAsOf?: string | null;
+}
+
 export interface ProvidersPayload {
+  anthropicReporting?: AnthropicReporting;
   apiConnections?: ApiConnection[];
   providers: ProviderConfigPayload[];
   settings: ProviderSettingsPayload;
@@ -272,6 +289,7 @@ export interface ProvidersPayload {
 }
 
 export interface ProviderSaveInput {
+  reportingAction?: 'connect' | 'refresh';
   priority?: number;
   connection?: ApiConnectionInput;
   refreshConnectionId?: string;

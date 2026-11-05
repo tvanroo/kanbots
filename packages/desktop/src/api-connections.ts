@@ -15,7 +15,7 @@ function write(rows: StoredConnection[]): void {
   renameSync(file() + '.tmp', file());
 }
 export function listApiConnections(): ApiConnection[] {
-  return read().map(({ encryptedKey: _key, ...metadata }) => metadata).sort((a, b) => a.priority - b.priority);
+  return read().map(({ encryptedKey: _key, ...metadata }) => metadata);
 }
 export async function saveApiConnection(input: ApiConnectionInput): Promise<void> {
   const rows = read();
@@ -28,6 +28,11 @@ export async function saveApiConnection(input: ApiConnectionInput): Promise<void
     models: [], checkedAt: null, status: 'Not checked', reportedSpend: null, spendCheckedAt: null,
     billingStatus: 'Not reported. Budget and credit fields are user-entered.',
     encryptedKey: '', keyPreview: '', ...previous, ...metadata,
+    name: metadata.name.trim() || `${input.provider === 'openai' ? 'OpenAI' : 'Anthropic'} API`,
+    expirationMode: metadata.expirationMode ?? (metadata.expiresAt ? 'date' : 'unknown'),
+    expiresAt: metadata.expirationMode && metadata.expirationMode !== 'date' ? null : metadata.expiresAt,
+    keyExpirationMode: metadata.keyExpirationMode ?? 'unknown',
+    keyExpiresAt: metadata.keyExpirationMode === 'date' ? (metadata.keyExpiresAt ?? null) : null,
   };
   if (apiKey) {
     row.encryptedKey = safeStorage.encryptString(apiKey).toString('base64');
@@ -70,16 +75,19 @@ export async function refreshApiConnection(id: string): Promise<void> {
   try {
     const start = new Date(); start.setUTCDate(1); start.setUTCHours(0, 0, 0, 0);
     let total = 0;
+    let refreshedAt: string | null = null;
     let next: string | undefined;
     do {
       const path = row.provider === 'openai'
         ? `/v1/organization/costs?start_time=${Math.floor(start.getTime() / 1000)}&limit=31${next ? `&page=${encodeURIComponent(next)}` : ''}`
-        : `/v1/organizations/cost_report?starting_at=${encodeURIComponent(start.toISOString())}&limit=31${next ? `&page=${encodeURIComponent(next)}` : ''}`;
-      const response = await fetch(base + path, { headers, signal: AbortSignal.timeout(10000) });
+        : `/v1/organizations/analytics/cost?starting_at=${encodeURIComponent(start.toISOString())}&limit=31${next ? `&page=${encodeURIComponent(next)}` : ''}`;
+      const response = await fetch(base + path, { headers: row.provider === 'anthropic' ? { ...headers, 'anthropic-version': '2026-10-21', 'anthropic-beta': 'analytics-usage-cost-2026-08-24' } : headers, signal: AbortSignal.timeout(10000) });
       if (!response.ok) throw new Error('Billing access unavailable');
       const data = await response.json() as any;
       if (!Array.isArray(data.data)) throw new Error('Invalid cost response');
-      for (const bucket of data.data) for (const item of bucket.results ?? []) {
+      if (row.provider === 'anthropic') refreshedAt = typeof data.data_refreshed_at === 'string' ? data.data_refreshed_at : null;
+      const items = row.provider === 'anthropic' ? data.data.map((entry: any) => entry.cost) : data.data.flatMap((bucket: any) => bucket.results ?? []);
+      for (const item of items) {
         const currency = row.provider === 'openai' ? item.amount?.currency : item.currency;
         const amount = Number(row.provider === 'openai' ? item.amount?.value : item.amount);
         if (String(currency).toLowerCase() !== 'usd' || !Number.isFinite(amount)) throw new Error('Unknown billing units');
@@ -87,11 +95,11 @@ export async function refreshApiConnection(id: string): Promise<void> {
       }
       next = data.has_more ? data.next_page : undefined;
     } while (next);
-    result.reportedSpend = total;
+    result.reportedSpend = row.provider === 'anthropic' && !refreshedAt ? null : total;
     result.spendCheckedAt = new Date().toISOString();
-    result.billingStatus = 'Provider-reported organization spend this UTC calendar month; shared across keys, not a remaining balance.';
+    result.billingStatus = 'Provider-reported organization spend this UTC calendar month, before credits; not a remaining balance.' + (row.provider === 'anthropic' ? ` Data as of ${refreshedAt ?? 'unknown'}; may lag up to 24 hours.` : '');
   } catch {
-    result.billingStatus = 'Billing not available with this key. Organization billing permissions may be required. Enter budget, balance, expiry, and renewal below.';
+    result.billingStatus = 'Organization costs could not be retrieved. This usually requires billing/admin permissions; model access is checked separately. Optional manual details are available below.';
   }
   const rows = read();
   // A slow refresh must not overwrite a newly replaced key or edited settings.

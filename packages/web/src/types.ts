@@ -59,6 +59,7 @@ export type {
   PrCommentsListResult,
   ProviderConfigPayload,
   ProviderId,
+  AnthropicReporting,
   ApiConnection,
   ApiConnectionInput,
   ProviderSaveInput,

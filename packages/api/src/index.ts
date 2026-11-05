@@ -137,6 +137,7 @@ export type {
   RecentActivityPayload,
   ProviderConfigPayload,
   ProviderId,
+  AnthropicReporting,
   ApiConnection,
   ApiConnectionInput,
   ProviderSaveInput,

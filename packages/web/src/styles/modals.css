@@ -3583,3 +3583,49 @@
   color: var(--ink-3);
   margin: 6px 0;
 }
+
+/* API connection cards follow the provider panel's warm surfaces and clay accent. */
+.kb-api-connections { padding: 12px 0 18px; }
+.kb-api-heading { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+.kb-api-heading h4 { margin: 0; font-size: 13px; font-weight: 600; }
+.kb-api-heading > span { color: var(--ink-3); font-size: 11px; }
+.kb-api-card { background: var(--bg-1); border: 1px solid var(--hairline-soft); border-radius: 10px; margin: 10px 0; overflow: hidden; }
+.kb-api-card-head { display: flex; align-items: center; gap: 10px; padding: 12px 14px; }
+.kb-api-identity { display: flex; flex: 1; min-width: 0; flex-direction: column; gap: 4px; }
+.kb-api-identity strong { font-size: 13px; font-weight: 600; overflow-wrap: anywhere; }
+.kb-api-identity code { font: 11px var(--ff-mono); color: var(--ink-2); }
+.kb-api-identity > span { font-size: 12px; color: var(--ink-3); }
+.kb-api-status { font-size: 11px; color: var(--ink-2); padding: 3px 7px; border-radius: 5px; background: var(--bg-2); }
+.kb-api-status.connected { color: var(--add); }
+.kb-api-card-actions { display: flex; gap: 6px; }
+.kb-api-summary { display: flex; flex-wrap: wrap; gap: 8px 16px; padding: 0 14px 12px; color: var(--ink-3); font-size: 11px; }
+.kb-api-editor { border: 0; margin: 0; padding: 2px 14px 14px; min-width: 0; }
+.kb-api-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px 12px; }
+.kb-api-field { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.kb-api-field.wide { grid-column: 1 / -1; }
+.kb-api-field > label { color: var(--ink-2); font-size: 12px; }
+.kb-api-field input, .kb-api-field select { box-sizing: border-box; width: 100%; min-width: 0; min-height: 34px; border: 1px solid var(--hairline); border-radius: 7px; background: var(--bg-inset); color: var(--ink); padding: 7px 9px; font: 12px var(--ff-sans); outline: none; }
+.kb-api-field input::placeholder { color: var(--ink-3); }
+.kb-api-field input:focus, .kb-api-field select:focus { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-soft); }
+.kb-api-field [aria-invalid='true'] { border-color: var(--failed); box-shadow: 0 0 0 2px color-mix(in srgb, var(--failed) 15%, transparent); }
+.kb-api-field-error { color: var(--failed); font-size: 11px; }
+.kb-api-toggle { display: flex; gap: 8px; align-items: center; color: var(--ink-2); font-size: 12px; align-self: center; }
+.kb-api-toggle input { accent-color: var(--accent); }
+.kb-api-manual { margin: 16px 0; padding: 12px 0; border-top: 1px solid var(--hairline-soft); border-bottom: 1px solid var(--hairline-soft); }
+.kb-api-manual summary { cursor: pointer; color: var(--ink-1); font-size: 12px; }
+.kb-api-manual summary span { color: var(--ink-3); margin-left: 8px; font-size: 11px; }
+.kb-api-reported { margin: 12px 0; padding: 12px; border-radius: 7px; background: var(--bg-inset); font-size: 12px; color: var(--ink-2); }
+.kb-api-reported strong { font-weight: 500; color: var(--ink-1); }
+.kb-api-reported p { margin: 6px 0; line-height: 1.5; }
+.kb-api-reported a { color: var(--accent); }
+.kb-api-message { color: var(--ink-2); font-size: 12px; margin: 0; padding: 0 14px 12px; }
+.kb-api-editor > .kb-provider-actions { margin-top: 14px; }
+@media (max-width: 540px) {
+  .kb-api-grid { grid-template-columns: 1fr; }
+  .kb-api-card-head { flex-wrap: wrap; }
+  .kb-api-heading > span { display: none; }
+}
+.kb-api-date-pair { display: grid; grid-template-columns: minmax(0, 1fr) 95px; gap: 6px; }
+.kb-api-date-hint { color: var(--ink-3); font-size: 11px; }
+.kb-api-reporting-body { padding: 0 14px 14px; }
+.kb-api-reporting-body .kb-api-summary { padding: 4px 0; }

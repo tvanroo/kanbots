@@ -1,3 +1,4 @@
+import { AnthropicReportingPanel } from './AnthropicReportingPanel.js';
 import { ApiConnections } from './ApiConnections.js';
 import { useEffect, useMemo, useState, type ChangeEvent, type MouseEvent } from 'react';
 import { api } from '../../api.js';
@@ -427,6 +428,7 @@ export function ProvidersSettingsModal({ onClose }: ProvidersSettingsModalProps)
                     <div key={spec.id}>
                       {spec.id === 'codex-cli' || spec.id === 'claude-code' ? <h3>{spec.id === 'codex-cli' ? 'OpenAI' : 'Anthropic'}</h3> : null}
                       <ProviderSection spec={spec} config={cfg} onChanged={(next) => setPayload(next)} />
+                      {spec.id === 'claude-code' ? <AnthropicReportingPanel report={payload.anthropicReporting} onChanged={setPayload} /> : null}
                       {spec.id === 'codex-cli' || spec.id === 'claude-code' ? <ApiConnections provider={spec.id === 'codex-cli' ? 'openai' : 'anthropic'} connections={payload.apiConnections ?? []} onChanged={setPayload} /> : null}
                     </div>
                   );
@@ -466,7 +468,6 @@ interface SectionProps {
 
 function ProviderSection({ spec, config, onChanged }: SectionProps) {
   const [enabled, setEnabled] = useState(config.enabled);
-  const [priority, setPriority] = useState(config.priority ?? 1);
   const [defaultModel, setDefaultModel] = useState(config.defaultModel ?? '');
   const [saving, setSaving] = useState(false);
   const [testState, setTestState] = useState<TestState>({ kind: 'idle' });
@@ -479,11 +480,10 @@ function ProviderSection({ spec, config, onChanged }: SectionProps) {
   }, [config.enabled, config.defaultModel]);
 
   const dirty = useMemo(() => {
-    if (priority !== (config.priority ?? 1)) return true;
     if (enabled !== config.enabled) return true;
     if ((defaultModel || null) !== (config.defaultModel ?? null)) return true;
     return false;
-  }, [enabled, priority, defaultModel, config]);
+  }, [enabled, defaultModel, config]);
 
   async function handleSave(): Promise<void> {
     if (saving) return;
@@ -493,7 +493,6 @@ function ProviderSection({ spec, config, onChanged }: SectionProps) {
       const next = await api.saveProvider({
         id: spec.id,
         enabled,
-        priority,
         defaultModel: defaultModel.trim() || null,
       });
       onChanged(next);
@@ -567,7 +566,6 @@ function ProviderSection({ spec, config, onChanged }: SectionProps) {
         {config.hasKey ? <span className="kb-provider-badge">configured</span> : null}
       </header>
       <p className="kb-provider-desc">{spec.description}</p>
-      {spec.id === 'codex-cli' || spec.id === 'claude-code' ? <label className="kb-sentry-row">Priority (saved preference)<input type="number" min="0" max="999" value={priority} onChange={e => setPriority(Number(e.target.value))} /></label> : null}
 
       <label className="kb-sentry-row kb-sentry-toggle">
         <input
