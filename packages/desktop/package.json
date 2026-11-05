@@ -1,6 +1,6 @@
 {
   "name": "@kanbots/desktop",
-  "version": "1.2.3",
+  "version": "1.2.4",
   "private": true,
   "description": "kanbots desktop app (Electron)",
   "main": "./dist/main.cjs",

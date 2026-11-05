@@ -49,6 +49,12 @@ const net=require('node:net');
    const chatView=await call('Runtime.evaluate',{expression:"JSON.stringify({open:!!document.querySelector('[aria-label=\"Project coordinator\"][role=\"dialog\"]'),composer:!!document.querySelector('textarea[aria-label=\"Message coordinator\"]'),saved:document.body.innerText.includes('This conversation is saved.')})",returnByValue:true});
    const visible=JSON.parse(chatView.result.value);if(!visible.open||!visible.composer||!visible.saved)throw Error('Coordinator chat disappeared during empty-board refresh');
    const chatImage=await call('Page.captureScreenshot',{format:'png'});fs.writeFileSync(path.resolve('output/packaged-coordinator-chat.png'),Buffer.from(chatImage.data,'base64'));console.log(JSON.stringify({coordinatorChatSurvivesRefresh:true}));
+   await call('Runtime.evaluate',{expression:"window.kanbots.coordinatorAction('add-client',{name:'DeepSeek Harness'})",awaitPromise:true,returnByValue:true});
+   await new Promise(r=>setTimeout(r,3500));
+   const setupView=await call('Runtime.evaluate',{expression:"JSON.stringify({step:document.body.innerText.includes('Step 1 of 3'),copy:[...document.querySelectorAll('button')].some(b=>b.offsetParent&&b.textContent==='Copy setup request'),prematureApproval:[...document.querySelectorAll('button')].some(b=>b.offsetParent&&/Approve (pairing|connection)/.test(b.textContent))})",returnByValue:true});
+   const setup=JSON.parse(setupView.result.value);if(!setup.step||!setup.copy||setup.prematureApproval)throw Error('Setup does not present one clear current action');
+   const setupImage=await call('Page.captureScreenshot',{format:'png'});fs.writeFileSync(path.resolve('output/packaged-coordinator-setup.png'),Buffer.from(setupImage.data,'base64'));console.log(JSON.stringify({clearSetupNextAction:true}));
+
 
   }
   if(/Uncaught Exception|ERR_INVALID_ARG_VALUE|Error launching app/.test(logs))throw Error('Main-process startup exception');

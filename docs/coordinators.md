@@ -1,4 +1,4 @@
-# Kanbots Local coordinators (1.2.3)
+# Kanbots Local coordinators (1.2.4)
 
 Open a project. When an external coordinator is not active, the board shows **Your built-in coordinator**, a message box, and guided action buttons. **Populate board from repository** starts the discovery prompt in the built-in chat without a separate mode-selection step. **Connect external coordinator** starts a setup conversation; the coordinator can prepare or reuse a named connection and guide pairing. The **Coordinators** control opens full progress and connection settings.
 
@@ -16,7 +16,7 @@ The coordinator records the inventory, dependencies, status evidence and a durab
 
 ## Conversation and navigation
 
-The coordinator opens immediately in a persistent chat view. The welcome message explains its role, progress stays visible during work, and connection setup actions and pending questions appear alongside the conversation. Connections and workflow controls have their own tab. Click **Chats → Project coordinator** to reopen it. Coordinator activity and decision links route to this conversation rather than an unrelated issue number. Refreshing an empty board preserves the open chat.
+The coordinator opens immediately in a persistent chat view. During external setup, the current action stays above the transcript: copy the request, approve a detected connection, then hand over. Earlier conversation is collapsible; questions remain visible above it. Reopening an active setup shows its progress rather than an error. The welcome message explains its role, progress stays visible during work, and connection setup actions and pending questions appear alongside the conversation. Connections and workflow controls have their own tab. Click **Chats → Project coordinator** to reopen it. Coordinator activity and decision links route to this conversation rather than an unrelated issue number. Refreshing an empty board preserves the open chat.
 
 ## Delegation and release
 
