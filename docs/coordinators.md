@@ -1,10 +1,10 @@
-# Kanbots Local coordinators (1.2.0)
+# Kanbots Local coordinators (1.2.2)
 
-Open a project and choose **Coordinators** (or **Discover existing work** for a new/empty board).
+Open a project. When an external coordinator is not active, the board shows **Your built-in coordinator**, a message box, and guided action buttons. **Populate board from repository** starts the discovery prompt in the built-in chat without a separate mode-selection step. **Connect external coordinator** starts a setup conversation; the coordinator can prepare or reuse a named connection and guide pairing. The **Coordinators** control opens full progress and connection settings.
 
 ## Start with the defaults
 
-Choose **Use Kanbots chat**, then describe an objective. Alternatively add a named external harness, copy its MCP configuration into that harness, connect, approve its matching pairing code in Kanbots, and choose **Use coordinator**. DeepSeek Harness has a dedicated configuration copy button; the standard MCP configuration is also available. The connection uses local stdio and requires Kanbots Local to be running with that project open. A remote-only MCP client needs a future transport integration.
+Use the inline message box to describe an objective, or open **Coordinators** to continue its chat. For an external harness, the guided chat prepares a connection; alternatively add a named external harness, copy its MCP configuration into that harness, connect, approve its matching pairing code in Kanbots, and choose **Use coordinator**. DeepSeek Harness has a dedicated configuration copy button; the standard MCP configuration is also available. The connection uses local stdio and requires Kanbots Local to be running with that project open. A remote-only MCP client needs a future transport integration.
 
 One coordinator controls a workspace at a time. Switching preserves tasks, summaries and workers. Stop an independent Autopilot session before handing control to a coordinator. The default workflow allows two workers, a $5 per-run budget setting, repository checks, an independent review and one correction attempt. Subscription usage is not a dollar charge; run budgets use the existing execution accounting. Change workflow settings as you learn what suits your project.
 

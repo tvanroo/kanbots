@@ -13,6 +13,8 @@ export interface BoardUsageRowProps {
   fiveHour: UsageWindow | null;
   sevenDay: UsageWindow | null;
   stale?: boolean;
+  issueCount?: number;
+  workspaceId?: string;
 }
 
 /**
@@ -20,11 +22,39 @@ export interface BoardUsageRowProps {
  * local and cloud modes. Pass `null` for either window to show a placeholder
  * — used in cloud mode until the cost-today endpoint lands (phase 2).
  */
-export function BoardUsageRow({ fiveHour, sevenDay, stale }: BoardUsageRowProps) {
+export function BoardUsageRow({ fiveHour, sevenDay, stale, issueCount=0, workspaceId }: BoardUsageRowProps) {
   const [coordinators,setCoordinators]=useState(false);
+  const [setup,setSetup]=useState(false);
   const [discover,setDiscover]=useState(false);
-  useEffect(()=>{void getBridge()?.coordinatorAction?.('onboarding-status').then(s=>setDiscover(!!s?.needed)).catch(()=>{});},[]);
-  if(getBridge()?.capacity)return <><div className="kb-coordinator-strip"><button className="kb-btn ghost" onClick={()=>setCoordinators(true)}>{discover?'Discover existing work':'Coordinators'}</button><CapacityOverview /></div>{coordinators?createPortal(<CoordinatorsModal onClose={()=>setCoordinators(false)}/>,document.body):null}</>;
+  const [mode,setMode]=useState('off');
+  const [message,setMessage]=useState('');
+  const [busy,setBusy]=useState(false);
+  const [error,setError]=useState('');
+  const [notice,setNotice]=useState('');
+  const bridge=getBridge();
+  const refresh=async()=>{const state=await bridge?.coordinatorState?.();setMode(state?.workspace?.mode??'off');const status=await bridge?.coordinatorAction?.('onboarding-status');setDiscover(!!status?.needed);};
+  useEffect(()=>{setError('');setNotice('');setMessage('');void refresh().catch(()=>{});},[workspaceId,issueCount,coordinators]);
+  async function startDiscovery(){setBusy(true);setError('');try{
+    if(mode==='external'){const status=await bridge?.coordinatorAction?.('onboarding-status');await navigator.clipboard.writeText(status.prompt);setNotice('Discovery request copied. Paste it into your external coordinator.');}
+    else{const result=await bridge?.coordinatorAction?.('onboarding-start');if(result?.dispatchError)throw Error(result.dispatchError);setSetup(false);setCoordinators(true);}
+  }catch(e){setError(e instanceof Error?e.message:String(e));}finally{setBusy(false);}}
+  async function setupExternal(){setBusy(true);setError('');try{if(mode==='external'){setSetup(true);setCoordinators(true);return;}const result=await bridge?.coordinatorAction?.('external-setup-start');if(result?.dispatchError)throw Error(result.dispatchError);setSetup(false);setCoordinators(true);}catch(e){setError(e instanceof Error?e.message:String(e));}finally{setBusy(false);}}
+  async function send(){setBusy(true);setError('');try{if(mode!=='internal')await bridge?.coordinatorAction?.('handoff',{mode:'internal'});const result=await bridge?.coordinatorAction?.('chat-send',{body:message});if(result?.dispatchError)throw Error(result.dispatchError);setMessage('');setSetup(false);setCoordinators(true);}catch(e){setError(e instanceof Error?e.message:String(e));}finally{setBusy(false);}}
+  if(bridge?.capacity)return <>
+    <div className="kb-coordinator-strip"><button className="kb-btn ghost" onClick={()=>{setSetup(false);setCoordinators(true);}}>Coordinators</button><CapacityOverview /></div>
+    {(mode!=='external'||discover||issueCount===0)?<section className="kb-board-onboarding" aria-label="Project coordinator">
+      <div className="kb-board-onboarding-main">
+        <span className="kb-board-onboarding-label">{mode==='external'?'Repository discovery':'Your built-in coordinator'}</span>
+        <h2>{issueCount===0?'Bring your project onto the board':mode==='external'?'Discover existing work':'What would you like to work on?'}</h2>
+        <p>{issueCount===0?'Find features, bugs and ongoing work in this repository. Your coordinator will organize the board with evidence and current status.':'Ask your coordinator to plan work, delegate tasks and keep the board up to date.'}</p>
+        {(discover||issueCount===0)?<div className="kb-coordinator-actions"><button className="kb-btn primary" disabled={busy} onClick={()=>void startDiscovery()}>{busy?'Starting…':mode==='external'?'Copy repository discovery request':'Populate board from repository'}</button><span className="kb-provider-desc">Reads the repository and updates cards. Does not start feature development.</span></div>:null}
+        {mode!=='external'?<form onSubmit={e=>{e.preventDefault();void send();}}><label htmlFor="board-coordinator-message">Or tell your coordinator what you need</label><div className="kb-board-coordinator-compose"><textarea id="board-coordinator-message" value={message} onChange={e=>setMessage(e.target.value)} placeholder="Find ongoing features and bugs, then help me decide what to do next…" rows={2}/><button className="kb-btn" disabled={busy||!message.trim()} type="submit">Send to coordinator</button></div></form>:null}
+        {error?<p role="alert" className="kb-coordinator-error">{error}</p>:null}{notice?<p role="status">{notice}</p>:null}
+      </div>
+      <aside><h3>Prefer your own harness?</h3><p>Your built-in coordinator can help connect DeepSeek Harness or another local MCP-compatible app, step by step.</p><button className="kb-btn" disabled={busy} onClick={()=>void setupExternal()}>Connect external coordinator</button><p className="kb-provider-desc">Starts a guided setup chat · you approve the handoff</p></aside>
+    </section>:null}
+    {coordinators?createPortal(<CoordinatorsModal initialSection={setup?'external':'chat'} onClose={()=>setCoordinators(false)}/>,document.body):null}
+  </>;
   return (
     <div className="kb-usage-row">
       <span className="kb-usage-label">Claude{stale ? ' · stale' : ''}</span>

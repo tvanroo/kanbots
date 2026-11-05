@@ -645,6 +645,8 @@ export function Board({ onOpenDetail, onOpenCreate, onOpenPalette, onOpenStats }
         }}
       />
       <BoardUsageRow
+        issueCount={issues.length}
+        workspaceId={workspaceMeta.workspace.id}
         stale={costUsage?.stale ?? false}
         fiveHour={costUsage?.fiveHour ?? null}
         sevenDay={costUsage?.sevenDay ?? null}

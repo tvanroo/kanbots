@@ -41,8 +41,16 @@ export class CoordinatorService{
   private assertControl(w:Workspace,actor:string){if(w.controller!==actor||w.mode==='off')throw Error('This session is controlled elsewhere. Hand off in Kanbots Coordinators.');if(w.leaseUntil<Date.now())throw Error('Controller lease expired. Call renewCoordinator.');}
   private session(w:Workspace){return {workspaceId:w.id,revision:w.revision,mode:w.mode,controller:w.controller,leaseUntil:w.leaseUntil,objective:w.objective,summary:w.summary,parallelism:w.parallelism,qaDefault:w.qaDefault,budgetUsd:w.budgetUsd,maxReworks:w.maxReworks,conversationId:w.conversationId,onboardedAt:w.onboardedAt};}
   ui(){return {workspace:this.context?this.session(this.current()):null,workspaces:this.state.workspaces.map(w=>({id:w.id,name:basename(w.path),open:w.path===this.context?.repoPath})),clients:this.state.clients.map(({tokenHash,...c})=>c),jobs:this.context?this.current().jobs:[],queue:this.context?this.current().queue??[]:[],releases:this.context?this.current().releases:[],decisions:this.context?this.current().decisions:[],guide:COORDINATOR_GUIDE};}
-  async uiAction(action:string,args:any={}){
+  async uiAction(action:string,args:any={}):Promise<any>{
     const w=this.current();
+    if(action==='onboarding-start'||action==='external-setup-start'){
+      if(w.mode==='external')throw Error('An external coordinator is active. Send it the discovery prompt or switch to Kanbots chat first.');
+      if(w.mode!=='internal')await this.uiAction('handoff',{mode:'internal'});
+      const chat=await this.h()['chat:get']({conversationId:w.conversationId!});
+      if(chat.activeRun)throw Error('Your coordinator is already working. Open its chat to follow progress, then send the setup request when it finishes.');
+      const body=action==='onboarding-start'?REPO_ONBOARDING_PROMPT:`Help me connect an external coordinator to this repository. Start by calling getWorkspaceSummary, then prepareExternalCoordinator with name DeepSeek Harness to prepare or reuse its local MCP connection. Explain the setup in short, simple steps. Give me a ready-to-paste request for my harness using the returned standard MCP config and DeepSeek fields; it should configure its MCP client if it can, or guide me through its settings if it cannot. Preserve other connections. Do not claim pairing until the connection is actually reported. Explain that I approve the matching pairing in Kanbots, then choose Use coordinator when ready. Stay as my coordinator until I explicitly hand off. Offer other local MCP-compatible harnesses as alternatives. Do not ask for provider keys or perform development. Save a concise handoff summary so the external coordinator can continue with repository discovery and board maintenance.`;
+      return this.uiAction('chat-send',{body});
+    }
     if(action==='onboarding-status'){const issues=await this.h()['issues:list']({state:'all'});return {needed:!w.onboardedAt||issues.length===0,prompt:REPO_ONBOARDING_PROMPT};}
     if(action==='add-client'){
       const id=randomUUID(),token=randomBytes(32).toString('hex');const name=String(args.name??'External harness').slice(0,80);const role=args.role==='observer'?'observer':'coordinator';
@@ -155,6 +163,7 @@ export class CoordinatorService{
   private async mutate(w:Workspace,name:string,a:any):Promise<any>{
     const h=this.h();
     switch(name){
+      case 'prepareExternalCoordinator':{if(w.mode!=='internal')throw Error('Prepare external harness setup from the built-in coordinator.');const client=this.state.clients.find(c=>c.workspaceId===w.id&&c.name===a.name&&c.status!=='revoked');const setup=client?{id:client.id,code:client.code,...this.config(client.id)}:await this.uiAction('add-client',{name:a.name});return {...setup,humanApprovalRequired:true,nextAction:'Show the setup request to the user. They connect their harness, approve pairing in Kanbots, then choose Use coordinator. Do not hand off automatically.'};}
       case 'updateCoordinationSession':if(a.objective!==undefined)w.objective=a.objective;if(a.summary!==undefined)w.summary=a.summary;return this.session(w);
       case 'completeOnboarding':w.onboardedAt=new Date().toISOString();w.summary=a.summary;return this.session(w);
       case 'upsertWorkItem':{
