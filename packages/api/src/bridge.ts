@@ -277,6 +277,8 @@ export interface ApiConnection {
 export type ApiConnectionInput = Omit<ApiConnection, 'keyPreview' | 'models' | 'checkedAt' | 'status' | 'reportedSpend' | 'spendCheckedAt' | 'billingStatus'> & { apiKey?: string | undefined };
 
 export interface AnthropicReporting {
+  eligibility?: 'unknown' | 'supported' | 'denied';
+  prerequisite?: 'ready' | 'missing' | 'manual';
   connected: boolean;
   status: string;
   organizationId?: string;
@@ -318,6 +320,7 @@ export interface ProvidersPayload {
 
 export interface ProviderSaveInput {
   reportingAction?: 'connect' | 'refresh';
+  approveReportingInstall?: boolean;
   reportingKey?: string;
   priority?: number;
   connection?: ApiConnectionInput;

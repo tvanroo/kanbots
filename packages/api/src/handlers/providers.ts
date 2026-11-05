@@ -61,6 +61,7 @@ const saveSchema = z
     id: PROVIDER_ID_SCHEMA,
     priority: z.number().int().min(0).max(999).optional(),
     reportingAction: z.enum(['connect', 'refresh']).optional(),
+    approveReportingInstall: z.boolean().optional(),
     reportingKey: z.string().trim().min(11).max(2000).regex(/^\S+$/).optional(),
     connection: connectionSchema.optional(),
     refreshConnectionId: z.string().uuid().optional(),
@@ -96,7 +97,7 @@ export async function save(
   const id = parsed.id as ProviderId;
   if (parsed.reportingAction) {
     if (id === 'codex-cli' && deps.providers.updateOpenAIReporting) await deps.providers.updateOpenAIReporting(parsed.reportingAction, parsed.reportingKey);
-    else if (id === 'claude-code' && deps.providers.updateAnthropicReporting) await deps.providers.updateAnthropicReporting(parsed.reportingAction);
+    else if (id === 'claude-code' && deps.providers.updateAnthropicReporting) await deps.providers.updateAnthropicReporting(parsed.reportingAction, parsed.approveReportingInstall);
     else throw badRequest('Organization reporting requires a supported desktop provider.');
     return readPayload(deps);
   }

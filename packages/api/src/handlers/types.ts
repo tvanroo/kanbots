@@ -36,7 +36,7 @@ export interface ProvidersRuntime {
   getOpenAIReporting?(): import('../bridge.js').OpenAIReporting;
   updateOpenAIReporting?(action: 'connect' | 'refresh', apiKey?: string): Promise<void>;
   getAnthropicReporting?(): import('../bridge.js').AnthropicReporting;
-  updateAnthropicReporting?(action: 'connect' | 'refresh'): Promise<void>;
+  updateAnthropicReporting?(action: 'connect' | 'refresh', approveInstall?: boolean): Promise<void>;
   getClaudeDetails?(): Promise<{ hasKey: boolean; authenticationLabel: string; cliAvailable: boolean }>;
   subscriptionPriorities?(): Record<string, number>;
   saveSubscriptionPriority?(id: string, priority: number): void;

@@ -6,7 +6,11 @@ import type { AnthropicReporting } from '@kanbots/api';
 const snapshotPath = () => join(app.getPath('userData'), 'anthropic-reporting.json');
 export function getAnthropicReporting(): AnthropicReporting {
   if (!existsSync(snapshotPath())) return { connected: false, status: 'Usage and cost access not connected.' };
-  try { return JSON.parse(readFileSync(snapshotPath(), 'utf8')); }
+  try {
+    const report: AnthropicReporting = JSON.parse(readFileSync(snapshotPath(), 'utf8'));
+    if (!report.eligibility && report.status.startsWith('Organization access was denied.')) report.eligibility = 'denied';
+    return report;
+  }
   catch { return { connected: false, status: 'Refresh usage and cost access.' }; }
 }
 function store(value: AnthropicReporting) { writeFileSync(snapshotPath(), JSON.stringify(value), { mode: 0o600 }); }
@@ -19,12 +23,48 @@ function ant(args: string[], timeout: number): Promise<string> {
     else resolve(stdout.trim());
   }));
 }
+let installation: Promise<void> | undefined;
+async function prepareCli(approved: boolean): Promise<boolean> {
+  try { await ant(['--version'], 10000); return true; }
+  catch (error) {
+    if (!(error instanceof Error) || error.message !== 'missing-cli') {
+      store({ ...getAnthropicReporting(), prerequisite: 'manual', status: 'The Anthropic helper is installed but could not start. Check the installation guide before retrying.' });
+      return false;
+    }
+  }
+  if (!approved) {
+    store({ ...getAnthropicReporting(), prerequisite: 'missing', status: 'The Anthropic helper is needed to check organization access. Nothing has been installed yet.' });
+    return false;
+  }
+  const brew = ['/opt/homebrew/bin/brew', '/usr/local/bin/brew'].find(existsSync);
+  if (process.platform !== 'darwin' || !brew) {
+    store({ ...getAnthropicReporting(), prerequisite: 'manual', status: 'Automatic installation requires Homebrew on this Mac. Use the installation guide, then check again.' });
+    return false;
+  }
+  try {
+    installation ??= new Promise<void>((resolve, reject) => {
+      execFile(brew, ['install', 'anthropics/tap/ant'], {
+        timeout: 300000, maxBuffer: 4 * 1024 * 1024,
+        env: { ...process.env, HOMEBREW_NO_AUTO_UPDATE: '1', HOMEBREW_NO_ENV_HINTS: '1' },
+      }, error => error ? reject(new Error('install-failed')) : resolve());
+    }).finally(() => { installation = undefined; });
+    await installation;
+    await ant(['--version'], 10000);
+    store({ ...getAnthropicReporting(), prerequisite: 'ready', status: 'Anthropic helper installed. Checking organization access…' });
+    return true;
+  } catch {
+    store({ ...getAnthropicReporting(), prerequisite: 'missing', status: 'Installation did not finish. Retry or use the installation guide; authorization has not started.' });
+    return false;
+  }
+}
 let loginPending: Promise<string> | undefined;
 let refreshPending: Promise<void> | undefined;
 const credentials = () => ant(['auth', 'print-credentials', '--profile', 'kanbots-local-analytics', '--access-token'], 15000);
-export async function updateAnthropicReporting(action: 'connect' | 'refresh'): Promise<void> {
+export async function updateAnthropicReporting(action: 'connect' | 'refresh', approveInstall = false): Promise<void> {
   // Refresh remains available while the browser login process is still waiting.
   if (action === 'connect') {
+    if (getAnthropicReporting().eligibility === 'denied') { await updateAnthropicReporting('refresh'); return; }
+    if (!await prepareCli(approveInstall)) return;
     try {
       const token = await credentials();
       if (!token || /\s/.test(token)) throw new Error('authorization-failed');
@@ -85,13 +125,13 @@ async function refreshReports(): Promise<void> {
       return { amount: refreshedAt ? amount : null, refreshedAt };
     };
     const [usage, cost] = await Promise.all([readReport('usage'), readReport('cost')]);
-    store({ connected: true, status: 'Usage and costs connected. Reports may lag by up to 24 hours; credits and balances are separate.', organizationId: organization.id, organizationName: organization.name, checkedAt: new Date().toISOString(), tokens: usage.amount, costUsd: cost.amount, usageAsOf: usage.refreshedAt, costAsOf: cost.refreshedAt });
+    store({ eligibility: 'supported', prerequisite: 'ready', connected: true, status: 'Usage and costs connected. Reports may lag by up to 24 hours; credits and balances are separate.', organizationId: organization.id, organizationName: organization.name, checkedAt: new Date().toISOString(), tokens: usage.amount, costUsd: cost.amount, usageAsOf: usage.refreshedAt, costAsOf: cost.refreshedAt });
   } catch (error) {
     const reason = error instanceof Error ? error.message : '';
-    store({ ...getAnthropicReporting(), connected: authenticated && reason !== 'authorization-failed', status: reason === 'missing-cli'
+    store({ ...getAnthropicReporting(), eligibility: reason === 'permission-denied' ? 'denied' : reason === 'authorization-failed' ? 'unknown' : getAnthropicReporting().eligibility ?? 'unknown', prerequisite: reason === 'missing-cli' ? 'missing' : 'ready', connected: authenticated && reason !== 'authorization-failed', status: reason === 'missing-cli'
       ? 'Install the official Anthropic ant CLI, then check connection.'
       : reason === 'authorization-failed' ? 'No active organization authorization found. Connect usage & costs to sign in.'
-      : reason === 'permission-denied' ? 'Organization access was denied. Check that this account has organization admin and reporting permissions; signing in again may not resolve this.'
+      : reason === 'permission-denied' ? 'Organization reporting is not available with this account’s current access. Personal Pro/Max subscriptions do not include this API; Console organizations require admin reporting permissions. Your subscription can still be used.'
       : authenticated ? 'Organization authorized, but reports are currently unavailable. Check connection to retry. Previous readings are stale.'
       : 'Could not check organization access. Check your connection and retry before signing in again.' });
   }
