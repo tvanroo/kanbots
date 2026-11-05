@@ -247,6 +247,8 @@ export interface ProviderSettingsPayload {
 }
 
 export interface ApiConnection {
+  organizationId?: string | null;
+  workspaceId?: string | null;
   id: string;
   provider: 'openai' | 'anthropic';
   name: string;
@@ -274,9 +276,10 @@ export interface ApiConnection {
   billingStatus: string;
 }
 
-export type ApiConnectionInput = Omit<ApiConnection, 'keyPreview' | 'models' | 'checkedAt' | 'status' | 'reportedSpend' | 'spendCheckedAt' | 'billingStatus'> & { apiKey?: string | undefined };
+export type ApiConnectionInput = Omit<ApiConnection, 'organizationId' | 'workspaceId' | 'keyPreview' | 'models' | 'checkedAt' | 'status' | 'reportedSpend' | 'spendCheckedAt' | 'billingStatus'> & { apiKey?: string | undefined };
 
 export interface AnthropicReporting {
+  organizationMismatch?: boolean;
   eligibility?: 'unknown' | 'supported' | 'denied';
   prerequisite?: 'ready' | 'missing' | 'manual';
   connected: boolean;
@@ -310,6 +313,7 @@ export interface OpenAIReporting {
 export interface ProvidersPayload {
   openaiReporting?: OpenAIReporting;
   anthropicReporting?: AnthropicReporting;
+  anthropicReportingAccounts?: Array<{ organizationId: string; connectionNames: string[]; report: AnthropicReporting }>;
   apiConnections?: ApiConnection[];
   providers: ProviderConfigPayload[];
   settings: ProviderSettingsPayload;
@@ -321,6 +325,8 @@ export interface ProvidersPayload {
 export interface ProviderSaveInput {
   reportingAction?: 'connect' | 'refresh';
   approveReportingInstall?: boolean;
+  reportingOrganizationId?: string;
+  reportingSwitchAccount?: boolean;
   reportingKey?: string;
   priority?: number;
   connection?: ApiConnectionInput;

@@ -37,6 +37,7 @@ export async function saveApiConnection(input: ApiConnectionInput): Promise<void
   if (apiKey) {
     row.encryptedKey = safeStorage.encryptString(apiKey).toString('base64');
     row.keyPreview = `${apiKey.slice(0, 5)}••••••${apiKey.slice(-5)}`;
+    row.organizationId = null; row.workspaceId = null;
     row.models = []; row.checkedAt = null; row.status = 'Not checked';
     row.reportedSpend = null; row.spendCheckedAt = null;
     row.billingStatus = 'Not reported. Budget and credit fields are user-entered.';
@@ -54,13 +55,18 @@ export async function refreshApiConnection(id: string): Promise<void> {
     ? { Authorization: `Bearer ${key}` }
     : { 'x-api-key': key, 'anthropic-version': '2023-06-01' };
   const base = row.provider === 'openai' ? 'https://api.openai.com' : 'https://api.anthropic.com';
-  const result: Partial<StoredConnection> = { checkedAt: new Date().toISOString() };
+  const result: Partial<StoredConnection> = { checkedAt: new Date().toISOString(), ...(row.provider === 'anthropic' ? { organizationId: null, workspaceId: null } : {}) };
   try {
     const models: ApiConnection['models'] = [];
     let after: string | undefined;
     do {
       const response = await fetch(`${base}/v1/models${after ? `?after_id=${encodeURIComponent(after)}` : ''}`, { headers, signal: AbortSignal.timeout(10000) });
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      if (row.provider === 'anthropic') {
+        // Only authenticated, provider-reported IDs may associate a key with reporting.
+        result.organizationId = response.headers.get('anthropic-organization-id');
+        result.workspaceId = response.headers.get('anthropic-workspace-id');
+      }
       const data = await response.json() as { data: Array<{ id: string; display_name?: string }>; has_more?: boolean; last_id?: string };
       for (const model of data.data) models.push({ id: model.id, label: model.display_name ?? model.id });
       after = data.has_more ? data.last_id : undefined;

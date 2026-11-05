@@ -138,6 +138,7 @@ function ConnectionEditor({ provider, initial, onChanged, onCancel }: { provider
     {initial && !expanded ? <div className="kb-api-summary">
       <span>{initial.models.length} models</span>
       <span>{expirationLabel(initial.expirationMode ?? (initial.expiresAt ? 'date' : 'unknown'), initial.expiresAt, 'Credit')}</span>
+      {initial.organizationId ? <span>Account identified · {initial.workspaceId ? 'workspace identified' : 'organization scope'}</span> : null}
       {initial.reportedSpend !== null ? <span>Organization spend ${initial.reportedSpend.toFixed(2)} · reported</span> : null}
     </div> : null}
     {expanded ? <fieldset disabled={busy} className="kb-api-editor">

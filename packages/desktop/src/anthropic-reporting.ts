@@ -1,11 +1,42 @@
+import { AsyncLocalStorage } from 'node:async_hooks';
+import { createHash } from 'node:crypto';
+import { listApiConnections } from './api-connections.js';
 import { app } from 'electron';
 import { execFile } from 'node:child_process';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { AnthropicReporting } from '@kanbots/api';
-const snapshotPath = () => join(app.getPath('userData'), 'anthropic-reporting.json');
+const accountContext = new AsyncLocalStorage<string>();
+const accountSuffix = () => accountContext.getStore() ? '-' + createHash('sha256').update(accountContext.getStore()!).digest('hex').slice(0, 24) : '';
+const snapshotPath = () => join(app.getPath('userData'), `anthropic-reporting${accountSuffix()}.json`);
+const profile = () => {
+  const account = accountContext.getStore();
+  if (account) {
+    try {
+      const legacy = JSON.parse(readFileSync(join(app.getPath('userData'), 'anthropic-reporting.json'), 'utf8'));
+      if (legacy.organizationId === account) return 'kanbots-local-analytics';
+    } catch { /* A new account gets its own CLI profile. */ }
+  }
+  return 'kanbots-local-analytics' + accountSuffix();
+};
+export function getAnthropicReportingAccounts() {
+  const groups = new Map<string, string[]>();
+  for (const row of listApiConnections()) {
+    if (row.provider !== 'anthropic' || !row.organizationId) continue;
+    groups.set(row.organizationId, [...(groups.get(row.organizationId) ?? []), row.name]);
+  }
+  return [...groups].map(([organizationId, connectionNames]) => ({ organizationId, connectionNames, report: accountContext.run(organizationId, getAnthropicReporting) }));
+}
 export function getAnthropicReporting(): AnthropicReporting {
-  if (!existsSync(snapshotPath())) return { connected: false, status: 'Usage and cost access not connected.' };
+  if (!existsSync(snapshotPath())) {
+    if (accountContext.getStore()) {
+      try {
+        const legacy: AnthropicReporting = JSON.parse(readFileSync(join(app.getPath('userData'), 'anthropic-reporting.json'), 'utf8'));
+        if (legacy.organizationId === accountContext.getStore()) return legacy;
+      } catch { /* No matching previous authorization. */ }
+    }
+    return { connected: false, status: 'Usage and cost access not connected.' };
+  }
   try {
     const report: AnthropicReporting = JSON.parse(readFileSync(snapshotPath(), 'utf8'));
     if (!report.eligibility && report.status.startsWith('Organization access was denied.')) report.eligibility = 'denied';
@@ -57,15 +88,25 @@ async function prepareCli(approved: boolean): Promise<boolean> {
     return false;
   }
 }
-let loginPending: Promise<string> | undefined;
-let refreshPending: Promise<void> | undefined;
-const credentials = () => ant(['auth', 'print-credentials', '--profile', 'kanbots-local-analytics', '--access-token'], 15000);
-export async function updateAnthropicReporting(action: 'connect' | 'refresh', approveInstall = false): Promise<void> {
+const pending = new Map<string, { login?: Promise<string> | undefined; refresh?: Promise<void> | undefined }>();
+function operations() {
+  const id = accountContext.getStore() ?? '';
+  if (!pending.has(id)) pending.set(id, {});
+  return pending.get(id)!;
+}
+const credentials = () => ant(['auth', 'print-credentials', '--profile', profile(), '--access-token'], 15000);
+export async function updateAnthropicReporting(action: 'connect' | 'refresh', approveInstall = false, organizationId?: string, switchAccount = false): Promise<void> {
+  if (organizationId && !/^[a-zA-Z0-9_-]{1,160}$/.test(organizationId)) throw new Error('Invalid organization.');
+  return accountContext.run(organizationId ?? '', () => updateReporting(action, approveInstall, switchAccount));
+}
+async function updateReporting(action: 'connect' | 'refresh', approveInstall = false, switchAccount = false): Promise<void> {
+  const state = operations();
   // Refresh remains available while the browser login process is still waiting.
   if (action === 'connect') {
-    if (getAnthropicReporting().eligibility === 'denied') { await updateAnthropicReporting('refresh'); return; }
+    if (!switchAccount && getAnthropicReporting().eligibility === 'denied') { await updateReporting('refresh'); return; }
     if (!await prepareCli(approveInstall)) return;
     try {
+      if (switchAccount || getAnthropicReporting().organizationMismatch) throw new Error('authorization-failed');
       const token = await credentials();
       if (!token || /\s/.test(token)) throw new Error('authorization-failed');
       const response = await fetch('https://api.anthropic.com/v1/organizations/me', {
@@ -75,19 +116,19 @@ export async function updateAnthropicReporting(action: 'connect' | 'refresh', ap
       // Permission and service errors need a useful report, not another browser login.
     } catch (error) {
       if (!(error instanceof Error) || !['authorization-failed', 'missing-cli'].includes(error.message)) {
-        await updateAnthropicReporting('refresh');
+        await updateReporting('refresh');
         return;
       }
       if (error instanceof Error && error.message === 'missing-cli') {
         store({ ...getAnthropicReporting(), connected: false, status: 'Install the official Anthropic ant CLI, then connect usage and costs.' });
         return;
       }
-      loginPending ??= ant(['auth', 'login', '--profile', 'kanbots-local-analytics', '--scope', 'org:admin'], 300000).finally(() => { loginPending = undefined; });
-      try { await loginPending; } catch { /* Recheck credentials even if the browser callback failed. */ }
+      state.login ??= ant(['auth', 'login', '--profile', profile(), '--scope', 'org:admin'], 300000).finally(() => { state.login = undefined; });
+      try { await state.login; } catch { /* Recheck credentials even if the browser callback failed. */ }
     }
   }
-  refreshPending ??= refreshReports().finally(() => { refreshPending = undefined; });
-  await refreshPending;
+  state.refresh ??= refreshReports().finally(() => { state.refresh = undefined; });
+  await state.refresh;
 }
 async function refreshReports(): Promise<void> {
   let authenticated = false;
@@ -103,8 +144,13 @@ async function refreshReports(): Promise<void> {
     };
     const organization = await get('/v1/organizations/me');
     if (typeof organization.id !== 'string' || typeof organization.name !== 'string') throw new Error('report-unavailable');
+    const expected = accountContext.getStore();
+    if (expected && organization.id !== expected) {
+      store({ connected: false, eligibility: 'unknown', organizationMismatch: true, prerequisite: 'ready', status: 'The authorized organization does not own these API keys. Sign in with the organization that issued them; existing account connections are unchanged.' });
+      return;
+    }
     authenticated = true;
-    store({ ...getAnthropicReporting(), connected: true, status: 'Organization authorized. Loading usage and costs…', organizationId: organization.id, organizationName: organization.name });
+    store({ ...getAnthropicReporting(), organizationMismatch: false, connected: true, status: 'Organization authorized. Loading usage and costs…', organizationId: organization.id, organizationName: organization.name });
     const start = new Date(); start.setUTCDate(1); start.setUTCHours(0, 0, 0, 0);
     const readReport = async (kind: 'usage' | 'cost') => {
       let page: string | undefined;

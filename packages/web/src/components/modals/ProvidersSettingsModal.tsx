@@ -1,5 +1,5 @@
 import { OpenAIReportingPanel, CodexUsagePanel } from './OpenAIReportingPanel.js';
-import { AnthropicReportingPanel } from './AnthropicReportingPanel.js';
+import { AnthropicReportingSetup } from './AnthropicReportingPanel.js';
 import { ApiConnections } from './ApiConnections.js';
 import { useEffect, useMemo, useRef, useState, type ChangeEvent, type MouseEvent } from 'react';
 import { api } from '../../api.js';
@@ -446,7 +446,7 @@ export function ProvidersSettingsModal({ onClose }: ProvidersSettingsModalProps)
                       {spec.id === 'codex-cli' || spec.id === 'claude-code' ? <h3>{spec.id === 'codex-cli' ? 'OpenAI' : 'Anthropic'}</h3> : null}
                       <ProviderSection spec={spec} config={cfg} onChanged={(next) => setPayload(next)} />
                       {spec.id === 'codex-cli' ? <OpenAIReportingPanel report={payload.openaiReporting} onChanged={setPayload} /> : null}
-                      {spec.id === 'claude-code' ? <AnthropicReportingPanel report={payload.anthropicReporting} onChanged={setPayload} /> : null}
+                      {spec.id === 'claude-code' ? <AnthropicReportingSetup payload={payload} onChanged={setPayload} /> : null}
                       {spec.id === 'codex-cli' || spec.id === 'claude-code' ? <ApiConnections provider={spec.id === 'codex-cli' ? 'openai' : 'anthropic'} connections={payload.apiConnections ?? []} onChanged={setPayload} /> : null}
                     </div>
                   );

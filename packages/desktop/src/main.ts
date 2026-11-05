@@ -1,5 +1,5 @@
 import { getOpenAIReporting, updateOpenAIReporting } from './openai-reporting.js';
-import { getAnthropicReporting, updateAnthropicReporting } from './anthropic-reporting.js';
+import { getAnthropicReporting, getAnthropicReportingAccounts, updateAnthropicReporting } from './anthropic-reporting.js';
 import { getClaudeDetails } from './claude-auth.js';
 import { listApiConnections, saveApiConnection, refreshApiConnection, subscriptionPriorities, saveSubscriptionPriority } from './api-connections.js';
 import { getCodexDetails } from './codex-catalogue.js';
@@ -552,7 +552,7 @@ async function openWorkspaceInternal(repoPath: string): Promise<ActiveWorkspaceI
     hasClaudeCodeCredentials: isClaudeAuthenticated,
     hasCodexCredentials: isCodexAuthenticated,
     getCodexDetails, getClaudeDetails,
-    getAnthropicReporting, updateAnthropicReporting,
+    getAnthropicReporting, getAnthropicReportingAccounts, updateAnthropicReporting,
     getOpenAIReporting, updateOpenAIReporting,
     listApiConnections, saveApiConnection, refreshApiConnection, subscriptionPriorities, saveSubscriptionPriority,
   };

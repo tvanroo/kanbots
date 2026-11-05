@@ -35,8 +35,9 @@ export interface SentryRuntime {
 export interface ProvidersRuntime {
   getOpenAIReporting?(): import('../bridge.js').OpenAIReporting;
   updateOpenAIReporting?(action: 'connect' | 'refresh', apiKey?: string): Promise<void>;
+  getAnthropicReportingAccounts?(): NonNullable<import('../bridge.js').ProvidersPayload['anthropicReportingAccounts']>;
   getAnthropicReporting?(): import('../bridge.js').AnthropicReporting;
-  updateAnthropicReporting?(action: 'connect' | 'refresh', approveInstall?: boolean): Promise<void>;
+  updateAnthropicReporting?(action: 'connect' | 'refresh', approveInstall?: boolean, organizationId?: string, switchAccount?: boolean): Promise<void>;
   getClaudeDetails?(): Promise<{ hasKey: boolean; authenticationLabel: string; cliAvailable: boolean }>;
   subscriptionPriorities?(): Record<string, number>;
   saveSubscriptionPriority?(id: string, priority: number): void;
