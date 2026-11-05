@@ -1,5 +1,12 @@
 import type { ApiConnection, AnthropicReporting } from '@kanbots/api';
 
+/** Plan useful grant-funded work to finish before this safety deadline.
+ * This is not provider expiry and does not authorize paid fallback or filler work.
+ */
+export function grantUseBy(cycleEnd: Date): string {
+  return new Date(cycleEnd.getTime() - 6 * 60 * 60 * 1000).toISOString();
+}
+
 /** UTC midnight is an estimation convention, not a provider-confirmed cutoff. */
 export function grantCycle(now: Date, billingDay: number) {
   if (!Number.isInteger(billingDay) || billingDay < 1 || billingDay > 31) throw new Error('Invalid billing day');
@@ -51,9 +58,9 @@ export async function estimateGrants(rows: ApiConnection[], get: (path: string) 
     })());
     try {
       const { spend, asOf } = await costs.get(start)!;
-      results.push({ connectionId: row.id, configKey: grantConfigKey(row), cycleStart: start, cycleEnd: cycle.end.toISOString(), amount: row.budget!, spent: spend, remaining: spend === null ? null : Math.max(0, Number((row.budget! - spend).toFixed(8))), asOf, checkedAt: now.toISOString(), stale: false });
+      results.push({ connectionId: row.id, configKey: grantConfigKey(row), cycleStart: start, cycleEnd: cycle.end.toISOString(), useBy: grantUseBy(cycle.end), amount: row.budget!, spent: spend, remaining: spend === null ? null : Math.max(0, Number((row.budget! - spend).toFixed(8))), asOf, checkedAt: now.toISOString(), stale: false });
     } catch {
-      results.push({ connectionId: row.id, configKey: grantConfigKey(row), cycleStart: start, cycleEnd: cycle.end.toISOString(), amount: row.budget!, spent: null, remaining: null, asOf: null, checkedAt: now.toISOString(), stale: true });
+      results.push({ connectionId: row.id, configKey: grantConfigKey(row), cycleStart: start, cycleEnd: cycle.end.toISOString(), useBy: grantUseBy(cycle.end), amount: row.budget!, spent: null, remaining: null, asOf: null, checkedAt: now.toISOString(), stale: true });
     }
   }
   return results;

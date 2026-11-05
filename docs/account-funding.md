@@ -60,3 +60,7 @@ Official research checked 2026-11-05:
 - https://platform.claude.com/docs/en/manage-claude/usage-cost-analytics-api documents data_refreshed_at and reporting delays up to 24 hours.
 
 No provider-confirmed exact time or grant issuance is claimed. Subscription billing-day input and the UTC convention are sufficient for an estimate, not a verified ledger or exact cutoff enforcement.
+
+## Grant use-by target
+
+Owner policy: plan useful API work to consume non-rollover monthly grant capacity by six hours before its estimated expiration. The estimator exposes `useBy = cycleEnd - 6 hours`; actual estimated expiry remains `cycleEnd`. For an estimated December 1 00:00 UTC expiration, the target is November 30 18:00 UTC. This target is a completion deadline, not the time to begin consuming the grant. The future router should plan ahead toward it using ready tasks and expected consumption; it must not create filler calls, double-count shared organization credit, or authorize paid fallback contrary to the key policy. Routing is not implemented by this metadata change, and no background API work is launched.

@@ -7,7 +7,7 @@ const ts = require('typescript');
 const sourcePath = path.join(__dirname, '../src/grant-estimate.ts');
 const compiled = ts.transpileModule(fs.readFileSync(sourcePath, 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText;
 const loaded = new Module(sourcePath); loaded._compile(compiled, sourcePath);
-const { grantCycle, estimateGrants } = loaded.exports;
+const { grantCycle, grantUseBy, estimateGrants } = loaded.exports;
 const now = new Date('2026-11-05T21:00:00Z');
 const key = { id: 'key1', provider: 'anthropic', funding: 'grant', renewal: 'monthly', rollover: false, grantBillingDay: 30, budget: 200 };
 const report = (amount, asOf = '2026-11-05T20:00:00Z') => ({ data: [{ cost: { amount, currency: 'USD' } }], data_refreshed_at: asOf, has_more: false });
@@ -58,4 +58,9 @@ test('repeated pagination cursor and reports predating the cycle are unavailable
     const [estimate] = await estimateGrants([key],async()=>response,now);
     assert.equal(estimate.remaining,null);
   }
+});
+
+test('use-by target is six hours before expiry, including year boundaries', () => {
+  assert.equal(grantUseBy(new Date('2026-12-01T00:00:00Z')), '2026-11-30T18:00:00.000Z');
+  assert.equal(grantUseBy(new Date('2027-01-01T00:00:00Z')), '2026-12-31T18:00:00.000Z');
 });

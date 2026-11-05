@@ -283,7 +283,7 @@ export interface ApiConnection {
 export type ApiConnectionInput = Omit<ApiConnection, 'organizationId' | 'workspaceId' | 'keyPreview' | 'models' | 'checkedAt' | 'status' | 'reportedSpend' | 'spendCheckedAt' | 'billingStatus'> & { apiKey?: string | undefined };
 
 export interface AnthropicReporting {
-  grantEstimates?: Array<{ connectionId: string; configKey: string; cycleStart: string; cycleEnd: string; amount: number; spent: number | null; remaining: number | null; asOf: string | null; checkedAt: string; stale: boolean }>;
+  grantEstimates?: Array<{ connectionId: string; configKey: string; cycleStart: string; cycleEnd: string; useBy?: string; amount: number; spent: number | null; remaining: number | null; asOf: string | null; checkedAt: string; stale: boolean }>;
 
   organizationMismatch?: boolean;
   eligibility?: 'unknown' | 'supported' | 'denied';
