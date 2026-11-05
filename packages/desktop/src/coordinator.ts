@@ -43,6 +43,8 @@ export class CoordinatorService{
   ui(){return {workspace:this.context?this.session(this.current()):null,workspaces:this.state.workspaces.map(w=>({id:w.id,name:basename(w.path),open:w.path===this.context?.repoPath})),clients:this.state.clients.map(({tokenHash,...c})=>c),jobs:this.context?this.current().jobs:[],queue:this.context?this.current().queue??[]:[],releases:this.context?this.current().releases:[],decisions:this.context?this.current().decisions:[],guide:COORDINATOR_GUIDE};}
   async uiAction(action:string,args:any={}):Promise<any>{
     const w=this.current();
+    if(action==='is-coordinator-run'){const conversation=w.conversationId?this.context!.store.chatConversations.findById(w.conversationId):null;return {matches:!!conversation&&this.context!.store.agentRuns.findById(args.runId)?.threadId===conversation.threadId};}
+    if(action==='resolve-chat-decision'){const chat=w.conversationId?await this.h()['chat:get']({conversationId:w.conversationId}):null;const card=chat?.cards.find(c=>c.id===args.cardId&&c.status==='pending');if(!card)throw Error('This question is no longer pending.');return this.h()['cards:resolve']({cardId:args.cardId,value:args.value});}
     if(action==='onboarding-start'||action==='external-setup-start'){
       if(w.mode==='external')throw Error('An external coordinator is active. Send it the discovery prompt or switch to Kanbots chat first.');
       if(w.mode!=='internal')await this.uiAction('handoff',{mode:'internal'});

@@ -141,6 +141,7 @@ function ChatList() {
         onChange={(e) => setFilter(e.target.value)}
       />
       <div className="kb-rail-chats-list">
+        {bridge.coordinatorState&&(!filter||'project coordinator'.includes(filter.toLowerCase()))?<button type="button" className="kb-rail-chat-row" onClick={()=>window.dispatchEvent(new CustomEvent('kanbots:open-coordinator'))}><div className="kb-rail-chat-title">Project coordinator</div><div className="kb-rail-chat-time">This repository · setup, decisions &amp; progress</div></button>:null}
         {loading && (chats === null || chats.length === 0) ? (
           <div className="kb-rail-chats-empty">Loading…</div>
         ) : filtered.length === 0 ? (

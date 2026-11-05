@@ -32,14 +32,15 @@ export function BoardUsageRow({ fiveHour, sevenDay, stale, issueCount=0, workspa
   const [error,setError]=useState('');
   const [notice,setNotice]=useState('');
   const bridge=getBridge();
+  useEffect(()=>{const open=()=>{setSetup(false);setCoordinators(true);};window.addEventListener('kanbots:open-coordinator',open);return()=>window.removeEventListener('kanbots:open-coordinator',open);},[]);
   const refresh=async()=>{const state=await bridge?.coordinatorState?.();setMode(state?.workspace?.mode??'off');const status=await bridge?.coordinatorAction?.('onboarding-status');setDiscover(!!status?.needed);};
   useEffect(()=>{setError('');setNotice('');setMessage('');void refresh().catch(()=>{});},[workspaceId,issueCount,coordinators]);
   async function startDiscovery(){setBusy(true);setError('');try{
     if(mode==='external'){const status=await bridge?.coordinatorAction?.('onboarding-status');await navigator.clipboard.writeText(status.prompt);setNotice('Discovery request copied. Paste it into your external coordinator.');}
-    else{const result=await bridge?.coordinatorAction?.('onboarding-start');if(result?.dispatchError)throw Error(result.dispatchError);setSetup(false);setCoordinators(true);}
+    else{setSetup(false);setCoordinators(true);const result=await bridge?.coordinatorAction?.('onboarding-start');if(result?.dispatchError)throw Error(result.dispatchError);setSetup(false);setCoordinators(true);}
   }catch(e){setError(e instanceof Error?e.message:String(e));}finally{setBusy(false);}}
-  async function setupExternal(){setBusy(true);setError('');try{if(mode==='external'){setSetup(true);setCoordinators(true);return;}const result=await bridge?.coordinatorAction?.('external-setup-start');if(result?.dispatchError)throw Error(result.dispatchError);setSetup(false);setCoordinators(true);}catch(e){setError(e instanceof Error?e.message:String(e));}finally{setBusy(false);}}
-  async function send(){setBusy(true);setError('');try{if(mode!=='internal')await bridge?.coordinatorAction?.('handoff',{mode:'internal'});const result=await bridge?.coordinatorAction?.('chat-send',{body:message});if(result?.dispatchError)throw Error(result.dispatchError);setMessage('');setSetup(false);setCoordinators(true);}catch(e){setError(e instanceof Error?e.message:String(e));}finally{setBusy(false);}}
+  async function setupExternal(){setBusy(true);setError('');try{if(mode==='external'){setSetup(true);setCoordinators(true);return;}setSetup(false);setCoordinators(true);const result=await bridge?.coordinatorAction?.('external-setup-start');if(result?.dispatchError)throw Error(result.dispatchError);setSetup(false);setCoordinators(true);}catch(e){setError(e instanceof Error?e.message:String(e));}finally{setBusy(false);}}
+  async function send(){setBusy(true);setError('');try{setSetup(false);setCoordinators(true);if(mode!=='internal')await bridge?.coordinatorAction?.('handoff',{mode:'internal'});const result=await bridge?.coordinatorAction?.('chat-send',{body:message});if(result?.dispatchError)throw Error(result.dispatchError);setMessage('');setSetup(false);setCoordinators(true);}catch(e){setError(e instanceof Error?e.message:String(e));}finally{setBusy(false);}}
   if(bridge?.capacity)return <>
     <div className="kb-coordinator-strip"><button className="kb-btn ghost" onClick={()=>{setSetup(false);setCoordinators(true);}}>Coordinators</button><CapacityOverview /></div>
     {(mode!=='external'||discover||issueCount===0)?<section className="kb-board-onboarding" aria-label="Project coordinator">
@@ -53,7 +54,7 @@ export function BoardUsageRow({ fiveHour, sevenDay, stale, issueCount=0, workspa
       </div>
       <aside><h3>Prefer your own harness?</h3><p>Your built-in coordinator can help connect DeepSeek Harness or another local MCP-compatible app, step by step.</p><button className="kb-btn" disabled={busy} onClick={()=>void setupExternal()}>Connect external coordinator</button><p className="kb-provider-desc">Starts a guided setup chat · you approve the handoff</p></aside>
     </section>:null}
-    {coordinators?createPortal(<CoordinatorsModal initialSection={setup?'external':'chat'} onClose={()=>setCoordinators(false)}/>,document.body):null}
+    {coordinators?createPortal(<CoordinatorsModal launching={busy} launchError={error} initialSection={setup?'external':'chat'} onClose={()=>setCoordinators(false)}/>,document.body):null}
   </>;
   return (
     <div className="kb-usage-row">

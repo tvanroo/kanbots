@@ -143,7 +143,7 @@ export function ActivitySection({ onSelectIssue }: ActivitySectionProps) {
               key={ev.id}
               type="button"
               className={`kb-rail-activity-row ${toneForKind(ev.kind)}`}
-              onClick={() => onSelectIssue(ev.issueNumber)}
+              onClick={async() => {const match=await bridge?.coordinatorAction?.('is-coordinator-run',{runId:ev.agentRunId}).catch(()=>null);if(match?.matches)window.dispatchEvent(new CustomEvent('kanbots:open-coordinator'));else onSelectIssue(ev.issueNumber);}}
               title={`#${ev.issueNumber} · ${ev.summary}`}
             >
               <span className="kb-rail-activity-icon" aria-hidden>

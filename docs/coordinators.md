@@ -1,4 +1,4 @@
-# Kanbots Local coordinators (1.2.2)
+# Kanbots Local coordinators (1.2.3)
 
 Open a project. When an external coordinator is not active, the board shows **Your built-in coordinator**, a message box, and guided action buttons. **Populate board from repository** starts the discovery prompt in the built-in chat without a separate mode-selection step. **Connect external coordinator** starts a setup conversation; the coordinator can prepare or reuse a named connection and guide pairing. The **Coordinators** control opens full progress and connection settings.
 
@@ -13,6 +13,10 @@ One coordinator controls a workspace at a time. Switching preserves tasks, summa
 The setup offers a comprehensive prompt for new projects and empty boards. Run it through the internal coordinator or copy it to the external harness. It delegates a read-only inventory of repository instructions, plans, TODOs, branches, recent changes and accessible issue/PR evidence. Source references identify cards across repeat reconciliation. Human edits and conflicting status require reconciliation rather than silent overwriting. Unavailable conversations, remote systems and deployment evidence remain explicitly unknown.
 
 The coordinator records the inventory, dependencies, status evidence and a durable handoff summary. It asks for the next objective instead of treating every discovered item as authorization to implement it. The same operating prompt requires ongoing board updates after meaningful work, reconnects and handoffs. This is an agent workflow contract, not a background crawler of every external service.
+
+## Conversation and navigation
+
+The coordinator opens immediately in a persistent chat view. The welcome message explains its role, progress stays visible during work, and connection setup actions and pending questions appear alongside the conversation. Connections and workflow controls have their own tab. Click **Chats → Project coordinator** to reopen it. Coordinator activity and decision links route to this conversation rather than an unrelated issue number. Refreshing an empty board preserves the open chat.
 
 ## Delegation and release
 

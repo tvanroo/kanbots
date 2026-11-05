@@ -8,7 +8,7 @@ import {
   type DragStartEvent,
   type UniqueIdentifier,
 } from '@dnd-kit/core';
-import { useEffect, useMemo, useState, type MouseEvent as ReactMouseEvent } from 'react';
+import { useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react';
 import { api } from '../api.js';
 import { AutopilotLaunchModal } from '../components/modals/AutopilotLaunchModal.js';
 import { BoardViewsModal } from '../components/modals/BoardViewsModal.js';
@@ -298,7 +298,9 @@ export function Board({ onOpenDetail, onOpenCreate, onOpenPalette, onOpenStats }
     return null;
   }, [viewsApi.views, currentViewState]);
 
-  if (loading && issues.length === 0) {
+  const loadedBoard = useRef(false);
+  if (!loading) loadedBoard.current = true;
+  if (loading && issues.length === 0 && !loadedBoard.current) {
     return (
       <div className="kb-app" style={{ padding: 32, color: 'var(--ink-2)' }}>
         Loading…

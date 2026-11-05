@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
+import { getBridge } from '../../desktop-bridge.js';
 import { api } from '../../api.js';
 import { useIssues } from '../../hooks/useIssues.js';
 import { ageString } from '../../labels.js';
@@ -118,7 +119,7 @@ export function Tray({ onJump }: TrayProps) {
               <button
                 type="button"
                 className="kb-tray-jump"
-                onClick={() => onJump(item.issueNumber)}
+                onClick={async()=>{const match=await getBridge()?.coordinatorAction?.('is-coordinator-run',{runId:item.runId}).catch(()=>null);if(match?.matches)window.dispatchEvent(new CustomEvent('kanbots:open-coordinator'));else onJump(item.issueNumber);}}
                 aria-label={`Jump to issue #${item.issueNumber}`}
               >
                 <div className="kb-tray-num">

@@ -42,6 +42,14 @@ const net=require('node:net');
    if(!text.includes('Populate board from repository')||!text.includes('Connect external coordinator')||!text.includes('Or tell your coordinator what you need'))throw Error('Coordinator onboarding panel is missing');
    const screenshot=await call('Page.captureScreenshot',{format:'png'});const output=path.resolve('output/packaged-board-onboarding.png');fs.mkdirSync(path.dirname(output),{recursive:true});fs.writeFileSync(output,Buffer.from(screenshot.data,'base64'));
    console.log(JSON.stringify({emptyBoardPrompts:true,screenshot:output}));
+   await call('Runtime.evaluate',{expression:"window.dispatchEvent(new CustomEvent('kanbots:open-coordinator'))"});
+   await new Promise(r=>setTimeout(r,700));
+   await call('Runtime.evaluate',{expression:"window.dispatchEvent(new CustomEvent('kanbots:issues-refetch'))"});
+   await new Promise(r=>setTimeout(r,700));
+   const chatView=await call('Runtime.evaluate',{expression:"JSON.stringify({open:!!document.querySelector('[aria-label=\"Project coordinator\"][role=\"dialog\"]'),composer:!!document.querySelector('textarea[aria-label=\"Message coordinator\"]'),saved:document.body.innerText.includes('This conversation is saved.')})",returnByValue:true});
+   const visible=JSON.parse(chatView.result.value);if(!visible.open||!visible.composer||!visible.saved)throw Error('Coordinator chat disappeared during empty-board refresh');
+   const chatImage=await call('Page.captureScreenshot',{format:'png'});fs.writeFileSync(path.resolve('output/packaged-coordinator-chat.png'),Buffer.from(chatImage.data,'base64'));console.log(JSON.stringify({coordinatorChatSurvivesRefresh:true}));
+
   }
   if(/Uncaught Exception|ERR_INVALID_ARG_VALUE|Error launching app/.test(logs))throw Error('Main-process startup exception');
   console.log(JSON.stringify({launched:true,rendererReady:state.ready,desktopBridge:state.bridge,visibleText:state.text.slice(0,600)}));
