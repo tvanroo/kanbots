@@ -28,6 +28,7 @@ export async function saveApiConnection(input: ApiConnectionInput): Promise<void
     models: [], checkedAt: null, status: 'Not checked', reportedSpend: null, spendCheckedAt: null,
     billingStatus: 'Not reported. Budget and credit fields are user-entered.',
     encryptedKey: '', keyPreview: '', ...previous, ...metadata,
+    balanceUpdatedAt: !previous || previous.remaining !== metadata.remaining ? new Date().toISOString() : previous.balanceUpdatedAt ?? new Date(0).toISOString(),
     name: metadata.name.trim() || `${input.provider === 'openai' ? 'OpenAI' : 'Anthropic'} API`,
     expirationMode: metadata.expirationMode ?? (metadata.expiresAt ? 'date' : 'unknown'),
     expiresAt: metadata.expirationMode && metadata.expirationMode !== 'date' ? null : metadata.expiresAt,
@@ -119,4 +120,11 @@ export function subscriptionPriorities(): Record<string, number> {
 }
 export function saveSubscriptionPriority(id: string, priority: number): void {
   writeFileSync(join(app.getPath('userData'), 'subscription-priorities.json'), JSON.stringify({ ...subscriptionPriorities(), [id]: priority }), { mode: 0o600 });
+}
+
+/** Main-process only. Never return this value over IPC or put it in a child environment. */
+export function unlockApiConnection(id: string): string {
+  const row=read().find(item=>item.id===id);
+  if(!row||!row.enabled)throw Error('API connection unavailable.');
+  return safeStorage.decryptString(Buffer.from(row.encryptedKey,'base64'));
 }

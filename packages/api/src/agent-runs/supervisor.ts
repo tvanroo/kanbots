@@ -600,6 +600,7 @@ export async function createSupervisor(
       if (streamEvent.kind === 'session') {
         store.agentRuns.update(run.id, {
           sessionId: streamEvent.sessionId,
+          ...(streamEvent.provider ? {provider:streamEvent.provider} : {}),
           ...(streamEvent.model !== null ? { model: streamEvent.model } : {}),
         });
         return;
@@ -883,6 +884,7 @@ export async function createSupervisor(
       appendSystemPrompt: composed.prompt,
       ...(model !== undefined ? { model } : {}),
       provider,
+      ...(budget !== null ? {costBudgetUsd:budget} : {}),
       ...(input.extraArgs !== undefined ? { extraArgs: input.extraArgs } : {}),
       ...(input.env !== undefined ? { env: input.env } : {}),
     });
@@ -933,6 +935,7 @@ export async function createSupervisor(
       cwd: resolveRepoPath(),
       prompt: input.prompt,
       resumeFromSessionId: existing.sessionId,
+      ...((input.costBudgetUsd ?? existing.costBudgetUsd) !== null && (input.costBudgetUsd ?? existing.costBudgetUsd) !== undefined ? { costBudgetUsd: Math.max(0, (input.costBudgetUsd ?? existing.costBudgetUsd)! - (existing.totalCostUsd ?? 0)) } : {}),
       appendSystemPrompt: composed.prompt,
       // Resume always reuses the original provider; non-claude-code can't
       // produce a sessionId today, so this guard is implicit.
@@ -1050,6 +1053,7 @@ export async function createSupervisor(
       appendSystemPrompt: composed.prompt,
       ...(model !== undefined ? { model } : {}),
       provider,
+      ...(budget !== null ? {costBudgetUsd:budget} : {}),
     });
 
     run = store.agentRuns.update(run.id, {
@@ -1087,8 +1091,10 @@ export async function createSupervisor(
     applyAcpWorkspaceCommand();
     const handle = startAgent({
       cwd: existing.worktreePath,
+      ...(existing.provider ? {provider: existing.provider as import('@kanbots/dispatcher').AgentRunProvider} : {}),
       prompt: input.prompt,
       resumeFromSessionId: existing.sessionId,
+      ...((input.costBudgetUsd ?? existing.costBudgetUsd) !== null && (input.costBudgetUsd ?? existing.costBudgetUsd) !== undefined ? { costBudgetUsd: Math.max(0, (input.costBudgetUsd ?? existing.costBudgetUsd)! - (existing.totalCostUsd ?? 0)) } : {}),
       appendSystemPrompt: composed.prompt,
     });
 

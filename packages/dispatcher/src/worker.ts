@@ -44,6 +44,7 @@ const ADAPTERS: Partial<Record<AgentRunProvider, AgentCliAdapter>> = {
 };
 
 export interface StartAgentRunOptions {
+  costBudgetUsd?: number;
   cwd: string;
   prompt: string;
   appendSystemPrompt?: string;

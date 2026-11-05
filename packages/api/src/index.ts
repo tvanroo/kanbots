@@ -188,3 +188,4 @@ export { readClaudeSubscriptionUsage } from './handlers/cost.js';
 export type { CostUsageResult, CostUsageWindow } from './bridge.js';
 
 export type { FundingPool, FundingAccount, FundingAccountInput } from './bridge.js';
+export type { RoutingConfig, RoutingState, CapacityRow, CapacitySnapshot } from './bridge.js';

@@ -1,3 +1,4 @@
+import { RoutingSettings } from './RoutingSettings.js';
 import { AccountFunding } from './AccountFunding.js';
 import { ClaudeUsagePanel } from './ClaudeUsagePanel.js';
 import { OpenAIReportingPanel, CodexUsagePanel } from './OpenAIReportingPanel.js';
@@ -399,6 +400,7 @@ export function ProvidersSettingsModal({ onClose }: ProvidersSettingsModalProps)
                 </div>
               ) : null}
 
+              <RoutingSettings />
               <div className="kb-providers-defaults">
                 <div className="kb-providers-defaults-title">Defaults</div>
                 <label className="kb-sentry-row">

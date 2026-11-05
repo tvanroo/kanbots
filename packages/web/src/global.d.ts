@@ -63,6 +63,9 @@ export interface KanbotsBridge {
   minimizeWindow(): Promise<void>;
   toggleMaximizeWindow(): Promise<void>;
   closeWindow(): Promise<void>;
+  routingState?(): Promise<import('@kanbots/api').RoutingState>;
+  saveRouting?(config: import('@kanbots/api').RoutingConfig): Promise<import('@kanbots/api').RoutingState>;
+  capacity?(): Promise<import('@kanbots/api').CapacitySnapshot>;
   claudeSubscriptionUsage?(): Promise<import('@kanbots/api').CostUsageResult>;
   claudeAuthStatus(): Promise<{ authed: boolean }>;
   claudeLoginStart(installIfMissing?: boolean): Promise<{ ok: true } | { ok: false; error: string }>;

@@ -1,7 +1,10 @@
+import { createHash } from 'node:crypto';
 import type { CodexSubscriptionUsage } from '@kanbots/api';
 import { spawn } from 'node:child_process';
 
 export interface CodexDetails {
+  accountIdentity?: string;
+  resetOutcome?: string;
   subscriptionUsage?: CodexSubscriptionUsage;
   subscriptionUsageError?: string;
   hasKey: boolean;
@@ -12,7 +15,7 @@ export interface CodexDetails {
 
 // Use the same CLI and account as task execution. Never forward account details,
 // raw protocol errors, or credential material to the renderer.
-export async function getCodexDetails(): Promise<CodexDetails> {
+export async function getCodexDetails(redemption?: { accountIdentity: string; creditId: string; idempotencyKey: string }): Promise<CodexDetails> {
   const child = spawn('codex', ['app-server'], { stdio: ['pipe', 'pipe', 'ignore'] });
   let sequence = 0;
   let buffer = '';
@@ -52,6 +55,12 @@ export async function getCodexDetails(): Promise<CodexDetails> {
     child.stdin.write(JSON.stringify({ method: 'initialized' }) + '\n');
     const { account } = await call('account/read', { refreshToken: false });
     details.hasKey = account != null;
+    if(account?.type === 'chatgpt' && (typeof account.id === 'string' || typeof account.email === 'string')) details.accountIdentity = createHash('sha256').update(JSON.stringify([account.id ?? null, account.email ?? null])).digest('hex');
+    if(redemption) {
+      if(account?.type !== 'chatgpt' || details.accountIdentity !== redemption.accountIdentity) throw Error('Account changed');
+      const result=await call('account/rateLimitResetCredit/consume',{ creditId:redemption.creditId, idempotencyKey:redemption.idempotencyKey });
+      details.resetOutcome=typeof result.outcome === 'string' ? result.outcome : 'unknown';
+    }
     details.authenticationLabel = account?.type === 'chatgpt'
       ? 'ChatGPT subscription'
       : account?.type === 'apiKey' ? 'OpenAI API billing'
@@ -80,7 +89,12 @@ export async function getCodexDetails(): Promise<CodexDetails> {
           }
           if (snapshot.credits) credits.push({ name, balance: typeof snapshot.credits.balance === 'string' ? snapshot.credits.balance : null, unlimited: snapshot.credits.unlimited === true });
         }
-        details.subscriptionUsage = { checkedAt: new Date().toISOString(), ordinaryUsageAllowed: typeof usage.ordinaryUsageAllowed === 'boolean' ? usage.ordinaryUsageAllowed : null, windows, credits };
+        const reset = usage.rateLimitResetCredits;
+        const resetCredits = reset && Number.isInteger(reset.availableCount) && reset.availableCount >= 0 ? {
+          availableCount: reset.availableCount,
+          credits: Array.isArray(reset.credits) ? reset.credits.filter((c: any)=>typeof c.id==='string' && c.status==='available' && c.resetType==='codexRateLimits' && (c.expiresAt===null || (typeof c.expiresAt==='number' && Number.isFinite(c.expiresAt)))).map((c: any)=>({id:c.id,expiresAt:c.expiresAt,status:c.status,resetType:c.resetType})) : [],
+        } : undefined;
+        details.subscriptionUsage = { ...(resetCredits ? {resetCredits} : {}), checkedAt: new Date().toISOString(), ordinaryUsageAllowed: typeof usage.ordinaryUsageAllowed === 'boolean' ? usage.ordinaryUsageAllowed : null, windows, credits };
       } catch { details.subscriptionUsageError = 'Subscription usage could not be read from Codex. Try Refresh again.'; }
     }
   } catch {

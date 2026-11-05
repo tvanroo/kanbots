@@ -40,7 +40,7 @@ export function ApiConnections({ provider, connections, onChanged, openaiReport,
   }, [provider, grantOrganizations]);
   return <div className="kb-api-connections">
     <div className="kb-api-heading"><h4>API connections</h4><span>Keys encrypted on this Mac</span></div>
-    <p className="kb-provider-desc">Separate from your subscription. API task routing and budget enforcement are not enabled yet.</p>
+    <p className="kb-provider-desc">Separate from your subscription. Automatic routing respects enabled keys and their funding rules.</p>
     {connections.filter(row => row.provider === provider).map(row => <ConnectionEditor key={row.id} initial={row} provider={provider} openaiReport={openaiReport} anthropicReport={anthropicReports?.find(a => a.organizationId === row.organizationId)?.report} onChanged={onChanged} />)}
     {adding ? <ConnectionEditor provider={provider} onChanged={value => { onChanged(value); setAdding(false); }} onCancel={() => setAdding(false)} /> : <button type="button" className="kb-btn" onClick={() => setAdding(true)}>Add API key</button>}
   </div>;
@@ -201,7 +201,7 @@ function ConnectionEditor({ provider, initial, onChanged, onCancel, openaiReport
       <strong>{!previousCycle && estimate?.remaining !== null && estimate?.remaining !== undefined ? `${staleEstimate ? 'Last estimate' : 'Estimated grant remaining'}: $${estimate.remaining.toFixed(2)} / $${estimate.amount.toFixed(2)}` : 'Estimated grant remaining: unknown'}</strong>
       {!previousCycle && estimate?.spent !== null && estimate?.spent !== undefined ? <p><QuotaMeter usedPercent={estimate.spent / estimate.amount * 100} label="Estimated API grant" /></p> : null}
       <p className="kb-provider-desc">{previousCycle ? 'New billing cycle · refresh to estimate. Credit issuance is not confirmed.' : estimate?.asOf ? `Costs reported through ${new Date(estimate.asOf).toLocaleString()}${staleEstimate ? ' · stale, refresh needed' : ''}.` : initial.organizationId ? 'Refresh to check connected organization costs.' : 'Refresh this key to identify its organization.'}</p>
-      {estimate && !previousCycle ? <p className="kb-provider-desc">Use-by target: {new Date(estimate.useBy ?? Date.parse(estimate.cycleEnd) - 6 * 60 * 60 * 1000).toLocaleString()} · 6 hours before estimated expiry. Automatic routing is not active yet.</p> : null}
+      {estimate && !previousCycle ? <p className="kb-provider-desc">Use-by target: {new Date(estimate.useBy ?? Date.parse(estimate.cycleEnd) - 6 * 60 * 60 * 1000).toLocaleString()} · 6 hours before estimated expiry.</p> : null}
       <details><summary>Estimate details</summary><p className="kb-provider-desc">Monthly grant minus covered API costs across this organization’s keys. Reports can lag up to 24 hours. Assumes the grant was issued and no overlapping grants; this is not a confirmed balance.</p>{estimate ? <p className="kb-provider-desc">Cycle: {new Date(estimate.cycleStart).toLocaleDateString(undefined, { timeZone: 'UTC' })} – {new Date(estimate.cycleEnd).toLocaleDateString(undefined, { timeZone: 'UTC' })}. Uses 00:00 UTC; Anthropic does not publish an exact renewal cutoff.</p> : null}<p className="kb-provider-desc">{initial.afterGrant === 'paygo' ? 'After grant: pay-as-you-go selected.' : 'After grant: stop selected.'}</p></details>
     </div> : null}
     {expanded ? <fieldset disabled={busy} className="kb-api-editor">
@@ -239,7 +239,7 @@ function ConnectionEditor({ provider, initial, onChanged, onCancel, openaiReport
         </> : null}
         <div className="kb-api-grid">{expiry('key')}</div>
         <label className="kb-api-toggle"><input type="checkbox" checked={form.expired} onChange={e => change('expired', e.target.checked)} />Mark connection expired</label>
-        <p className="kb-provider-desc">Spending rules are saved for routing setup; automatic switching and spending limits are not active yet.</p>
+        <p className="kb-provider-desc">Routing checks these rules before each API request. Provider reports and prices are estimates; provider-side limits remain authoritative.</p>
       </details>
       {initial?.models.length ? field('defaultModel', 'Preferred API model (optional)', <select {...attributes('defaultModel')} value={form.defaultModel ?? ''} onChange={e => change('defaultModel', e.target.value || null)}><option value="">No preference</option>{form.defaultModel && !initial.models.some(m => m.id === form.defaultModel) ? <option value={form.defaultModel}>{form.defaultModel} (saved)</option> : null}{initial.models.map(m => <option key={m.id} value={m.id}>{m.label}</option>)}</select>) : null}
       <div className="kb-provider-actions"><button type="button" className="kb-btn primary" disabled={!dirty || busy} onClick={() => void save()}>{busy ? 'Saving…' : 'Save'}</button><button type="button" className="kb-btn ghost" onClick={cancel}>Cancel</button></div>

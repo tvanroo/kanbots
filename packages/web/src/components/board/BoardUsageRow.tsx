@@ -1,3 +1,5 @@
+import { CapacityOverview } from './CapacityOverview.js';
+import { getBridge } from '../../desktop-bridge.js';
 import { QuotaMeter } from '../usage/QuotaMeter.js';
 export interface UsageWindow {
   pct: number;
@@ -16,6 +18,7 @@ export interface BoardUsageRowProps {
  * — used in cloud mode until the cost-today endpoint lands (phase 2).
  */
 export function BoardUsageRow({ fiveHour, sevenDay, stale }: BoardUsageRowProps) {
+  if(getBridge()?.capacity)return <CapacityOverview />;
   return (
     <div className="kb-usage-row">
       <span className="kb-usage-label">Claude{stale ? ' · stale' : ''}</span>

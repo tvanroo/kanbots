@@ -1014,3 +1014,13 @@ h2 {
   font-size: 12px;
   font-style: italic;
 }
+
+.kb-capacity-trigger { display:flex; align-items:center; gap:12px; border:0; background:transparent; color:var(--text-muted); font:inherit; cursor:pointer; padding:6px 0; }
+.kb-capacity-blend { display:flex; width:150px; gap:3px; height:6px; }
+.kb-capacity-segment,.kb-capacity-track { display:block; flex:1; overflow:hidden; background:rgba(150,140,130,.16); border-radius:4px; }
+.kb-capacity-segment i,.kb-capacity-track i { display:block; height:100%; border-radius:inherit; }
+.kb-capacity-popover { position:fixed; z-index:10000; width:min(460px,calc(100vw - 24px)); max-height:min(70vh,650px); overflow:auto; box-sizing:border-box; padding:20px; border:1px solid rgba(150,140,130,.25); border-radius:14px; background:var(--bg-1,#191612); color:var(--ink,#eee9e3); box-shadow:0 12px 45px #0006; }
+.kb-capacity-detail { padding:13px 0; border-top:1px solid rgba(150,140,130,.18); }
+.kb-capacity-detail > div:first-child { display:flex; justify-content:space-between; gap:12px; font-size:13px; }
+.kb-capacity-track { height:6px; margin:9px 0 4px; }
+.kb-capacity-detail small,.kb-capacity-detail p { font-size:12px; color:var(--text-muted,#aaa199); margin:4px 0; line-height:1.45; }

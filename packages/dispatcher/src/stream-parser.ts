@@ -9,7 +9,7 @@ export type StreamEvent =
       isError: boolean;
       content: unknown;
     }
-  | { kind: 'session'; sessionId: string; model: string | null }
+  | { kind: 'session'; sessionId: string; model: string | null; provider?: 'claude-code' | 'codex-cli' }
   | {
       kind: 'decision';
       question: string;

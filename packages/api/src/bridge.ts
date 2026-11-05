@@ -218,6 +218,8 @@ export type ProviderId =
   | 'acp';
 
 export interface CodexSubscriptionUsage {
+  resetCredits?: { availableCount: number; credits: Array<{id:string; expiresAt:number|null; status:string; resetType:string}> };
+
   checkedAt: string;
   ordinaryUsageAllowed: boolean | null;
   windows: Array<{ name: string; usedPercent: number; windowMinutes: number | null; resetsAt: number | null }>;
@@ -247,6 +249,7 @@ export interface ProviderSettingsPayload {
 }
 
 export interface ApiConnection {
+  balanceUpdatedAt?: string;
   organizationId?: string | null;
   workspaceId?: string | null;
   id: string;
@@ -280,7 +283,7 @@ export interface ApiConnection {
   billingStatus: string;
 }
 
-export type ApiConnectionInput = Omit<ApiConnection, 'organizationId' | 'workspaceId' | 'keyPreview' | 'models' | 'checkedAt' | 'status' | 'reportedSpend' | 'spendCheckedAt' | 'billingStatus'> & { apiKey?: string | undefined };
+export type ApiConnectionInput = Omit<ApiConnection, 'balanceUpdatedAt' | 'organizationId' | 'workspaceId' | 'keyPreview' | 'models' | 'checkedAt' | 'status' | 'reportedSpend' | 'spendCheckedAt' | 'billingStatus'> & { apiKey?: string | undefined };
 
 export interface AnthropicReporting {
   grantEstimates?: Array<{ connectionId: string; configKey: string; cycleStart: string; cycleEnd: string; useBy?: string; amount: number; spent: number | null; remaining: number | null; asOf: string | null; checkedAt: string; stale: boolean }>;
@@ -1537,3 +1540,21 @@ export interface ChatPostMessageResult {
 export type ChannelName = keyof BridgeChannels;
 export type ChannelArgs<C extends ChannelName> = BridgeChannels[C]['args'];
 export type ChannelResult<C extends ChannelName> = BridgeChannels[C]['result'];
+
+export interface RoutingConfig {
+  enabled: boolean;
+  maxRunUsd: number;
+  autoResets: boolean;
+  claudeResetExpiresAt: string | null;
+}
+export interface RoutingState {
+  config: RoutingConfig;
+  lastDecision: string | null;
+  lastReset: string | null;
+}
+export interface CapacityRow {
+  id: string; label: string; kind: 'subscription' | 'grant' | 'paygo' | 'unknown';
+  usedPercent: number | null; remaining: number | null; spent: number | null;
+  detail: string; available: boolean; resetsAt?: string | null;
+}
+export interface CapacitySnapshot { checkedAt: string; rows: CapacityRow[]; routing: RoutingState }

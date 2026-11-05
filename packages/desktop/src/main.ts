@@ -1,3 +1,7 @@
+import { startRoutedRun } from './automatic-routing.js';
+import { configureRoutingProviders, collectCapacity, invalidateCapacity } from './routing-capacity.js';
+import { routingState,saveRouting } from './routing-state.js';
+import { manageCodexResets, notifyClaudeReset } from './subscription-resets.js';
 import { getFundingAccounts, saveFundingAccount } from './account-funding.js';
 import { readClaudeSubscriptionUsage } from '@kanbots/api';
 import { getOpenAIReporting, updateOpenAIReporting } from './openai-reporting.js';
@@ -583,6 +587,7 @@ async function openWorkspaceInternal(repoPath: string): Promise<ActiveWorkspaceI
   const curator = createCurator({ store, cwd: gitRoot });
 
   const rawSupervisor = await createSupervisor({
+    startAgentRun: startRoutedRun,
     store,
     providerConfig: getAppStore,
     repoPath: gitRoot,
@@ -1026,6 +1031,7 @@ async function ensureDeviceChat(): Promise<{
   }
   const store = openStore({ path: deviceChatDbPath() });
   const supervisor = await createSupervisor({
+    startAgentRun: startRoutedRun,
     store,
     providerConfig: getAppStore,
     repoPath: resolveChatCwd,
@@ -1233,6 +1239,11 @@ function registerIpc(): void {
     };
   });
 
+  configureRoutingProviders(() => getAppStore().providers.list());
+  ipcMain.handle('kanbots:routing-state', () => routingState());
+  ipcMain.handle('kanbots:routing-save', (_event, config) => { const state=saveRouting(config); invalidateCapacity(); return state; });
+  ipcMain.handle('kanbots:capacity', async () => (await collectCapacity()).snapshot);
+  setInterval(() => { notifyClaudeReset(); if(getAppStore().providers.get('codex-cli')?.enabled) void manageCodexResets(false).catch(()=>{}); }, 60000).unref();
   ipcMain.handle('kanbots:claude-subscription-usage', () => readClaudeSubscriptionUsage());
   ipcMain.handle('kanbots:claude-auth-status', async (): Promise<{ authed: boolean }> => {
     return { authed: await isClaudeAuthenticated() };
@@ -2115,6 +2126,7 @@ function buildChatToolRuntime(args: {
     prepareForRun: async ({ provider }) => {
       const token = toolBridge.issueToken();
       const env = {
+        KANBOTS_MCP_ENTRY: mcpServerEntry,
         KANBOTS_TOOL_BRIDGE_URL: toolBridge.baseUrl(),
         KANBOTS_TOOL_BRIDGE_TOKEN: token,
       };
@@ -2189,7 +2201,9 @@ if (process.platform === 'darwin') {
   ].filter(Boolean).join(delimiter);
 }
 
-void app.whenReady().then(async () => {
+const ownsLocalInstance = app.requestSingleInstanceLock();
+if (!ownsLocalInstance) app.quit();
+if (ownsLocalInstance) void app.whenReady().then(async () => {
   Menu.setApplicationMenu(null);
   registerIpc();
   await createWindow();
