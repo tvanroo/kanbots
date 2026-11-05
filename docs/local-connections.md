@@ -31,3 +31,14 @@ Official sources checked 2026-11-05:
 - https://developers.openai.com/api/docs/guides/chatgpt-api-credits
 
 Validation: TypeScript and production build; browser preview with synthetic data for invalid-key focus, name-free save, automatic collapse, unchanged disabled Save; UTC/Pacific/half-hour offset/DST-gap conversion checks; mocked Electron reporting checks for GET-only requests, cents-to-USD conversion, unknown freshness, permission failures, and no token in persisted snapshots. Real Anthropic organization OAuth consent and report acceptance remain owner setup steps.
+
+
+## OpenAI reporting revision (1.1.5)
+
+OpenAI now has a dedicated organization reporting connection using a locally encrypted Admin API key, distinct from inference keys and ChatGPT subscription authentication. Its key preview is the first five and last five characters only. Read-only GET requests use the documented `/v1/organization/usage/completions` and `/v1/organization/costs` endpoints with pagination and a UTC calendar-month range. Input/output totals do not add cached tokens again. Reports expose their retrieval times and independent usage/cost availability. Failed refreshes retain prior readings with timestamps; replacing a key clears previous-account readings. Cost reports can cover services outside the token-usage report, and neither report establishes remaining credit or grant expiry.
+
+Codex subscription usage is read automatically through `account/rateLimits/read` during discovery with the existing ChatGPT login. Only quota windows, reset times, explicit ordinary-usage permission and credit summaries are returned to the renderer; account identifiers and other protocol payloads are excluded. Missing permission is unknown. Windows and credits are displayed separately and never summed. Credits have no assumed expiry. A quota-read failure does not discard the model catalogue.
+
+Verified on the local account: ChatGPT authentication, eight models, one reported quota window and one credit pool. No inference request was made. OpenAI organization reporting passed a temporary-profile mocked check for encryption, masking, pagination, token accounting, USD costs and independent failure handling; live Admin-key acceptance remains the owner's setup step.
+
+Source: https://developers.openai.com/cookbook/examples/completions_usage_api and the installed Codex app-server generated protocol. No ChatGPT OAuth path for OpenAI organization reporting was verified, so the UI does not imply that subscription sign-in grants it.

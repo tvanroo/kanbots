@@ -1,3 +1,4 @@
+import { getOpenAIReporting, updateOpenAIReporting } from './openai-reporting.js';
 import { getAnthropicReporting, updateAnthropicReporting } from './anthropic-reporting.js';
 import { getClaudeDetails } from './claude-auth.js';
 import { listApiConnections, saveApiConnection, refreshApiConnection, subscriptionPriorities, saveSubscriptionPriority } from './api-connections.js';
@@ -552,6 +553,7 @@ async function openWorkspaceInternal(repoPath: string): Promise<ActiveWorkspaceI
     hasCodexCredentials: isCodexAuthenticated,
     getCodexDetails, getClaudeDetails,
     getAnthropicReporting, updateAnthropicReporting,
+    getOpenAIReporting, updateOpenAIReporting,
     listApiConnections, saveApiConnection, refreshApiConnection, subscriptionPriorities, saveSubscriptionPriority,
   };
 

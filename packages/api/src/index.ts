@@ -137,6 +137,8 @@ export type {
   RecentActivityPayload,
   ProviderConfigPayload,
   ProviderId,
+  OpenAIReporting,
+  CodexSubscriptionUsage,
   AnthropicReporting,
   ApiConnection,
   ApiConnectionInput,

@@ -59,6 +59,8 @@ export type {
   PrCommentsListResult,
   ProviderConfigPayload,
   ProviderId,
+  OpenAIReporting,
+  CodexSubscriptionUsage,
   AnthropicReporting,
   ApiConnection,
   ApiConnectionInput,

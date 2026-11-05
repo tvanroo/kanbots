@@ -217,7 +217,16 @@ export type ProviderId =
   | 'qwen-cli'
   | 'acp';
 
+export interface CodexSubscriptionUsage {
+  checkedAt: string;
+  ordinaryUsageAllowed: boolean | null;
+  windows: Array<{ name: string; usedPercent: number; windowMinutes: number | null; resetsAt: number | null }>;
+  credits: Array<{ name: string; balance: string | null; unlimited: boolean }>;
+}
+
 export interface ProviderConfigPayload {
+  subscriptionUsage?: CodexSubscriptionUsage;
+  subscriptionUsageError?: string;
   priority?: number;
   authenticationLabel?: string;
   models?: Array<{ id: string; label: string }>;
@@ -278,7 +287,25 @@ export interface AnthropicReporting {
   costAsOf?: string | null;
 }
 
+export interface OpenAIReporting {
+  connected: boolean;
+  status: string;
+  keyPreview?: string;
+  checkedAt?: string;
+  usageAvailable?: boolean;
+  costsAvailable?: boolean;
+  inputTokens?: number;
+  outputTokens?: number;
+  requests?: number;
+  costUsd?: number;
+  usageRetrievedAt?: string;
+  costsRetrievedAt?: string;
+  periodStart?: string;
+  costPeriodStart?: string;
+}
+
 export interface ProvidersPayload {
+  openaiReporting?: OpenAIReporting;
   anthropicReporting?: AnthropicReporting;
   apiConnections?: ApiConnection[];
   providers: ProviderConfigPayload[];
@@ -290,6 +317,7 @@ export interface ProvidersPayload {
 
 export interface ProviderSaveInput {
   reportingAction?: 'connect' | 'refresh';
+  reportingKey?: string;
   priority?: number;
   connection?: ApiConnectionInput;
   refreshConnectionId?: string;

@@ -1,3 +1,4 @@
+import { getOpenAIReporting, updateOpenAIReporting } from './openai-reporting.js';
 import { getAnthropicReporting, updateAnthropicReporting } from './anthropic-reporting.js';
 import { getClaudeDetails } from './claude-auth.js';
 import { listApiConnections, saveApiConnection, refreshApiConnection, subscriptionPriorities, saveSubscriptionPriority } from './api-connections.js';
@@ -43,6 +44,7 @@ export function registerProvidersIpc(): void {
     hasCodexCredentials: isCodexAuthenticated,
     getCodexDetails, getClaudeDetails,
     getAnthropicReporting, updateAnthropicReporting,
+    getOpenAIReporting, updateOpenAIReporting,
     listApiConnections, saveApiConnection, refreshApiConnection, subscriptionPriorities, saveSubscriptionPriority,
   };
   const deps: ProvidersHandlerDeps = {

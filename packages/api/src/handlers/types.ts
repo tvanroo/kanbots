@@ -33,6 +33,8 @@ export interface SentryRuntime {
 }
 
 export interface ProvidersRuntime {
+  getOpenAIReporting?(): import('../bridge.js').OpenAIReporting;
+  updateOpenAIReporting?(action: 'connect' | 'refresh', apiKey?: string): Promise<void>;
   getAnthropicReporting?(): import('../bridge.js').AnthropicReporting;
   updateAnthropicReporting?(action: 'connect' | 'refresh'): Promise<void>;
   getClaudeDetails?(): Promise<{ hasKey: boolean; authenticationLabel: string }>;
@@ -47,7 +49,7 @@ export interface ProvidersRuntime {
   /** True if Claude Code CLI OAuth credentials are present on disk. */
   hasClaudeCodeCredentials(): boolean | Promise<boolean>;
   hasCodexCredentials?(): Promise<boolean>;
-  getCodexDetails?(): Promise<{ hasKey: boolean; authenticationLabel: string; models: Array<{ id: string; label: string }>; catalogueError?: string }>;
+  getCodexDetails?(): Promise<{ subscriptionUsage?: import('../bridge.js').CodexSubscriptionUsage; subscriptionUsageError?: string; hasKey: boolean; authenticationLabel: string; models: Array<{ id: string; label: string }>; catalogueError?: string }>;
 }
 
 export interface ChatToolRuntime {

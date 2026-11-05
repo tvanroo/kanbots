@@ -1,6 +1,9 @@
+import type { CodexSubscriptionUsage } from '@kanbots/api';
 import { spawn } from 'node:child_process';
 
 export interface CodexDetails {
+  subscriptionUsage?: CodexSubscriptionUsage;
+  subscriptionUsageError?: string;
   hasKey: boolean;
   authenticationLabel: string;
   models: Array<{ id: string; label: string }>;
@@ -63,6 +66,23 @@ export async function getCodexDetails(): Promise<CodexDetails> {
       }
       cursor = page.nextCursor ?? null;
     } while (cursor);
+    if (account?.type === 'chatgpt') {
+      try {
+        const usage = await call('account/rateLimits/read', {});
+        const snapshots = usage.rateLimitsByLimitId ? Object.values(usage.rateLimitsByLimitId) : [usage.rateLimits];
+        const windows: CodexSubscriptionUsage['windows'] = [];
+        const credits: CodexSubscriptionUsage['credits'] = [];
+        for (const snapshot of snapshots as any[]) {
+          if (!snapshot) continue;
+          const name = typeof snapshot.limitName === 'string' ? snapshot.limitName : typeof snapshot.limitId === 'string' ? snapshot.limitId : 'Codex';
+          for (const window of [snapshot.primary, snapshot.secondary]) if (window && typeof window.usedPercent === 'number' && Number.isFinite(window.usedPercent)) {
+            windows.push({ name, usedPercent: window.usedPercent, windowMinutes: typeof window.windowDurationMins === 'number' ? window.windowDurationMins : null, resetsAt: typeof window.resetsAt === 'number' ? window.resetsAt : null });
+          }
+          if (snapshot.credits) credits.push({ name, balance: typeof snapshot.credits.balance === 'string' ? snapshot.credits.balance : null, unlimited: snapshot.credits.unlimited === true });
+        }
+        details.subscriptionUsage = { checkedAt: new Date().toISOString(), ordinaryUsageAllowed: typeof usage.ordinaryUsageAllowed === 'boolean' ? usage.ordinaryUsageAllowed : null, windows, credits };
+      } catch { details.subscriptionUsageError = 'Subscription usage could not be read from Codex. Try Refresh again.'; }
+    }
   } catch {
     details.catalogueError = 'Could not load models from Codex. Check that the CLI is up to date and signed in, then refresh.';
   } finally {

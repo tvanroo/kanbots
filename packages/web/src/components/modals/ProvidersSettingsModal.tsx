@@ -1,3 +1,4 @@
+import { OpenAIReportingPanel, CodexUsagePanel } from './OpenAIReportingPanel.js';
 import { AnthropicReportingPanel } from './AnthropicReportingPanel.js';
 import { ApiConnections } from './ApiConnections.js';
 import { useEffect, useMemo, useState, type ChangeEvent, type MouseEvent } from 'react';
@@ -428,6 +429,7 @@ export function ProvidersSettingsModal({ onClose }: ProvidersSettingsModalProps)
                     <div key={spec.id}>
                       {spec.id === 'codex-cli' || spec.id === 'claude-code' ? <h3>{spec.id === 'codex-cli' ? 'OpenAI' : 'Anthropic'}</h3> : null}
                       <ProviderSection spec={spec} config={cfg} onChanged={(next) => setPayload(next)} />
+                      {spec.id === 'codex-cli' ? <OpenAIReportingPanel report={payload.openaiReporting} onChanged={setPayload} /> : null}
                       {spec.id === 'claude-code' ? <AnthropicReportingPanel report={payload.anthropicReporting} onChanged={setPayload} /> : null}
                       {spec.id === 'codex-cli' || spec.id === 'claude-code' ? <ApiConnections provider={spec.id === 'codex-cli' ? 'openai' : 'anthropic'} connections={payload.apiConnections ?? []} onChanged={setPayload} /> : null}
                     </div>
@@ -566,6 +568,7 @@ function ProviderSection({ spec, config, onChanged }: SectionProps) {
         {config.hasKey ? <span className="kb-provider-badge">configured</span> : null}
       </header>
       <p className="kb-provider-desc">{spec.description}</p>
+      {spec.id === 'codex-cli' ? <CodexUsagePanel usage={config.subscriptionUsage} error={config.subscriptionUsageError} /> : null}
 
       <label className="kb-sentry-row kb-sentry-toggle">
         <input
@@ -627,7 +630,7 @@ function ProviderSection({ spec, config, onChanged }: SectionProps) {
 
       {spec.id === 'codex-cli' ? <p className="kb-provider-desc">
         {config.catalogueError ?? 'Models supplied by your installed Codex CLI and account.'}
-        {' '}<button type="button" className="kb-btn" onClick={() => void api.getProviders().then(onChanged).catch(() => setLocalError('Could not refresh providers.'))}>Refresh models</button>
+        {' '}<button type="button" className="kb-btn" onClick={() => void api.getProviders().then(onChanged).catch(() => setLocalError('Could not refresh providers.'))}>Refresh models &amp; usage</button>
       </p> : null}
       <div className="kb-provider-actions">
         <button
