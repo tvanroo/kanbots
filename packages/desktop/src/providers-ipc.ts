@@ -1,3 +1,6 @@
+import { getClaudeDetails } from './claude-auth.js';
+import { listApiConnections, saveApiConnection, refreshApiConnection, subscriptionPriorities, saveSubscriptionPriority } from './api-connections.js';
+import { getCodexDetails } from './codex-catalogue.js';
 import { join } from 'node:path';
 import { app, ipcMain } from 'electron';
 import {
@@ -37,6 +40,8 @@ export function registerProvidersIpc(): void {
     safeStorageAvailable,
     hasClaudeCodeCredentials: isClaudeAuthenticated,
     hasCodexCredentials: isCodexAuthenticated,
+    getCodexDetails, getClaudeDetails,
+    listApiConnections, saveApiConnection, refreshApiConnection, subscriptionPriorities, saveSubscriptionPriority,
   };
   const deps: ProvidersHandlerDeps = {
     get store() {

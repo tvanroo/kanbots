@@ -33,10 +33,19 @@ export interface SentryRuntime {
 }
 
 export interface ProvidersRuntime {
+  getClaudeDetails?(): Promise<{ hasKey: boolean; authenticationLabel: string }>;
+  subscriptionPriorities?(): Record<string, number>;
+  saveSubscriptionPriority?(id: string, priority: number): void;
+
+  listApiConnections?(): import('../bridge.js').ApiConnection[];
+  saveApiConnection?(input: import('../bridge.js').ApiConnectionInput): Promise<void>;
+  refreshApiConnection?(id: string): Promise<void>;
+
   safeStorageAvailable(): boolean;
   /** True if Claude Code CLI OAuth credentials are present on disk. */
   hasClaudeCodeCredentials(): boolean | Promise<boolean>;
   hasCodexCredentials?(): Promise<boolean>;
+  getCodexDetails?(): Promise<{ hasKey: boolean; authenticationLabel: string; models: Array<{ id: string; label: string }>; catalogueError?: string }>;
 }
 
 export interface ChatToolRuntime {

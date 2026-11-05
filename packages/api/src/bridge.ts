@@ -218,6 +218,10 @@ export type ProviderId =
   | 'acp';
 
 export interface ProviderConfigPayload {
+  priority?: number;
+  authenticationLabel?: string;
+  models?: Array<{ id: string; label: string }>;
+  catalogueError?: string;
   id: ProviderId;
   enabled: boolean;
   hasKey: boolean;
@@ -232,7 +236,34 @@ export interface ProviderSettingsPayload {
   defaultModel: string | null;
 }
 
+export interface ApiConnection {
+  id: string;
+  provider: 'openai' | 'anthropic';
+  name: string;
+  enabled: boolean;
+  priority: number;
+  keyPreview: string;
+  funding: 'paid' | 'grant' | 'subscription-credit';
+  budget: number | null;
+  remaining: number | null;
+  expiresAt: string | null;
+  renewal: 'none' | 'weekly' | 'monthly' | 'yearly';
+  renewsAt: string | null;
+  expired: boolean;
+  pool: string;
+  defaultModel: string | null;
+  models: Array<{ id: string; label: string }>;
+  checkedAt: string | null;
+  status: string;
+  reportedSpend: number | null;
+  spendCheckedAt: string | null;
+  billingStatus: string;
+}
+
+export type ApiConnectionInput = Omit<ApiConnection, 'keyPreview' | 'models' | 'checkedAt' | 'status' | 'reportedSpend' | 'spendCheckedAt' | 'billingStatus'> & { apiKey?: string | undefined };
+
 export interface ProvidersPayload {
+  apiConnections?: ApiConnection[];
   providers: ProviderConfigPayload[];
   settings: ProviderSettingsPayload;
   safeStorageAvailable: boolean;
@@ -241,6 +272,9 @@ export interface ProvidersPayload {
 }
 
 export interface ProviderSaveInput {
+  priority?: number;
+  connection?: ApiConnectionInput;
+  refreshConnectionId?: string;
   id: ProviderId;
   enabled?: boolean;
   defaultModel?: string | null;

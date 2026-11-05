@@ -2,18 +2,20 @@ import { execFile, spawn, type ChildProcess } from 'node:child_process';
 
 let login: ChildProcess | undefined;
 
-export function isClaudeAuthenticated(): Promise<boolean> {
+export function getClaudeDetails(): Promise<{ hasKey: boolean; authenticationLabel: string }> {
   return new Promise((resolve) => {
     execFile('claude', ['auth', 'status', '--json'], { timeout: 5000 }, (error, stdout) => {
-      if (error) return resolve(false);
       try {
-        const status = JSON.parse(stdout) as { loggedIn?: boolean };
-        resolve(status.loggedIn === true);
-      } catch {
-        resolve(false);
-      }
+        if (error) throw error;
+        const status = JSON.parse(stdout);
+        resolve({ hasKey: status.loggedIn === true, authenticationLabel: status.authMethod === 'claude.ai'
+          ? 'Claude subscription' : status.authMethod === 'api_key' ? 'Anthropic API billing' : 'Claude authentication detected — billing method unconfirmed' });
+      } catch { resolve({ hasKey: false, authenticationLabel: 'Claude signed out or unavailable' }); }
     });
   });
+}
+export async function isClaudeAuthenticated(): Promise<boolean> {
+  return (await getClaudeDetails()).hasKey;
 }
 
 export async function startClaudeLogin(): Promise<{ ok: true } | { ok: false; error: string }> {

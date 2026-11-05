@@ -1,3 +1,4 @@
+import { ApiConnections } from './ApiConnections.js';
 import { useEffect, useMemo, useState, type ChangeEvent, type MouseEvent } from 'react';
 import { api } from '../../api.js';
 import { getBridge } from '../../desktop-bridge.js';
@@ -37,7 +38,7 @@ const SPECS: ProviderSpec[] = [
   },
   {
     id: 'codex-cli',
-    name: 'Codex CLI (OpenAI)',
+    name: 'ChatGPT subscription (Codex)',
     description:
       'Run agent tasks through OpenAI’s codex CLI. Requires `codex` on PATH. Issue drafting and Sentry analysis still run on Claude.',
     externalAuth: true,
@@ -154,10 +155,7 @@ const MODELS_BY_PROVIDER: Record<ProviderId, Array<{ id: string; label: string }
     { id: 'claude-sonnet-4-6', label: 'Claude Sonnet 4.6' },
     { id: 'claude-haiku-4-5', label: 'Claude Haiku 4.5' },
   ],
-  'codex-cli': [
-    { id: 'gpt-5', label: 'GPT-5' },
-    { id: 'gpt-5-mini', label: 'GPT-5 mini' },
-  ],
+  'codex-cli': [],
   'gemini-cli': [
     { id: 'gemini-3-pro-preview', label: 'Gemini 3 Pro' },
     { id: 'gemini-3-flash-preview', label: 'Gemini 3 Flash' },
@@ -393,7 +391,7 @@ export function ProvidersSettingsModal({ onClose }: ProvidersSettingsModalProps)
                       })
                     }
                   >
-                    <option value="">(none)</option>
+                    <option value="">Use provider default</option>
                     {configuredProviders.map((p) => (
                       <option key={p.id} value={p.id}>
                         {SPECS.find((s) => s.id === p.id)?.name ?? p.id}
@@ -411,7 +409,7 @@ export function ProvidersSettingsModal({ onClose }: ProvidersSettingsModalProps)
                       }
                     >
                       <option value="">(provider default)</option>
-                      {(MODELS_BY_PROVIDER[payload.settings.defaultProvider] ?? []).map((m) => (
+                      {(payload.settings.defaultProvider === 'codex-cli' ? (payload.providers.find(p => p.id === 'codex-cli')?.models ?? []) : (MODELS_BY_PROVIDER[payload.settings.defaultProvider] ?? [])).map((m) => (
                         <option key={m.id} value={m.id}>
                           {m.label}
                         </option>
@@ -426,12 +424,11 @@ export function ProvidersSettingsModal({ onClose }: ProvidersSettingsModalProps)
                   const cfg = payload.providers.find((p) => p.id === spec.id);
                   if (!cfg) return null;
                   return (
-                    <ProviderSection
-                      key={spec.id}
-                      spec={spec}
-                      config={cfg}
-                      onChanged={(next) => setPayload(next)}
-                    />
+                    <div key={spec.id}>
+                      {spec.id === 'codex-cli' || spec.id === 'claude-code' ? <h3>{spec.id === 'codex-cli' ? 'OpenAI' : 'Anthropic'}</h3> : null}
+                      <ProviderSection spec={spec} config={cfg} onChanged={(next) => setPayload(next)} />
+                      {spec.id === 'codex-cli' || spec.id === 'claude-code' ? <ApiConnections provider={spec.id === 'codex-cli' ? 'openai' : 'anthropic'} connections={payload.apiConnections ?? []} onChanged={setPayload} /> : null}
+                    </div>
                   );
                 })}
               </div>
@@ -469,6 +466,7 @@ interface SectionProps {
 
 function ProviderSection({ spec, config, onChanged }: SectionProps) {
   const [enabled, setEnabled] = useState(config.enabled);
+  const [priority, setPriority] = useState(config.priority ?? 1);
   const [defaultModel, setDefaultModel] = useState(config.defaultModel ?? '');
   const [saving, setSaving] = useState(false);
   const [testState, setTestState] = useState<TestState>({ kind: 'idle' });
@@ -481,10 +479,11 @@ function ProviderSection({ spec, config, onChanged }: SectionProps) {
   }, [config.enabled, config.defaultModel]);
 
   const dirty = useMemo(() => {
+    if (priority !== (config.priority ?? 1)) return true;
     if (enabled !== config.enabled) return true;
     if ((defaultModel || null) !== (config.defaultModel ?? null)) return true;
     return false;
-  }, [enabled, defaultModel, config]);
+  }, [enabled, priority, defaultModel, config]);
 
   async function handleSave(): Promise<void> {
     if (saving) return;
@@ -494,6 +493,7 @@ function ProviderSection({ spec, config, onChanged }: SectionProps) {
       const next = await api.saveProvider({
         id: spec.id,
         enabled,
+        priority,
         defaultModel: defaultModel.trim() || null,
       });
       onChanged(next);
@@ -555,8 +555,10 @@ function ProviderSection({ spec, config, onChanged }: SectionProps) {
     cancelLoginForProvider(bridge, spec.id);
   }
 
-  const models = MODELS_BY_PROVIDER[spec.id] ?? [];
-  const signedInLabel = signedInLabelFor(spec.id);
+  const models = spec.id === 'codex-cli' ? (config.models ?? []) : MODELS_BY_PROVIDER[spec.id] ?? [];
+  const displayedModels = defaultModel && !models.some(m => m.id === defaultModel)
+    ? [...models, { id: defaultModel, label: `${defaultModel} (saved; unavailable in current catalogue)` }] : models;
+  const signedInLabel = config.authenticationLabel ?? signedInLabelFor(spec.id);
 
   return (
     <section className="kb-provider-section">
@@ -565,6 +567,7 @@ function ProviderSection({ spec, config, onChanged }: SectionProps) {
         {config.hasKey ? <span className="kb-provider-badge">configured</span> : null}
       </header>
       <p className="kb-provider-desc">{spec.description}</p>
+      {spec.id === 'codex-cli' || spec.id === 'claude-code' ? <label className="kb-sentry-row">Priority (saved preference)<input type="number" min="0" max="999" value={priority} onChange={e => setPriority(Number(e.target.value))} /></label> : null}
 
       <label className="kb-sentry-row kb-sentry-toggle">
         <input
@@ -615,8 +618,8 @@ function ProviderSection({ spec, config, onChanged }: SectionProps) {
           value={defaultModel}
           onChange={(e: ChangeEvent<HTMLSelectElement>) => setDefaultModel(e.target.value)}
         >
-          <option value="">(none)</option>
-          {models.map((m) => (
+          <option value="">Use provider default</option>
+          {displayedModels.map((m) => (
             <option key={m.id} value={m.id}>
               {m.label}
             </option>
@@ -624,6 +627,10 @@ function ProviderSection({ spec, config, onChanged }: SectionProps) {
         </select>
       </label>
 
+      {spec.id === 'codex-cli' ? <p className="kb-provider-desc">
+        {config.catalogueError ?? 'Models supplied by your installed Codex CLI and account.'}
+        {' '}<button type="button" className="kb-btn" onClick={() => void api.getProviders().then(onChanged).catch(() => setLocalError('Could not refresh providers.'))}>Refresh models</button>
+      </p> : null}
       <div className="kb-provider-actions">
         <button
           type="button"

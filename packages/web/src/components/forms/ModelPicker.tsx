@@ -15,10 +15,7 @@ const MODELS: Record<ProviderId, ModelEntry[]> = {
     { id: 'claude-sonnet-4-6', label: 'Claude Sonnet 4.6' },
     { id: 'claude-haiku-4-5', label: 'Claude Haiku 4.5' },
   ],
-  'codex-cli': [
-    { id: 'gpt-5', label: 'GPT-5' },
-    { id: 'gpt-5-mini', label: 'GPT-5 mini' },
-  ],
+  'codex-cli': [],
   'gemini-cli': [
     { id: 'gemini-3-pro-preview', label: 'Gemini 3 Pro' },
     { id: 'gemini-3-flash-preview', label: 'Gemini 3 Flash' },
@@ -98,7 +95,7 @@ export function ModelPicker({ value, onChange, className, agentRunsOnly }: Model
             p.id === 'acp'
           : true,
       )
-      .map((p) => ({ provider: p.id, models: MODELS[p.id] ?? [] }));
+      .map((p) => ({ provider: p.id, models: p.id === 'codex-cli' ? (p.models ?? []) : MODELS[p.id] ?? [] }));
   }, [providers, agentRunsOnly]);
 
   // Auto-select first option if value is unset and options become available.

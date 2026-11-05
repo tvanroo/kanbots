@@ -1,0 +1,107 @@
+import { app, safeStorage } from 'electron';
+import { existsSync, readFileSync, writeFileSync, renameSync } from 'node:fs';
+import { join } from 'node:path';
+import type { ApiConnection, ApiConnectionInput } from '@kanbots/api';
+
+type StoredConnection = ApiConnection & { encryptedKey: string };
+const file = () => join(app.getPath('userData'), 'api-connections.json');
+function read(): StoredConnection[] {
+  if (!existsSync(file())) return [];
+  try { return JSON.parse(readFileSync(file(), 'utf8')) as StoredConnection[]; }
+  catch { throw new Error('Could not read saved API connections. The existing file has been preserved.'); }
+}
+function write(rows: StoredConnection[]): void {
+  writeFileSync(file() + '.tmp', JSON.stringify(rows), { mode: 0o600 });
+  renameSync(file() + '.tmp', file());
+}
+export function listApiConnections(): ApiConnection[] {
+  return read().map(({ encryptedKey: _key, ...metadata }) => metadata).sort((a, b) => a.priority - b.priority);
+}
+export async function saveApiConnection(input: ApiConnectionInput): Promise<void> {
+  const rows = read();
+  const previous = rows.find(row => row.id === input.id);
+  if (previous && previous.provider !== input.provider) throw new Error('A connection cannot change provider.');
+  const { apiKey, ...metadata } = input;
+  if (!previous && !apiKey) throw new Error('Paste an API key to create this connection.');
+  if (apiKey && !safeStorage.isEncryptionAvailable()) throw new Error('Encrypted storage is unavailable. The API key was not saved.');
+  const row: StoredConnection = {
+    models: [], checkedAt: null, status: 'Not checked', reportedSpend: null, spendCheckedAt: null,
+    billingStatus: 'Not reported. Budget and credit fields are user-entered.',
+    encryptedKey: '', keyPreview: '', ...previous, ...metadata,
+  };
+  if (apiKey) {
+    row.encryptedKey = safeStorage.encryptString(apiKey).toString('base64');
+    row.keyPreview = `${apiKey.slice(0, 5)}••••••${apiKey.slice(-5)}`;
+    row.models = []; row.checkedAt = null; row.status = 'Not checked';
+    row.reportedSpend = null; row.spendCheckedAt = null;
+    row.billingStatus = 'Not reported. Budget and credit fields are user-entered.';
+  }
+  write([...rows.filter(item => item.id !== row.id), row]);
+}
+export async function refreshApiConnection(id: string): Promise<void> {
+  const row = read().find(item => item.id === id);
+  if (!row) throw new Error('Connection not found.');
+  const encryptedKey = row.encryptedKey;
+  let key: string;
+  try { key = safeStorage.decryptString(Buffer.from(encryptedKey, 'base64')); }
+  catch { throw new Error('The saved key could not be unlocked on this Mac. Paste it again to replace it.'); }
+  const headers: Record<string, string> = row.provider === 'openai'
+    ? { Authorization: `Bearer ${key}` }
+    : { 'x-api-key': key, 'anthropic-version': '2023-06-01' };
+  const base = row.provider === 'openai' ? 'https://api.openai.com' : 'https://api.anthropic.com';
+  const result: Partial<StoredConnection> = { checkedAt: new Date().toISOString() };
+  try {
+    const models: ApiConnection['models'] = [];
+    let after: string | undefined;
+    do {
+      const response = await fetch(`${base}/v1/models${after ? `?after_id=${encodeURIComponent(after)}` : ''}`, { headers, signal: AbortSignal.timeout(10000) });
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      const data = await response.json() as { data: Array<{ id: string; display_name?: string }>; has_more?: boolean; last_id?: string };
+      for (const model of data.data) models.push({ id: model.id, label: model.display_name ?? model.id });
+      after = data.has_more ? data.last_id : undefined;
+    } while (after);
+    result.models = models;
+    result.status = 'Connected — models refreshed';
+  } catch {
+    result.status = 'Could not refresh models. Check the key and network connection. Saved models may be stale.';
+  }
+  // Billing privileges are separate from inference access. Never imply that
+  // historical spend is a credit balance, or overwrite user-entered grants.
+  try {
+    const start = new Date(); start.setUTCDate(1); start.setUTCHours(0, 0, 0, 0);
+    let total = 0;
+    let next: string | undefined;
+    do {
+      const path = row.provider === 'openai'
+        ? `/v1/organization/costs?start_time=${Math.floor(start.getTime() / 1000)}&limit=31${next ? `&page=${encodeURIComponent(next)}` : ''}`
+        : `/v1/organizations/cost_report?starting_at=${encodeURIComponent(start.toISOString())}&limit=31${next ? `&page=${encodeURIComponent(next)}` : ''}`;
+      const response = await fetch(base + path, { headers, signal: AbortSignal.timeout(10000) });
+      if (!response.ok) throw new Error('Billing access unavailable');
+      const data = await response.json() as any;
+      if (!Array.isArray(data.data)) throw new Error('Invalid cost response');
+      for (const bucket of data.data) for (const item of bucket.results ?? []) {
+        const currency = row.provider === 'openai' ? item.amount?.currency : item.currency;
+        const amount = Number(row.provider === 'openai' ? item.amount?.value : item.amount);
+        if (String(currency).toLowerCase() !== 'usd' || !Number.isFinite(amount)) throw new Error('Unknown billing units');
+        total += row.provider === 'anthropic' ? amount / 100 : amount;
+      }
+      next = data.has_more ? data.next_page : undefined;
+    } while (next);
+    result.reportedSpend = total;
+    result.spendCheckedAt = new Date().toISOString();
+    result.billingStatus = 'Provider-reported organization spend this UTC calendar month; shared across keys, not a remaining balance.';
+  } catch {
+    result.billingStatus = 'Billing not available with this key. Organization billing permissions may be required. Enter budget, balance, expiry, and renewal below.';
+  }
+  const rows = read();
+  // A slow refresh must not overwrite a newly replaced key or edited settings.
+  write(rows.map(item => item.id === id && item.encryptedKey === encryptedKey ? { ...item, ...result } : item));
+}
+
+export function subscriptionPriorities(): Record<string, number> {
+  const path = join(app.getPath('userData'), 'subscription-priorities.json');
+  return existsSync(path) ? JSON.parse(readFileSync(path, 'utf8')) : {};
+}
+export function saveSubscriptionPriority(id: string, priority: number): void {
+  writeFileSync(join(app.getPath('userData'), 'subscription-priorities.json'), JSON.stringify({ ...subscriptionPriorities(), [id]: priority }), { mode: 0o600 });
+}

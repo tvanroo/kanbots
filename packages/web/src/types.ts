@@ -59,6 +59,8 @@ export type {
   PrCommentsListResult,
   ProviderConfigPayload,
   ProviderId,
+  ApiConnection,
+  ApiConnectionInput,
   ProviderSaveInput,
   ProviderSettingsInput,
   ProviderSettingsPayload,

@@ -37,9 +37,23 @@ const PROVIDER_ID_SCHEMA = z.enum([
   'acp',
 ]);
 
+const connectionSchema = z.object({
+  id: z.string().uuid(), provider: z.enum(['openai', 'anthropic']), name: z.string().trim().min(1).max(100),
+  enabled: z.boolean(), priority: z.number().int().min(0).max(999),
+  apiKey: z.string().trim().min(11).max(2000).optional(),
+  funding: z.enum(['paid', 'grant', 'subscription-credit']),
+  budget: z.number().nonnegative().nullable(), remaining: z.number().nonnegative().nullable(),
+  expiresAt: z.string().datetime().nullable(), renewal: z.enum(['none', 'weekly', 'monthly', 'yearly']),
+  renewsAt: z.string().datetime().nullable(), expired: z.boolean(), pool: z.string().max(120),
+  defaultModel: z.string().max(120).nullable(),
+}).strict();
+
 const saveSchema = z
   .object({
     id: PROVIDER_ID_SCHEMA,
+    priority: z.number().int().min(0).max(999).optional(),
+    connection: connectionSchema.optional(),
+    refreshConnectionId: z.string().uuid().optional(),
     enabled: z.boolean().optional(),
     defaultModel: z.string().min(1).max(120).nullable().optional(),
     apiKey: z.string().min(1).max(2_000).nullable().optional(),
@@ -70,6 +84,12 @@ export async function save(
 ): Promise<ProvidersPayload> {
   const parsed = parseArgs(saveSchema, args);
   const id = parsed.id as ProviderId;
+  if (parsed.connection || parsed.refreshConnectionId) {
+    if (!deps.providers.saveApiConnection || !deps.providers.refreshApiConnection) throw badRequest('API connections require the desktop app.');
+    if (parsed.connection) await deps.providers.saveApiConnection(parsed.connection);
+    if (parsed.refreshConnectionId) await deps.providers.refreshApiConnection(parsed.refreshConnectionId);
+    return readPayload(deps);
+  }
 
   // All supported providers manage their own credentials externally.
   // The app never stores API keys — each CLI either drives its own OAuth
@@ -80,6 +100,7 @@ export async function save(
     );
   }
 
+  if (parsed.priority !== undefined) deps.providers.saveSubscriptionPriority?.(id, parsed.priority);
   const patch: Parameters<typeof deps.store.providers.update>[1] = {};
   if (parsed.enabled !== undefined) patch.enabled = parsed.enabled;
   if (parsed.defaultModel !== undefined) patch.defaultModel = parsed.defaultModel;
@@ -143,10 +164,15 @@ async function readPayload(deps: ProvidersHandlerDeps): Promise<ProvidersPayload
   const rows = deps.store.providers.list();
   const settings = deps.store.providerSettings.get();
 
+  const [codex, claude] = await Promise.all([deps.providers.getCodexDetails?.(), deps.providers.getClaudeDetails?.()]);
+  const priorities = deps.providers.subscriptionPriorities?.() ?? {};
   const providers = await Promise.all(rows.map(async (row) => ({
     id: row.id,
+    priority: priorities[row.id] ?? 1,
     enabled: row.enabled,
-    hasKey: await detectProviderCredentials(row.id, deps),
+    hasKey: row.id === 'codex-cli' && codex ? codex.hasKey : await detectProviderCredentials(row.id, deps),
+    ...(row.id === 'codex-cli' && codex ? codex : {}),
+    ...(row.id === 'claude-code' && claude ? claude : {}),
     defaultModel: row.defaultModel,
     keyEncryption: row.keyEncryption,
     lastValidatedAt: row.lastValidatedAt,
@@ -162,6 +188,7 @@ async function readPayload(deps: ProvidersHandlerDeps): Promise<ProvidersPayload
 
   return {
     providers,
+    apiConnections: deps.providers.listApiConnections?.() ?? [],
     settings: {
       defaultProvider: settings.defaultProvider,
       defaultModel: settings.defaultModel,

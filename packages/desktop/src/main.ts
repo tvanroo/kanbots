@@ -1,3 +1,6 @@
+import { getClaudeDetails } from './claude-auth.js';
+import { listApiConnections, saveApiConnection, refreshApiConnection, subscriptionPriorities, saveSubscriptionPriority } from './api-connections.js';
+import { getCodexDetails } from './codex-catalogue.js';
 import { existsSync } from 'node:fs';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
@@ -546,6 +549,8 @@ async function openWorkspaceInternal(repoPath: string): Promise<ActiveWorkspaceI
     safeStorageAvailable,
     hasClaudeCodeCredentials: isClaudeAuthenticated,
     hasCodexCredentials: isCodexAuthenticated,
+    getCodexDetails, getClaudeDetails,
+    listApiConnections, saveApiConnection, refreshApiConnection, subscriptionPriorities, saveSubscriptionPriority,
   };
 
   const containmentEnv = process.env.KANBOTS_CONTAINMENT_MODE;

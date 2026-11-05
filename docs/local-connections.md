@@ -1,0 +1,13 @@
+# Local provider connections (1.1.3)
+
+OpenAI and Anthropic each have a subscription section and separate API connection cards. The subscription labels are based on the official installed CLI's reported authentication method. Codex model selectors read `model/list` from its app server, including pagination. They do not fall back to the old GPT-5 list.
+
+API keys are pasted into the desktop UI and encrypted with Electron safeStorage in `Kanbots Local/api-connections.json` under Application Support. This is the owner's explicit app-local storage exception. No plaintext fallback is permitted. Payloads sent back to the renderer contain only the first five and last five characters of a saved key. Editing metadata retains the encrypted key unless a replacement is supplied. Reinstalling the same app identity preserves this file and the existing app store.
+
+Each API connection saves an enabled flag, priority, preferred model, funding type, amount, remaining balance, expiry, expired flag, renewal cadence/date, and shared-pool label. Unknown values remain empty. These are user-entered metadata, not live capacity estimates. Renewal dates do not automatically mint or reset credits.
+
+Refresh uses the provider's models API and attempts its organization cost report with the supplied key. Missing billing permissions do not prevent model discovery. Reported spend is organization-wide calendar-month USD spend and is never treated as remaining credit or subtracted from manually entered balances. Anthropic's legacy report excludes Priority Tier costs. A previous successful cost reading retains its timestamp if refresh fails. Grant expiration and credit balances currently require manual entry.
+
+This increment is connection setup and discovery. API connections are not yet execution routes; enabling them does not change task execution. Priorities are saved preferences and determine card order only. Automatic switching, budget enforcement, renewal scheduling, direct API agent execution, and grant optimization remain follow-up work. Subscription-granted API credits exclude Codex/Claude Code according to current provider documentation, so direct API execution must be implemented before claiming those credits are used by tasks.
+
+Validation: desktop/web TypeScript checks and production build; focused temporary-profile Electron test with synthetic keys and mocked provider responses covers encrypted storage, masked readback, metadata edits retaining keys, model discovery, billing permission denial, and separation of spend from balance. Codex discovery was checked against the local logged-in account without inference. Real API-key and billing acceptance is pending user configuration.
