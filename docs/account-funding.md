@@ -46,3 +46,17 @@ Future provider-ledger adapters must retain grant IDs, currencies, provider orga
 The primary entry point is now each API key's Payment control: pay-as-you-go, monthly grant, or other credit. Monthly grants store amount, next reset instant and display zone, rollover policy, and stop/pay-go after exhaustion. Unknown remaining balance stays unknown; entering an amount does not establish the remaining balance. Reset dates do not create credits automatically. Existing account-level pools remain accessible in a collapsed legacy section, without migration or duplicate balance creation. Verified organization IDs remain on keys for later shared-pool reconciliation.
 
 OpenAI and Anthropic key cards show reporting coverage separately from model access. These settings are persisted configuration, not an active API dispatch or spending enforcement path. A future router must classify an exhausted grant with pay-go fallback as paid capacity and re-rank against available subscription/grant capacity; stop must exclude it. Shared organization reports must not be subtracted independently from each key.
+
+## Anthropic monthly grant estimates (1.1.12)
+
+Per-key monthly grant setup accepts a monthly USD amount and subscription billing day (1–31). No billing day is guessed. The estimator clamps short months to their last day and uses 00:00 UTC as an explicitly disclosed convention. An optional first-grant timestamp excludes pre-enrollment spend; rollover grants are not estimated from one cycle. Existing organization OAuth reporting is reused, and organization identity must match the key. Refresh occurs after saving, via key Refresh, and every 15 minutes while settings are visible. Keys with the same cycle share one cost query per organization refresh.
+
+The cost query uses the cycle start and fixed current ending_at, all pages, and products messages_api, message_batches_api, claude_console and managed_agents_api. cost.amount is after discounts and before credits, in cents. The organization total includes other keys and workspaces, not just this app. Estimated remaining is max(0, monthly amount - eligible spend), assuming this grant was issued and no other overlapping grant changes allocation. It never overwrites a manual remaining balance. Null freshness, failed queries, wrong organizations, configuration changes, and past cycles cannot appear as a newly full grant. Old estimates are marked stale; data older than 24 hours is visibly stale. This does not implement routing or budget enforcement.
+
+Official research checked 2026-11-05:
+- https://support.claude.com/en/articles/17154008-monthly-api-credits-for-max-ultra-and-team-plans says credits expire at the end of the billing cycle and new credits arrive shortly after payment. It does not specify a universal cutoff time or guarantee midnight UTC.
+- https://platform.claude.com/docs/en/about-claude/api-credits-for-subscribers confirms no rollover, eligible products, and organization sharing.
+- https://platform.claude.com/docs/en/api/beta/organization/analytics/cost/list documents product filters, cents, pagination and date-range parameters.
+- https://platform.claude.com/docs/en/manage-claude/usage-cost-analytics-api documents data_refreshed_at and reporting delays up to 24 hours.
+
+No provider-confirmed exact time or grant issuance is claimed. Subscription billing-day input and the UTC convention are sufficient for an estimate, not a verified ledger or exact cutoff enforcement.

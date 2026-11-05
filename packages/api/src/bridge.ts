@@ -256,6 +256,8 @@ export interface ApiConnection {
   priority: number;
   keyPreview: string;
   funding: 'unknown' | 'paid' | 'grant' | 'subscription-credit';
+  grantBillingDay?: number | undefined;
+  grantFirstStart?: string | null | undefined;
   rollover?: boolean | undefined;
   afterGrant?: 'stop' | 'paygo' | undefined;
   budget: number | null;
@@ -281,6 +283,8 @@ export interface ApiConnection {
 export type ApiConnectionInput = Omit<ApiConnection, 'organizationId' | 'workspaceId' | 'keyPreview' | 'models' | 'checkedAt' | 'status' | 'reportedSpend' | 'spendCheckedAt' | 'billingStatus'> & { apiKey?: string | undefined };
 
 export interface AnthropicReporting {
+  grantEstimates?: Array<{ connectionId: string; configKey: string; cycleStart: string; cycleEnd: string; amount: number; spent: number | null; remaining: number | null; asOf: string | null; checkedAt: string; stale: boolean }>;
+
   organizationMismatch?: boolean;
   eligibility?: 'unknown' | 'supported' | 'denied';
   prerequisite?: 'ready' | 'missing' | 'manual';

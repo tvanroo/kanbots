@@ -1,3 +1,4 @@
+import { canEstimateGrant, estimateGrants, grantConfigKey } from './grant-estimate.js';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { createHash } from 'node:crypto';
 import { listApiConnections } from './api-connections.js';
@@ -25,7 +26,11 @@ export function getAnthropicReportingAccounts() {
     if (row.provider !== 'anthropic' || !row.organizationId) continue;
     groups.set(row.organizationId, [...(groups.get(row.organizationId) ?? []), row.name]);
   }
-  return [...groups].map(([organizationId, connectionNames]) => ({ organizationId, connectionNames, report: accountContext.run(organizationId, getAnthropicReporting) }));
+  return [...groups].map(([organizationId, connectionNames]) => ({ organizationId, connectionNames, report: accountContext.run(organizationId, () => {
+    const report = getAnthropicReporting();
+    report.grantEstimates = report.grantEstimates?.filter(estimate => listApiConnections().some(row => row.id === estimate.connectionId && row.organizationId === organizationId && canEstimateGrant(row) && grantConfigKey(row) === estimate.configKey)) ?? [];
+    return report;
+  }) }));
 }
 export function getAnthropicReporting(): AnthropicReporting {
   if (!existsSync(snapshotPath())) {
@@ -171,10 +176,11 @@ async function refreshReports(): Promise<void> {
       return { amount: refreshedAt ? amount : null, refreshedAt };
     };
     const [usage, cost] = await Promise.all([readReport('usage'), readReport('cost')]);
-    store({ eligibility: 'supported', prerequisite: 'ready', connected: true, status: 'Usage and costs connected. Reports may lag by up to 24 hours; credits and balances are separate.', organizationId: organization.id, organizationName: organization.name, checkedAt: new Date().toISOString(), tokens: usage.amount, costUsd: cost.amount, usageAsOf: usage.refreshedAt, costAsOf: cost.refreshedAt });
+    const grantEstimates = await estimateGrants(listApiConnections().filter(row => row.organizationId === organization.id), get);
+    store({ grantEstimates, eligibility: 'supported', prerequisite: 'ready', connected: true, status: 'Usage and costs connected. Reports may lag by up to 24 hours; credits and balances are separate.', organizationId: organization.id, organizationName: organization.name, checkedAt: new Date().toISOString(), tokens: usage.amount, costUsd: cost.amount, usageAsOf: usage.refreshedAt, costAsOf: cost.refreshedAt });
   } catch (error) {
     const reason = error instanceof Error ? error.message : '';
-    store({ ...getAnthropicReporting(), eligibility: reason === 'permission-denied' ? 'denied' : reason === 'authorization-failed' ? 'unknown' : getAnthropicReporting().eligibility ?? 'unknown', prerequisite: reason === 'missing-cli' ? 'missing' : 'ready', connected: authenticated && reason !== 'authorization-failed', status: reason === 'missing-cli'
+    store({ ...getAnthropicReporting(), grantEstimates: getAnthropicReporting().grantEstimates?.map(estimate => ({ ...estimate, stale: true })) ?? [], eligibility: reason === 'permission-denied' ? 'denied' : reason === 'authorization-failed' ? 'unknown' : getAnthropicReporting().eligibility ?? 'unknown', prerequisite: reason === 'missing-cli' ? 'missing' : 'ready', connected: authenticated && reason !== 'authorization-failed', status: reason === 'missing-cli'
       ? 'Install the official Anthropic ant CLI, then check connection.'
       : reason === 'authorization-failed' ? 'No active organization authorization found. Connect usage & costs to sign in.'
       : reason === 'permission-denied' ? 'Organization reporting is not available with this account’s current access. Personal Pro/Max subscriptions do not include this API; Console organizations require admin reporting permissions. Your subscription can still be used.'
