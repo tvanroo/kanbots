@@ -1,8 +1,14 @@
-import { useId, useState } from 'react';
+import { useEffect, useRef, useId, useState } from 'react';
 import { api } from '../../api.js';
 import type { OpenAIReporting, ProvidersPayload, CodexSubscriptionUsage } from '../../types.js';
 
 export function OpenAIReportingPanel({ report, onChanged }: { report: OpenAIReporting | undefined; onChanged: (payload: ProvidersPayload) => void }) {
+  const attemptedIdentity = useRef(false);
+  useEffect(() => {
+    if (!report?.keyPreview || report.organizationId !== undefined || attemptedIdentity.current) return;
+    attemptedIdentity.current = true;
+    void api.saveProvider({ id: 'codex-cli', reportingAction: 'refresh' }).then(onChanged).catch(() => {});
+  }, [report?.keyPreview, report?.organizationId]);
   const [key, setKey] = useState('');
   const [editing, setEditing] = useState(!report?.keyPreview);
   const [busy, setBusy] = useState(false);

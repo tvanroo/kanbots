@@ -294,6 +294,7 @@ export interface AnthropicReporting {
 }
 
 export interface OpenAIReporting {
+  organizationId?: string | null;
   connected: boolean;
   status: string;
   keyPreview?: string;
@@ -588,6 +589,10 @@ export interface CostUsageWindow {
 }
 
 export interface CostUsageResult {
+  checkedAt?: string;
+  stale?: boolean;
+  message?: string;
+  windows?: Array<CostUsageWindow & { id: string; label: string }>;
   fiveHour: CostUsageWindow | null;
   sevenDay: CostUsageWindow | null;
   // 'oauth' = live numbers, 'unauthorized' = token expired (relog required),

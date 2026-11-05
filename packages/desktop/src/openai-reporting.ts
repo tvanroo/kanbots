@@ -39,10 +39,14 @@ export async function updateOpenAIReporting(action: 'connect' | 'refresh', apiKe
       let page: string | undefined;
       let input = 0, output = 0, requests = 0, cost = 0;
       const seen = new Set<string>();
+      let organizationId: string | null = null;
       do {
         const endpoint = kind === 'usage' ? 'usage/completions' : 'costs';
         const response = await fetch(`https://api.openai.com/v1/organization/${endpoint}?start_time=${Math.floor(start.getTime() / 1000)}&end_time=${end}&bucket_width=1d&limit=31${page ? `&page=${encodeURIComponent(page)}` : ''}`, { headers, signal: AbortSignal.timeout(15000) });
         if (!response.ok) throw new Error(response.status === 401 || response.status === 403 ? 'permission' : 'unavailable');
+        const responseOrganization = response.headers.get('openai-organization');
+        if (organizationId && responseOrganization && organizationId !== responseOrganization) throw new Error('organization-mismatch');
+        organizationId = responseOrganization ?? organizationId;
         const data = await response.json() as any;
         if (!Array.isArray(data.data)) throw new Error('schema');
         for (const bucket of data.data) {
@@ -62,11 +66,11 @@ export async function updateOpenAIReporting(action: 'connect' | 'refresh', apiKe
         page = data.has_more ? data.next_page : undefined;
         if (page) seen.add(page);
       } while (page);
-      return { input, output, requests, cost };
+      return { input, output, requests, cost, organizationId };
     };
     const [usage, costs] = await Promise.allSettled([report('usage'), report('costs')]);
     const checkedAt = new Date().toISOString();
-    const result: Stored = { ...stored, connected: usage.status === 'fulfilled' && costs.status === 'fulfilled', checkedAt,
+    const result: Stored = { ...stored, organizationId: (usage.status === 'fulfilled' ? usage.value.organizationId : null) ?? (costs.status === 'fulfilled' ? costs.value.organizationId : null), connected: usage.status === 'fulfilled' && costs.status === 'fulfilled', checkedAt,
       usageAvailable: usage.status === 'fulfilled', costsAvailable: costs.status === 'fulfilled',
       status: usage.status === 'fulfilled' && costs.status === 'fulfilled'
         ? 'Organization usage and costs connected. Reports may lag; these are not credit balances.'

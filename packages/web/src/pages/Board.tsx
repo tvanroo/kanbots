@@ -645,6 +645,7 @@ export function Board({ onOpenDetail, onOpenCreate, onOpenPalette, onOpenStats }
         }}
       />
       <BoardUsageRow
+        stale={costUsage?.stale ?? false}
         fiveHour={costUsage?.fiveHour ?? null}
         sevenDay={costUsage?.sevenDay ?? null}
       />

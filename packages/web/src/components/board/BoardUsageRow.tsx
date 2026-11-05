@@ -6,6 +6,7 @@ export interface UsageWindow {
 export interface BoardUsageRowProps {
   fiveHour: UsageWindow | null;
   sevenDay: UsageWindow | null;
+  stale?: boolean;
 }
 
 /**
@@ -13,9 +14,10 @@ export interface BoardUsageRowProps {
  * local and cloud modes. Pass `null` for either window to show a placeholder
  * — used in cloud mode until the cost-today endpoint lands (phase 2).
  */
-export function BoardUsageRow({ fiveHour, sevenDay }: BoardUsageRowProps) {
+export function BoardUsageRow({ fiveHour, sevenDay, stale }: BoardUsageRowProps) {
   return (
     <div className="kb-usage-row">
+      <span className="kb-usage-label">Claude{stale ? ' · stale' : ''}</span>
       <UsageMeter label="5h" usage={fiveHour} />
       <UsageMeter label="7d" usage={sevenDay} />
     </div>
@@ -34,18 +36,19 @@ function UsageMeter({ label, usage }: { label: string; usage: UsageWindow | null
       </div>
     );
   }
+  if (usage.resetsAt && Date.parse(usage.resetsAt) <= Date.now()) return <div className="kb-usage-meter is-empty"><span className="kb-usage-label">{label}</span><span>Updating quota…</span></div>;
   const pct = Math.max(0, Math.min(1, usage.pct));
   const tone = pct >= 0.9 ? 'danger' : pct >= 0.7 ? 'warn' : 'ok';
-  const display = `${Math.round(pct * 100)}%`;
+  const display = `${Math.round((1 - pct) * 100)}% left`;
   const reset = usage.resetsAt ? formatResetCountdown(usage.resetsAt) : null;
   const title = usage.resetsAt
-    ? `${label} window · ${display} used · resets ${new Date(usage.resetsAt).toLocaleString()}`
-    : `${label} window · ${display} used`;
+    ? `${label} window · ${display} · resets ${new Date(usage.resetsAt).toLocaleString()}`
+    : `${label} window · ${display}`;
   return (
     <div className={`kb-usage-meter tone-${tone}`} title={title}>
       <span className="kb-usage-label">{label}</span>
       <span className="kb-usage-bar" aria-hidden>
-        <span className="kb-usage-bar-fill" style={{ width: `${pct * 100}%` }} />
+        <span className="kb-usage-bar-fill" style={{ width: `${(1 - pct) * 100}%` }} />
       </span>
       <span className="kb-usage-pct">{display}</span>
       {reset ? <span className="kb-usage-reset">Resets in {reset}</span> : null}

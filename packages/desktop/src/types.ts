@@ -111,6 +111,7 @@ export interface KanbotsBridge {
   minimizeWindow(): Promise<void>;
   toggleMaximizeWindow(): Promise<void>;
   closeWindow(): Promise<void>;
+  claudeSubscriptionUsage(): Promise<import('@kanbots/api').CostUsageResult>;
   claudeAuthStatus(): Promise<{ authed: boolean }>;
   claudeLoginStart(): Promise<{ ok: true } | { ok: false; error: string }>;
   claudeLoginCancel(): Promise<void>;

@@ -46,6 +46,7 @@ const api: KanbotsBridge = {
   toggleMaximizeWindow: () =>
     ipcRenderer.invoke('kanbots:window-toggle-maximize') as Promise<void>,
   closeWindow: () => ipcRenderer.invoke('kanbots:window-close') as Promise<void>,
+  claudeSubscriptionUsage: () => ipcRenderer.invoke('kanbots:claude-subscription-usage'),
   claudeAuthStatus: () =>
     ipcRenderer.invoke('kanbots:claude-auth-status') as Promise<{ authed: boolean }>,
   claudeLoginStart: (installIfMissing?: boolean) =>

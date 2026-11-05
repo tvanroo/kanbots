@@ -55,13 +55,14 @@ export async function refreshApiConnection(id: string): Promise<void> {
     ? { Authorization: `Bearer ${key}` }
     : { 'x-api-key': key, 'anthropic-version': '2023-06-01' };
   const base = row.provider === 'openai' ? 'https://api.openai.com' : 'https://api.anthropic.com';
-  const result: Partial<StoredConnection> = { checkedAt: new Date().toISOString(), ...(row.provider === 'anthropic' ? { organizationId: null, workspaceId: null } : {}) };
+  const result: Partial<StoredConnection> = { checkedAt: new Date().toISOString(), organizationId: null, workspaceId: null };
   try {
     const models: ApiConnection['models'] = [];
     let after: string | undefined;
     do {
       const response = await fetch(`${base}/v1/models${after ? `?after_id=${encodeURIComponent(after)}` : ''}`, { headers, signal: AbortSignal.timeout(10000) });
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      if (row.provider === 'openai') result.organizationId = response.headers.get('openai-organization');
       if (row.provider === 'anthropic') {
         // Only authenticated, provider-reported IDs may associate a key with reporting.
         result.organizationId = response.headers.get('anthropic-organization-id');

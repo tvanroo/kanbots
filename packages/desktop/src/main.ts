@@ -1,3 +1,4 @@
+import { readClaudeSubscriptionUsage } from '@kanbots/api';
 import { getOpenAIReporting, updateOpenAIReporting } from './openai-reporting.js';
 import { getAnthropicReporting, getAnthropicReportingAccounts, updateAnthropicReporting } from './anthropic-reporting.js';
 import { getClaudeDetails } from './claude-auth.js';
@@ -1230,6 +1231,7 @@ function registerIpc(): void {
     };
   });
 
+  ipcMain.handle('kanbots:claude-subscription-usage', () => readClaudeSubscriptionUsage());
   ipcMain.handle('kanbots:claude-auth-status', async (): Promise<{ authed: boolean }> => {
     return { authed: await isClaudeAuthenticated() };
   });

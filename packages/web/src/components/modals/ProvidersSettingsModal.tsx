@@ -1,3 +1,4 @@
+import { ClaudeUsagePanel } from './ClaudeUsagePanel.js';
 import { OpenAIReportingPanel, CodexUsagePanel } from './OpenAIReportingPanel.js';
 import { AnthropicReportingSetup } from './AnthropicReportingPanel.js';
 import { ApiConnections } from './ApiConnections.js';
@@ -447,7 +448,7 @@ export function ProvidersSettingsModal({ onClose }: ProvidersSettingsModalProps)
                       <ProviderSection spec={spec} config={cfg} onChanged={(next) => setPayload(next)} />
                       {spec.id === 'codex-cli' ? <OpenAIReportingPanel report={payload.openaiReporting} onChanged={setPayload} /> : null}
                       {spec.id === 'claude-code' ? <AnthropicReportingSetup payload={payload} onChanged={setPayload} /> : null}
-                      {spec.id === 'codex-cli' || spec.id === 'claude-code' ? <ApiConnections provider={spec.id === 'codex-cli' ? 'openai' : 'anthropic'} connections={payload.apiConnections ?? []} onChanged={setPayload} /> : null}
+                      {spec.id === 'codex-cli' || spec.id === 'claude-code' ? <ApiConnections provider={spec.id === 'codex-cli' ? 'openai' : 'anthropic'} connections={payload.apiConnections ?? []} openaiReport={payload.openaiReporting} onChanged={setPayload} /> : null}
                     </div>
                   );
                 })}
@@ -619,6 +620,7 @@ function ProviderSection({ spec, config, onChanged }: SectionProps) {
         {config.hasKey ? <span className="kb-provider-badge">configured</span> : null}
       </header>
       <p className="kb-provider-desc">{spec.description}</p>
+      {spec.id === 'claude-code' && config.hasKey && config.authenticationLabel === 'Claude subscription' ? <ClaudeUsagePanel /> : null}
       {spec.id === 'codex-cli' ? <CodexUsagePanel usage={config.subscriptionUsage} error={config.subscriptionUsageError} /> : null}
 
       <label className="kb-sentry-row kb-sentry-toggle">

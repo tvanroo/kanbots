@@ -1,23 +1,32 @@
 import { zonedInput, zonedIso } from './connection-time.js';
-import { useId, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useId, useRef, useState, type ReactNode } from 'react';
 import { api } from '../../api.js';
-import type { ApiConnection, ApiConnectionInput, ProvidersPayload } from '../../types.js';
+import type { ApiConnection, ApiConnectionInput, ProvidersPayload, OpenAIReporting } from '../../types.js';
 
-type Props = { provider: 'openai' | 'anthropic'; connections: ApiConnection[]; onChanged: (value: ProvidersPayload) => void };
+type Props = { provider: 'openai' | 'anthropic'; connections: ApiConnection[]; openaiReport?: OpenAIReporting | undefined; onChanged: (value: ProvidersPayload) => void };
 type Errors = Record<string, string>;
 type ExpirationMode = 'unknown' | 'never' | 'date';
 const providerName = (provider: Props['provider']) => provider === 'openai' ? 'OpenAI' : 'Anthropic';
 
-export function ApiConnections({ provider, connections, onChanged }: Props) {
+export function ApiConnections({ provider, connections, onChanged, openaiReport }: Props) {
   const [adding, setAdding] = useState(false);
+  const scanned = useRef(new Set<string>());
+  useEffect(() => {
+    if (provider !== 'openai') return;
+    const rows = connections.filter(row => row.provider === 'openai' && row.organizationId === undefined && !scanned.current.has(row.id));
+    for (const row of rows) scanned.current.add(row.id);
+    void (async () => { for (const row of rows) {
+      try { onChanged(await api.saveProvider({ id: 'codex-cli', refreshConnectionId: row.id })); } catch { /* Existing Refresh button can retry. */ }
+    } })();
+  }, [connections, provider]);
   return <div className="kb-api-connections">
     <div className="kb-api-heading"><h4>API connections</h4><span>Keys encrypted on this Mac</span></div>
     <p className="kb-provider-desc">Separate from your subscription. API task routing and budget enforcement are not enabled yet.</p>
-    {connections.filter(row => row.provider === provider).map(row => <ConnectionEditor key={row.id} initial={row} provider={provider} onChanged={onChanged} />)}
+    {connections.filter(row => row.provider === provider).map(row => <ConnectionEditor key={row.id} initial={row} provider={provider} openaiReport={openaiReport} onChanged={onChanged} />)}
     {adding ? <ConnectionEditor provider={provider} onChanged={value => { onChanged(value); setAdding(false); }} onCancel={() => setAdding(false)} /> : <button type="button" className="kb-btn" onClick={() => setAdding(true)}>Add API key</button>}
   </div>;
 }
-function ConnectionEditor({ provider, initial, onChanged, onCancel }: { provider: Props['provider']; initial?: ApiConnection; onChanged: Props['onChanged']; onCancel?: () => void }) {
+function ConnectionEditor({ provider, initial, onChanged, onCancel, openaiReport }: { openaiReport?: OpenAIReporting | undefined; provider: Props['provider']; initial?: ApiConnection; onChanged: Props['onChanged']; onCancel?: () => void }) {
   const [form, setForm] = useState<ApiConnectionInput>(() => ({
     id: initial?.id ?? crypto.randomUUID(), provider, name: initial?.name ?? '', enabled: initial?.enabled ?? true,
     priority: initial?.priority ?? 1, funding: initial?.funding ?? 'unknown', budget: initial?.budget ?? null,
@@ -128,13 +137,20 @@ function ConnectionEditor({ provider, initial, onChanged, onCancel }: { provider
     </>;
   }
   const expired = initial?.expired || (initial?.expiresAt && Date.parse(initial.expiresAt) <= Date.now()) || (initial?.keyExpiresAt && Date.parse(initial.keyExpiresAt) <= Date.now());
-  const status = !initial ? 'New connection' : !initial.enabled ? 'Disabled' : expired ? 'Expired' : initial.status.startsWith('Connected') ? 'Connected' : initial.checkedAt ? 'Needs attention' : 'Not checked';
+  const status = !initial ? 'New connection' : !initial.enabled ? 'Disabled' : expired ? 'Expired' : initial.status.startsWith('Connected') ? 'Models connected' : initial.checkedAt ? 'Needs attention' : 'Not checked';
+  const coverage = !initial || provider !== 'openai' ? null
+    : !openaiReport?.keyPreview ? 'Usage visibility: not connected. Connect an OpenAI Admin key above.'
+    : !initial.organizationId || !openaiReport.organizationId ? 'Usage visibility: account match not yet confirmed. Refresh this key and organization reports to check.'
+    : initial.organizationId !== openaiReport.organizationId ? 'Usage visibility: this key belongs to a different organization. It needs that organization’s reporting authorization.'
+    : openaiReport.usageAvailable && openaiReport.costsAvailable ? 'Usage visibility: covered by the connected organization reports. Totals cover the organization, not this key alone.'
+    : 'Usage visibility: organization matched, but reporting access needs attention. Refresh reports above.';
   return <div ref={root} className="kb-api-card">
     <div className="kb-api-card-head">
       <div className="kb-api-identity"><strong>{initial?.name ?? 'New API connection'}</strong>{initial ? <code>{initial.keyPreview}</code> : <span>Paste a key to discover available details.</span>}</div>
-      <span className={`kb-api-status${status === 'Connected' ? ' connected' : ''}`}>{status}</span>
+      <span className={`kb-api-status${status === 'Models connected' ? ' connected' : ''}`}>{status}</span>
       {initial ? <div className="kb-api-card-actions"><button type="button" className="kb-btn ghost" disabled={busy || dirty} onClick={() => void save(true)}>{busy ? 'Checking…' : 'Refresh'}</button>{!expanded ? <button type="button" className="kb-btn" onClick={() => setExpanded(true)}>Edit</button> : null}</div> : null}
     </div>
+    {coverage ? <p className="kb-provider-desc" role="status">{coverage}</p> : null}
     {initial && !expanded ? <div className="kb-api-summary">
       <span>{initial.models.length} models</span>
       <span>{expirationLabel(initial.expirationMode ?? (initial.expiresAt ? 'date' : 'unknown'), initial.expiresAt, 'Credit')}</span>
