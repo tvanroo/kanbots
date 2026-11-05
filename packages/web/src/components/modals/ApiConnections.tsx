@@ -20,17 +20,25 @@ function ConnectionEditor({ provider, initial, onChanged, onCancel }: { provider
     remaining: initial?.remaining ?? null, expiresAt: initial?.expiresAt ?? null, renewal: initial?.renewal ?? 'none',
     renewsAt: initial?.renewsAt ?? null, expired: initial?.expired ?? false, pool: initial?.pool ?? '', defaultModel: initial?.defaultModel ?? null,
   }));
+  const [savedForm, setSavedForm] = useState(form);
   const [key, setKey] = useState('');
+  const dirty = JSON.stringify(form) !== JSON.stringify(savedForm) || key.trim().length > 0;
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState('');
   const change = <K extends keyof ApiConnectionInput>(field: K, value: ApiConnectionInput[K]) => setForm(old => ({ ...old, [field]: value }));
   async function save(refresh = false) {
+    if (busy || (!dirty && !refresh)) return;
     setBusy(true); setMessage('');
     try {
-      let next = await api.saveProvider({ id: provider === 'openai' ? 'codex-cli' : 'claude-code', connection: { ...form, ...(key.trim() ? { apiKey: key.trim() } : {}) } });
-      setKey('');
-      if (refresh) next = await api.saveProvider({ id: provider === 'openai' ? 'codex-cli' : 'claude-code', refreshConnectionId: form.id });
-      onChanged(next); setMessage('Saved');
+      const providerId = provider === 'openai' ? 'codex-cli' : 'claude-code';
+      if (dirty) {
+        const saved = { ...form, name: form.name.trim() };
+        const next = await api.saveProvider({ id: providerId, connection: { ...saved, ...(key.trim() ? { apiKey: key.trim() } : {}) } });
+        setForm(saved); setSavedForm(saved); setKey('');
+        onChanged(next);
+      }
+      if (refresh) onChanged(await api.saveProvider({ id: providerId, refreshConnectionId: form.id }));
+      setMessage(refresh ? 'Refreshed' : 'Saved');
     } catch { setMessage('Could not save or refresh. Check the fields, encrypted storage, and connection.'); }
     finally { setBusy(false); }
   }
@@ -55,7 +63,7 @@ function ConnectionEditor({ provider, initial, onChanged, onCancel }: { provider
     <p className="kb-provider-desc">Budget, balance, expiry, renewal, and shared pool are user-entered. Leave unknown amounts or dates empty. Keys in the same organization may share one balance; they are not extra capacity.</p>
     {form.expired || (form.expiresAt && Date.parse(form.expiresAt) <= Date.now()) ? <p className="kb-sentry-warn">Expired</p> : null}
     {initial ? <><p>{initial.status}{initial.checkedAt ? ` · ${new Date(initial.checkedAt).toLocaleString()}` : ''}</p><p className="kb-provider-desc">{initial.billingStatus}</p>{initial.reportedSpend !== null ? <p>Reported organization spend: ${initial.reportedSpend.toFixed(2)} USD · checked {initial.spendCheckedAt ? new Date(initial.spendCheckedAt).toLocaleString() : 'unknown'}</p> : null}</> : null}
-    <div className="kb-provider-actions"><button className="kb-btn primary" onClick={() => void save()}>Save</button><button className="kb-btn" onClick={() => void save(true)}>{busy ? 'Working…' : 'Save & refresh models / costs'}</button>{onCancel ? <button className="kb-btn" onClick={onCancel}>Cancel</button> : null}</div>
+    <div className="kb-provider-actions"><button className="kb-btn primary" disabled={!dirty || busy} onClick={() => void save()}>{busy ? 'Saving…' : 'Save'}</button><button className="kb-btn" disabled={busy || (!initial && !dirty)} onClick={() => void save(true)}>{busy ? 'Working…' : dirty ? 'Save & refresh models / costs' : 'Refresh models / costs'}</button>{onCancel ? <button className="kb-btn" onClick={onCancel}>Cancel</button> : null}</div>
     {message ? <p role="status">{message}</p> : null}
   </fieldset>;
 }

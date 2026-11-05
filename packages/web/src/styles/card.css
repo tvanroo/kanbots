@@ -1387,3 +1387,13 @@
   gap: 6px;
   margin-top: 4px;
 }
+
+/* A saved provider form has no highlighted action remaining. */
+.kb-provider-actions .kb-btn:disabled {
+  background: var(--bg-2);
+  color: var(--ink-3);
+  border-color: var(--hairline);
+  box-shadow: none;
+  filter: none;
+  cursor: default;
+}
