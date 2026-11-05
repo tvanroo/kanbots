@@ -8,6 +8,16 @@ export function OpenAIReportingPanel({ report, onChanged }: { report: OpenAIRepo
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [invalidKey, setInvalidKey] = useState(false);
+  const [copyStatus, setCopyStatus] = useState('');
+  const setupUrl = 'https://platform.openai.com/settings/organization/admin-keys';
+  async function copySetupLink() {
+    try {
+      await navigator.clipboard.writeText(setupUrl);
+      setCopyStatus('Copied. Paste into your preferred browser.');
+    } catch {
+      setCopyStatus('Select the address below and copy it manually.');
+    }
+  }
   const inputId = useId();
   const dirty = key.trim().length > 0;
   async function act(action: 'connect' | 'refresh') {
@@ -29,7 +39,12 @@ export function OpenAIReportingPanel({ report, onChanged }: { report: OpenAIRepo
       <p className="kb-provider-desc">These reports are not a remaining balance or grant-expiration feed. Usage and cost scopes differ; costs can include services beyond token usage. Retrieval time does not guarantee the provider’s data is current.</p>
       {editing ? <div className="kb-api-reported">
         <strong>Connect in two steps</strong>
-        <p><a className="kb-btn" href="https://platform.openai.com/settings/organization/admin-keys" target="_blank" rel="noreferrer">1. Open OpenAI Admin keys</a></p>
+        <p>1. Open the setup page in your preferred browser.</p>
+        <div className="kb-api-field">
+          <button type="button" className="kb-btn" onClick={() => void copySetupLink()}>Copy setup link</button>
+          <input type="text" aria-label="OpenAI Admin keys setup address" readOnly value={setupUrl} onFocus={event => event.currentTarget.select()} />
+          {copyStatus ? <span role="status">{copyStatus}</span> : null}
+        </div>
         <p>Choose the organization that holds your API credits. Create an Admin key named <strong>Kanbots Local reporting</strong>, then copy it.</p>
         <p>2. Paste it below and select <strong>Save &amp; connect</strong>. Kanbots checks access automatically.</p>
         <details><summary>Can’t create an Admin key?</summary><p>Sign in as an API organization owner, or ask your organization owner to provide a reporting credential. A ChatGPT subscription or a normal model API key does not provide this administrative access.</p></details>
