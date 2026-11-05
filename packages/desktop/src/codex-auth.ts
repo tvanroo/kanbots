@@ -29,6 +29,7 @@ export interface CodexLoginError {
 }
 
 export async function startCodexLogin(): Promise<CodexLoginResult | CodexLoginError> {
+  if (await isCodexAuthenticated()) return { ok: true };
   if (pending) {
     cancelCodexLogin();
   }

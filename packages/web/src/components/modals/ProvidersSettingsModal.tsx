@@ -1,7 +1,7 @@
 import { OpenAIReportingPanel, CodexUsagePanel } from './OpenAIReportingPanel.js';
 import { AnthropicReportingPanel } from './AnthropicReportingPanel.js';
 import { ApiConnections } from './ApiConnections.js';
-import { useEffect, useMemo, useState, type ChangeEvent, type MouseEvent } from 'react';
+import { useEffect, useMemo, useRef, useState, type ChangeEvent, type MouseEvent } from 'react';
 import { api } from '../../api.js';
 import { getBridge } from '../../desktop-bridge.js';
 import type {
@@ -183,6 +183,22 @@ const MODELS_BY_PROVIDER: Record<ProviderId, Array<{ id: string; label: string }
 };
 
 type BridgeLoginResult = { ok: true } | { ok: false; error: string };
+
+async function checkProviderAuthorization(bridge: NonNullable<Window['kanbots']>, id: ProviderId): Promise<boolean> {
+  switch (id) {
+    case 'claude-code': return (await bridge.claudeAuthStatus()).authed;
+    case 'codex-cli': return (await bridge.codexAuthStatus()).authed;
+    case 'gemini-cli': return (await bridge.geminiAuthStatus()).authed;
+    case 'amp-cli': return (await bridge.ampAuthStatus()).authed;
+    case 'cursor-cli': return (await bridge.cursorAuthStatus()).authed;
+    case 'copilot-cli': return (await bridge.copilotAuthStatus()).authed;
+    case 'opencode-cli': return (await bridge.opencodeAuthStatus()).authed;
+    case 'droid-cli': return (await bridge.droidAuthStatus()).authed;
+    case 'ccr-cli': return (await bridge.ccrAuthStatus()).authed;
+    case 'qwen-cli': return (await bridge.qwenAuthStatus()).authed;
+    default: return false;
+  }
+}
 
 function runLoginForProvider(
   bridge: NonNullable<Window['kanbots']>,
@@ -472,6 +488,9 @@ function ProviderSection({ spec, config, onChanged }: SectionProps) {
   const [enabled, setEnabled] = useState(config.enabled);
   const [defaultModel, setDefaultModel] = useState(config.defaultModel ?? '');
   const [saving, setSaving] = useState(false);
+  const checkingAuth = useRef(false);
+  const loginAttempt = useRef(0);
+  const [authMessage, setAuthMessage] = useState('');
   const [testState, setTestState] = useState<TestState>({ kind: 'idle' });
   const [loginState, setLoginState] = useState<LoginState>({ kind: 'idle' });
   const [localError, setLocalError] = useState<string | null>(null);
@@ -522,7 +541,33 @@ function ProviderSection({ spec, config, onChanged }: SectionProps) {
     }
   }
 
+  async function checkAuthorization(): Promise<boolean> {
+    const bridge = getBridge();
+    if (!bridge || checkingAuth.current) return false;
+    checkingAuth.current = true;
+    setAuthMessage('Checking existing authorization…');
+    try {
+      const authorized = await checkProviderAuthorization(bridge, spec.id);
+      onChanged(await api.getProviders());
+      setAuthMessage(authorized ? 'Existing authorization detected.' : 'No authorization detected yet. You can check again after signing in.');
+      if (authorized) {
+        loginAttempt.current += 1;
+        setLoginState({ kind: 'idle' });
+      }
+      return authorized;
+    } finally { checkingAuth.current = false; }
+  }
+
+  useEffect(() => {
+    if (loginState.kind === 'idle') return;
+    const check = () => { void checkAuthorization().catch(() => setAuthMessage('Could not check authorization. Try again.')); };
+    window.addEventListener('focus', check);
+    const timer = loginState.kind === 'running' ? window.setInterval(check, 10000) : undefined;
+    return () => { window.removeEventListener('focus', check); window.clearInterval(timer); };
+  }, [loginState.kind, spec.id]);
+
   async function handleSignIn(): Promise<void> {
+    if (checkingAuth.current) return;
     const bridge = getBridge();
     if (!bridge) {
       setLoginState({
@@ -531,9 +576,13 @@ function ProviderSection({ spec, config, onChanged }: SectionProps) {
       });
       return;
     }
+    const attempt = ++loginAttempt.current;
     setLoginState({ kind: 'running' });
     try {
+      if (await checkAuthorization()) return;
       const result = spec.id === 'claude-code' ? await bridge.claudeLoginStart(config.cliAvailable === false) : await runLoginForProvider(bridge, spec.id);
+      if (attempt !== loginAttempt.current) return;
+      if (await checkAuthorization()) return;
       if (!result.ok) {
         setLoginState({ kind: 'error', message: result.error });
         return;
@@ -544,6 +593,7 @@ function ProviderSection({ spec, config, onChanged }: SectionProps) {
       onChanged(next);
       setLoginState({ kind: 'idle' });
     } catch (err) {
+      if (attempt !== loginAttempt.current) return;
       setLoginState({
         kind: 'error',
         message: err instanceof Error ? err.message : String(err),
@@ -610,6 +660,8 @@ function ProviderSection({ spec, config, onChanged }: SectionProps) {
           ) : null}
         </div>
       ) : null}
+      <button type="button" className="kb-btn ghost" onClick={() => void checkAuthorization().catch(() => setAuthMessage('Could not check authorization. Try again.'))}>Check authorization</button>
+      {authMessage ? <p role="status" className="kb-provider-desc">{authMessage}</p> : null}
       {loginState.kind === 'error' ? (
         <div className="kb-sentry-error">{loginState.message}</div>
       ) : null}
