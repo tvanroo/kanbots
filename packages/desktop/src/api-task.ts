@@ -1,7 +1,7 @@
 import { execFile } from 'node:child_process';
 import { readFile,writeFile,realpath,mkdir } from 'node:fs/promises';
 import { resolve,dirname,relative,isAbsolute } from 'node:path';
-import { KANBOTS_TOOLS } from '@kanbots/mcp';
+import { COORDINATOR_TOOLS, KANBOTS_TOOLS } from '@kanbots/mcp';
 import type { StartAgentRunOptions,StreamEvent } from '@kanbots/dispatcher';
 import { unlockApiConnection, listApiConnections } from './api-connections.js';
 import { reserveCharge,settleCharge } from './routing-state.js';
@@ -27,7 +27,7 @@ export async function apiTurn(candidate:Candidate,opts:StartAgentRunOptions,tran
   const policy=(r:typeof row)=>JSON.stringify([r.enabled,r.keyPreview,r.funding,r.afterGrant,r.budget,r.remaining,r.expiresAt,r.keyExpiresAt,r.expired,r.renewsAt,r.grantBillingDay,r.rollover]);
   if(!current||policy(current)!==policy(row))throw new RouteUnavailable('Payment settings changed; re-evaluate this connection.');
   if(candidate.deadline!==undefined&&Date.now()>=candidate.deadline)throw new RouteUnavailable('Grant use-by deadline reached.');
-  const tools=opts.env?.KANBOTS_TOOL_BRIDGE_URL?[...fileTools,...KANBOTS_TOOLS]:fileTools;
+  const tools=opts.env?.KANBOTS_COORDINATOR==='1'?[...COORDINATOR_TOOLS]:opts.env?.KANBOTS_TOOL_BRIDGE_URL?[...fileTools,...KANBOTS_TOOLS]:fileTools;
   const prompt=transcript.map(m=>`${m.role.toUpperCase()}:\n${m.text}`).join('\n\n');
   const instructions=`${opts.appendSystemPrompt??''}\nWork only on the user's requested task in ${opts.cwd}. First read relevant AGENTS.md instructions. Use the supplied tools to inspect/edit/test. The transcript includes completed tool results; do not repeat completed side effects. If finished, return a concise final answer. Never read credentials or secret stores. Report failures honestly.`;
   const outputLimit=Math.min(4096,model.maxOutput);

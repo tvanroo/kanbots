@@ -25,3 +25,9 @@ if (existsSync(iconSrc)) {
   copyFileSync(iconSrc, iconTarget);
   console.log(`[copy-web] copied ${iconSrc} → ${iconTarget}`);
 }
+
+// Ship a standalone stdio server, including its bundled SDK dependencies.
+const mcpTarget=join(desktopRoot,'dist','mcp');
+mkdirSync(mcpTarget,{recursive:true});
+cpSync(resolve(desktopRoot,'..','mcp','dist'),mcpTarget,{recursive:true});
+require('node:fs').writeFileSync(join(mcpTarget,'package.json'),JSON.stringify({type:'module'}));

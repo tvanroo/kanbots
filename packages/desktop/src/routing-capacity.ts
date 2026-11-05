@@ -35,7 +35,8 @@ async function load(hasWork:boolean){
     if(state.config.claudeResetExpiresAt)rows.push({id:'claude-reset',label:'Claude reset offer',kind:'unknown',usedPercent:null,remaining:null,spent:null,available:false,detail:`Manually tracked · ${Date.parse(state.config.claudeResetExpiresAt)>now?'expires':'expired'} ${new Date(state.config.claudeResetExpiresAt).toLocaleString()} · redeem in Claude Usage`});
     const resetSoon=state.config.claudeResetExpiresAt&&Date.parse(state.config.claudeResetExpiresAt)>now&&Date.parse(state.config.claudeResetExpiresAt)-now<48*3600000;
     rows.push({id:'claude-sub',label:'Claude subscription',kind:'subscription',usedPercent:fresh?used:null,remaining:fresh&&used!==null?100-used:null,spent:null,available:!!usable,detail:!fresh?'Quota unavailable or stale':windows.map(w=>`${w.label}: ${Math.round(w.pct*100)}% used${w.resetsAt?` · resets ${new Date(w.resetsAt).toLocaleString()}`:''}`).join('; ')});
-    if(usable)candidates.push({id:'claude-sub',provider:'claude-code',kind:'subscription',score:resetSoon?280:180-(used??0)/10,reason:resetSoon?'Use included capacity before the tracked Claude reset expires':'Available Claude subscription quota'});
+    const resetHours=Math.min(...windows.filter(w=>w.resetsAt&&Date.parse(w.resetsAt)>now).map(w=>(Date.parse(w.resetsAt!)-now)/3600000));
+    if(usable)candidates.push({id:'claude-sub',provider:'claude-code',kind:'subscription',score:resetSoon?280:resetHours<24?270-resetHours:180-(used??0)/10,reason:resetSoon?'Use included capacity before the tracked Claude reset expires':resetHours<24?'Use subscription quota before its approaching reset':'Available Claude subscription quota'});
   }
   if(enabled.has('codex-cli')){
     const usage=codex?.subscriptionUsage;
@@ -44,7 +45,8 @@ async function load(hasWork:boolean){
     const resetSoon=usage?.resetCredits?.credits.some(c=>c.expiresAt!==null&&c.expiresAt*1000>now&&c.expiresAt*1000-now<48*3600000);
     rows.push({id:'codex-sub',label:'ChatGPT subscription',kind:'subscription',usedPercent:used,remaining:used===null?null:100-used,spent:null,available:!!usable,detail:usage?`${usage.resetCredits?.availableCount??0} reset credits reported. `+usage.windows.map(w=>`${w.name}: ${Math.round(w.usedPercent)}% used${w.resetsAt?` · resets ${new Date(w.resetsAt*1000).toLocaleString()}`:''}`).join('; '):'Quota unavailable'});
     for(const [i,credit] of (usage?.credits??[]).entries())rows.push({id:`codex-credit-${i}`,label:`ChatGPT credits · ${credit.name}`,kind:'grant',usedPercent:null,remaining:credit.balance!==null&&Number.isFinite(Number(credit.balance))?Number(credit.balance):null,spent:null,available:false,detail:credit.unlimited?'Unlimited reported; paid fallback is not selected automatically':'Credit balance reported; preserved while included capacity is available. Not a dollar balance.'});
-    if(usable)candidates.push({id:'codex-sub',provider:'codex-cli',kind:'subscription',score:resetSoon?280:180-(used??0)/10,reason:resetSoon?'Use included capacity before the ChatGPT reset expires':'Available ChatGPT subscription quota'});
+    const resetHours=Math.min(...(usage?.windows??[]).filter(w=>w.resetsAt&&w.resetsAt*1000>now).map(w=>(w.resetsAt!*1000-now)/3600000));
+    if(usable)candidates.push({id:'codex-sub',provider:'codex-cli',kind:'subscription',score:resetSoon?280:resetHours<24?270-resetHours:180-(used??0)/10,reason:resetSoon?'Use included capacity before the ChatGPT reset expires':resetHours<24?'Use subscription quota before its approaching reset':'Available ChatGPT subscription quota'});
   }
   let reports=getAnthropicReportingAccounts();
   const refresh=reports.filter(a=>listApiConnections().some(k=>k.organizationId===a.organizationId&&k.grantBillingDay)&&a.report.connected&&(!a.report.checkedAt||now-Date.parse(a.report.checkedAt)>15*60000));
@@ -74,7 +76,7 @@ async function load(hasWork:boolean){
     const spend=charged(pool,month.getTime());
     if(!displayed.has(pool)){
       displayed.add(pool);
-      rows.push({id:pool,label:`${row.provider==='anthropic'?'Anthropic':'OpenAI'} · ${row.name}`,kind:grant?'grant':'paygo',usedPercent:grant?(remaining!==null&&row.budget?Math.max(0,Math.min(100,(1-remaining/row.budget)*100)):null):(row.budget?Math.min(100,spend/row.budget*100):null),remaining:grant?remaining:null,spent:grant?null:spend,available,detail:!model?'Refresh models; a current tool-capable model with known pricing is required':grant?`${estimate?'Estimated':'Manually entered'} shared balance${Number.isFinite(useBy)?` · use by ${new Date(useBy).toLocaleString()}`:''} · ${row.afterGrant==='paygo'?'pay-go allowed afterward':'stop afterward'}`:`Kanbots spend this month${row.budget?` / $${row.budget} budget`:' · no monthly budget set'}`});
+      rows.push({id:pool,label:`${row.provider==='anthropic'?'Anthropic':'OpenAI'} · ${row.name}`,kind:grant?'grant':'paygo',usedPercent:grant?(remaining!==null&&row.budget?Math.max(0,Math.min(100,(1-remaining/row.budget)*100)):null):(row.budget?Math.min(100,spend/row.budget*100):null),remaining:grant?remaining:null,spent:grant?null:spend,available,detail:!model?'Refresh models; a current tool-capable model with known pricing is required':grant?`${estimate?'Estimated':'Manually entered'} shared balance${Number.isFinite(useBy)?` · use by ${new Date(useBy).toLocaleString()}`:' · expiry unknown'} · ${row.afterGrant==='paygo'?'pay-go allowed afterward':'stop afterward'}`:`Kanbots spend this month${row.budget?` / $${row.budget} budget`:' · no monthly budget set'}`});
     }
     if(available){
       const score=eligibleGrant?250+Math.max(0,100-(useBy-now)/3600000):10-(model!.input+model!.output)/100;
@@ -82,5 +84,11 @@ async function load(hasWork:boolean){
     }
   }
   for(const id of enabled)if(!['claude-code','codex-cli'].includes(id))rows.push({id,label:id,kind:'unknown',usedPercent:null,remaining:null,spent:null,available:false,detail:'Capacity reporting not supported yet; manual provider selection remains available.'});
-  return {snapshot:{checkedAt:new Date().toISOString(),rows,routing:routingState()},candidates:candidates.sort((a,b)=>b.score-a.score)};
+  const ordered=candidates.sort((a,b)=>b.score-a.score);
+  for(const row of rows){const candidate=ordered.find(c=>c.id===row.id||c.pool===row.id);
+    if(candidate){row.routingOrder=candidate.score>=250?1:candidate.score>=100?2:4;row.routingTier=row.routingOrder===1?'Time-sensitive / grants':row.routingOrder===2?'Included capacity':'Pay-as-you-go';row.preferredNow=candidate===ordered[0];row.routingReason=candidate.reason;}
+    else{row.routingOrder=3;row.routingTier=row.id.startsWith('codex-credit')?'Held in reserve':'Unavailable for automatic routing';row.routingReason=row.id.startsWith('codex-credit')?'Provider-managed credit fallback; expiry not reported by this connection.':'';}
+  }
+  rows.sort((a,b)=>(a.routingOrder??9)-(b.routingOrder??9)||Number(!!b.preferredNow)-Number(!!a.preferredNow));
+  return {snapshot:{checkedAt:new Date().toISOString(),rows,routing:routingState()},candidates:ordered};
 }

@@ -46,6 +46,8 @@ const api: KanbotsBridge = {
   toggleMaximizeWindow: () =>
     ipcRenderer.invoke('kanbots:window-toggle-maximize') as Promise<void>,
   closeWindow: () => ipcRenderer.invoke('kanbots:window-close') as Promise<void>,
+  coordinatorState: () => ipcRenderer.invoke('kanbots:coordinator-state'),
+  coordinatorAction: (action,args) => ipcRenderer.invoke('kanbots:coordinator-action',action,args),
   routingState: () => ipcRenderer.invoke('kanbots:routing-state'),
   saveRouting: (config) => ipcRenderer.invoke('kanbots:routing-save',config),
   capacity: () => ipcRenderer.invoke('kanbots:capacity'),

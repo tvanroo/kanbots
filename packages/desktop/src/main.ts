@@ -1,3 +1,4 @@
+import { CoordinatorService } from './coordinator.js';
 import { startRoutedRun } from './automatic-routing.js';
 import { configureRoutingProviders, collectCapacity, invalidateCapacity } from './routing-capacity.js';
 import { routingState,saveRouting } from './routing-state.js';
@@ -227,6 +228,7 @@ process.on('unhandledRejection', (reason) => {
 });
 
 let activeWorkspace: ActiveWorkspace | null = null;
+let coordinators: CoordinatorService;
 /**
  * Free-floating cloud workspace (no git repo). Mutually exclusive
  * with `activeWorkspace` — opening one closes the other so the
@@ -449,6 +451,7 @@ async function buildSource(config: WorkspaceConfig, store: Store): Promise<Issue
 }
 
 async function closeActiveWorkspace(): Promise<void> {
+  await coordinators?.beforeClose();
   // Free-floating cloud workspace has no local resources, so closing
   // is just clearing the state. Done first so renderer never sees
   // both kinds set at once.
@@ -508,6 +511,7 @@ async function closeActiveWorkspace(): Promise<void> {
     // ignore
   }
   activeWorkspace = null;
+  coordinators?.attach(null);
 }
 
 async function openWorkspaceInternal(repoPath: string): Promise<ActiveWorkspaceInfo> {
@@ -711,6 +715,7 @@ async function openWorkspaceInternal(repoPath: string): Promise<ActiveWorkspaceI
       dispatch: (name, args) => {
         const h = handlersHolder.handlers;
         if (!h) throw new Error('handlers not yet ready');
+        if(coordinators?.hasController()&&!['listIssues','getIssue','listAgentRuns','listPendingDecisions','listLearnings','getPerformanceMetrics'].includes(name))throw Error('This project is managed by its selected coordinator. Use the Coordinators panel.');
         return dispatchChatTool(name, args, h);
       },
     });
@@ -854,6 +859,9 @@ async function openWorkspaceInternal(repoPath: string): Promise<ActiveWorkspaceI
     toolBridgeRuntimeDir,
   };
 
+  const startAutopilot=handlers['autopilot:start'];
+  handlers['autopilot:start']=(args)=>{if(coordinators.hasController())return Promise.reject(new Error('Pause coordination before starting independent autopilot.'));return startAutopilot(args);};
+  coordinators.attach({repoPath:gitRoot,handlers,store,supervisor,source});
   sentryPoller.start();
 
   await ensureGitignoreEntry(gitRoot, '.kanbots/').catch(() => {
@@ -1240,6 +1248,8 @@ function registerIpc(): void {
   });
 
   configureRoutingProviders(() => getAppStore().providers.list());
+  ipcMain.handle('kanbots:coordinator-state', () => coordinators.ui());
+  ipcMain.handle('kanbots:coordinator-action', (_event, action, args) => coordinators.uiAction(action,args));
   ipcMain.handle('kanbots:routing-state', () => routingState());
   ipcMain.handle('kanbots:routing-save', (_event, config) => { const state=saveRouting(config); invalidateCapacity(); return state; });
   ipcMain.handle('kanbots:capacity', async () => (await collectCapacity()).snapshot);
@@ -2103,6 +2113,8 @@ function closeAllChatWindows(): void {
 }
 
 function resolveMcpServerEntry(): string | null {
+  const bundled=join(__dirname,'mcp','server.js');
+  if (existsSync(bundled)) return bundled;
   // The MCP server ships from `@kanbots/mcp/server`. We resolve the entry
   // through the standard module loader so it works in both dev (pnpm
   // symlinks → packages/mcp/dist/server.js) and a packaged Electron app
@@ -2123,7 +2135,8 @@ function buildChatToolRuntime(args: {
 }): ChatToolRuntime {
   const { toolBridge, runtimeDir, mcpServerEntry } = args;
   return {
-    prepareForRun: async ({ provider }) => {
+    prepareForRun: async ({ provider, conversationId }) => {
+      if(conversationId!==undefined){const prepared=await coordinators.prepareInternal(conversationId,provider);if(prepared)return prepared;}
       const token = toolBridge.issueToken();
       const env = {
         KANBOTS_MCP_ENTRY: mcpServerEntry,
@@ -2133,18 +2146,18 @@ function buildChatToolRuntime(args: {
       const mcpServer = {
         command: process.execPath,
         args: [mcpServerEntry],
-        env,
       };
       let extraArgs: string[];
       if (provider === 'codex-cli') {
-        extraArgs = buildCodexMcpArgs('kanbots', mcpServer);
+        extraArgs = buildCodexMcpArgs('kanbots', {...mcpServer,env:{}});
+        extraArgs.push('-c','mcp_servers.kanbots.env_vars=["KANBOTS_TOOL_BRIDGE_URL","KANBOTS_TOOL_BRIDGE_TOKEN","ELECTRON_RUN_AS_NODE"]');
       } else {
         const configPath = join(
           runtimeDir,
           `mcp-${randomUUID().slice(0, 8)}.json`,
         );
         const config = { mcpServers: { kanbots: mcpServer } };
-        await writeFile(configPath, JSON.stringify(config, null, 2), 'utf-8');
+        await writeFile(configPath, JSON.stringify(config, null, 2), {encoding:'utf8',mode:0o600});
         extraArgs = ['--mcp-config', configPath];
       }
       return {
@@ -2204,6 +2217,9 @@ if (process.platform === 'darwin') {
 const ownsLocalInstance = app.requestSingleInstanceLock();
 if (!ownsLocalInstance) app.quit();
 if (ownsLocalInstance) void app.whenReady().then(async () => {
+  coordinators=new CoordinatorService();
+  const coordinatorEntry=resolveMcpServerEntry();
+  if(coordinatorEntry) await coordinators.start(coordinatorEntry);
   Menu.setApplicationMenu(null);
   registerIpc();
   await createWindow();

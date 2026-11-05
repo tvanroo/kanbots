@@ -63,7 +63,8 @@ export interface ChatToolRuntime {
    * takes repeated `-c mcp_servers.<name>.* = ...` overrides), so callers
    * must pass the provider that will actually be spawned.
    */
-  prepareForRun(input: { provider: AgentRunProvider }): Promise<{
+  prepareForRun(input: { provider: AgentRunProvider; conversationId?: number }): Promise<{
+    coordinatorPrompt?: string;
     extraArgs: string[];
     env: Record<string, string>;
     /** Called once the run terminates so the token can be revoked. */

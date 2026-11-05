@@ -280,3 +280,6 @@ export const KANBOTS_TOOLS: readonly ToolDef[] = [
 ];
 
 export type ToolName = (typeof KANBOTS_TOOLS)[number]['name'];
+
+export { COORDINATOR_TOOLS, COORDINATOR_GUIDE, validateCoordinatorArgs } from './coordinator.js';
+export { REPO_ONBOARDING_PROMPT } from './onboarding.js';

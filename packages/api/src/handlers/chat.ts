@@ -409,7 +409,7 @@ export async function postMessage(
     if (active !== null && !willResume) {
       throw alreadyActive(`agent run #${active.id} is already ${active.status}`, active);
     }
-    const appendSystemPrompt =
+    let appendSystemPrompt =
       parsed.appendSystemPrompt !== undefined
         ? `${SYSTEM_PROMPT_DEFAULT}\n\n${parsed.appendSystemPrompt}`
         : SYSTEM_PROMPT_DEFAULT;
@@ -429,11 +429,12 @@ export async function postMessage(
     let toolPrep: Awaited<ReturnType<NonNullable<typeof deps.chatTools>['prepareForRun']>> | null = null;
     if (deps.chatTools) {
       try {
-        toolPrep = await deps.chatTools.prepareForRun({ provider: dispatchProvider });
-      } catch {
-        toolPrep = null;
+        toolPrep = await deps.chatTools.prepareForRun({ provider: dispatchProvider, conversationId: conversation.id });
+      } catch (error) {
+        throw error;
       }
     }
+    if(toolPrep?.coordinatorPrompt) appendSystemPrompt=toolPrep.coordinatorPrompt;
     try {
       if (willResume && latest !== null) {
         await deps.supervisor.resumeChat({

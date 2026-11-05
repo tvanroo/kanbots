@@ -1,3 +1,6 @@
+import { useEffect,useState } from 'react';
+import { createPortal } from 'react-dom';
+import { CoordinatorsModal } from '../modals/CoordinatorsModal.js';
 import { CapacityOverview } from './CapacityOverview.js';
 import { getBridge } from '../../desktop-bridge.js';
 import { QuotaMeter } from '../usage/QuotaMeter.js';
@@ -18,7 +21,10 @@ export interface BoardUsageRowProps {
  * — used in cloud mode until the cost-today endpoint lands (phase 2).
  */
 export function BoardUsageRow({ fiveHour, sevenDay, stale }: BoardUsageRowProps) {
-  if(getBridge()?.capacity)return <CapacityOverview />;
+  const [coordinators,setCoordinators]=useState(false);
+  const [discover,setDiscover]=useState(false);
+  useEffect(()=>{void getBridge()?.coordinatorAction?.('onboarding-status').then(s=>setDiscover(!!s?.needed)).catch(()=>{});},[]);
+  if(getBridge()?.capacity)return <><div className="kb-coordinator-strip"><button className="kb-btn ghost" onClick={()=>setCoordinators(true)}>{discover?'Discover existing work':'Coordinators'}</button><CapacityOverview /></div>{coordinators?createPortal(<CoordinatorsModal onClose={()=>setCoordinators(false)}/>,document.body):null}</>;
   return (
     <div className="kb-usage-row">
       <span className="kb-usage-label">Claude{stale ? ' · stale' : ''}</span>

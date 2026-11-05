@@ -5,8 +5,10 @@ import {
   CallToolRequestSchema,
   ListToolsRequestSchema,
 } from '@modelcontextprotocol/sdk/types.js';
-import { KANBOTS_TOOLS } from './index.js';
-import { CLOUD_SIGNIN_HINT, readCloudSession } from './auth.js';
+import { COORDINATOR_TOOLS, COORDINATOR_GUIDE, KANBOTS_TOOLS } from './index.js';
+import { readFile } from 'node:fs/promises';
+import { homedir } from 'node:os';
+import { join } from 'node:path';
 
 // Local-only launch by default. Cloud sign-in is OPTIONAL: we read the
 // session status once at startup so we can annotate tool errors with a
@@ -14,12 +16,13 @@ import { CLOUD_SIGNIN_HINT, readCloudSession } from './auth.js';
 // server from starting. Cloud-dependent tools surface their own errors
 // when invoked without a session (the desktop tool-bridge enforces the
 // real auth boundary; this layer only proxies).
-const cloudSession = await readCloudSession();
+const coordinated=process.env.KANBOTS_COORDINATOR==='1'||!!process.env.KANBOTS_COORDINATOR_CLIENT;
+const dataDir=process.env.KANBOTS_LOCAL_DATA??join(homedir(),'Library','Application Support','Kanbots Local');
 
 const BRIDGE_URL = process.env.KANBOTS_TOOL_BRIDGE_URL;
 const BRIDGE_TOKEN = process.env.KANBOTS_TOOL_BRIDGE_TOKEN;
 
-if (!BRIDGE_URL || !BRIDGE_TOKEN) {
+if (!coordinated && (!BRIDGE_URL || !BRIDGE_TOKEN)) {
   process.stderr.write(
     '[kanbots-mcp] KANBOTS_TOOL_BRIDGE_URL and KANBOTS_TOOL_BRIDGE_TOKEN env vars are required\n',
   );
@@ -27,11 +30,27 @@ if (!BRIDGE_URL || !BRIDGE_TOKEN) {
 }
 
 async function callBridge(name: string, args: unknown): Promise<unknown> {
-  const response = await fetch(`${BRIDGE_URL}/tool/${encodeURIComponent(name)}`, {
+  let url=BRIDGE_URL,token=BRIDGE_TOKEN;
+  if(process.env.KANBOTS_COORDINATOR_CLIENT){
+    const id=process.env.KANBOTS_COORDINATOR_CLIENT;
+    if(!/^[0-9a-f-]{36}$/.test(id))throw Error('Invalid paired client');
+    const endpoint=JSON.parse(await readFile(join(dataDir,'coordinator-endpoint.json'),'utf8'));
+    const profile=JSON.parse(await readFile(join(dataDir,'coordinator-clients',id+'.json'),'utf8'));
+    url=endpoint.url; token=profile.token;
+    if(!/^http:\/\/127\.0\.0\.1:\d+$/.test(url!))throw Error('Invalid local endpoint');
+    const session=await fetch(`${url}/session`,{method:'POST',headers:{authorization:`Bearer ${token}`},redirect:'error',signal:AbortSignal.timeout(5000)});
+    const reply=await session.json() as {token?:string;error?:string};
+    if(!session.ok||!reply.token)throw Error(reply.error??'Pair in Kanbots Coordinators');
+    token=reply.token;
+  }
+  if(!url||!/^http:\/\/127\.0\.0\.1:\d+$/.test(url)||!token)throw Error('Open Kanbots Local and check coordinator pairing.');
+  const response = await fetch(`${url}/tool/${encodeURIComponent(name)}`, {
     method: 'POST',
+    redirect:'error',
+    signal:AbortSignal.timeout(30000),
     headers: {
       'content-type': 'application/json',
-      authorization: `Bearer ${BRIDGE_TOKEN}`,
+      authorization: `Bearer ${token}`,
     },
     body: JSON.stringify(args ?? {}),
   });
@@ -55,12 +74,12 @@ async function callBridge(name: string, args: unknown): Promise<unknown> {
 }
 
 const server = new Server(
-  { name: 'kanbots', version: '0.0.0' },
-  { capabilities: { tools: {} } },
+  { name: 'kanbots-local', version: '1.2.0' },
+  { capabilities: { tools: {} }, ...(coordinated?{instructions:COORDINATOR_GUIDE}:{}) },
 );
 
 server.setRequestHandler(ListToolsRequestSchema, () =>
-  Promise.resolve({ tools: KANBOTS_TOOLS as unknown as never[] }),
+  Promise.resolve({ tools: (coordinated?COORDINATOR_TOOLS:KANBOTS_TOOLS) as unknown as never[] }),
 );
 
 server.setRequestHandler(CallToolRequestSchema, async (request) => {
@@ -68,6 +87,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
   try {
     const result = await callBridge(name, args);
     return {
+      ...(coordinated?{structuredContent:{result}}:{}),
       content: [
         {
           type: 'text' as const,
@@ -77,16 +97,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     };
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
-    // If the bridge rejected the call with what looks like an auth /
-    // cloud-session error and there is no signed-in session, append the
-    // sign-in hint so model clients get an actionable next step.
-    const looksLikeAuthError = /\b(401|403|unauthorized|forbidden|sign[\s-]?in|cloud)\b/i.test(
-      message,
-    );
-    const text =
-      !cloudSession.signedIn && looksLikeAuthError
-        ? `Error: ${message}\n\n${CLOUD_SIGNIN_HINT}`
-        : `Error: ${message}`;
+    const text = `Error: ${message}`;
     return {
       isError: true,
       content: [{ type: 'text' as const, text }],
@@ -94,6 +105,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
   }
 });
 
+if(coordinated) await callBridge('getCapabilities',{}).catch(error=>process.stderr.write(`[kanbots-local] ${error instanceof Error?error.message:'Pair in Kanbots Coordinators'}\n`));
 const transport = new StdioServerTransport();
 server
   .connect(transport)

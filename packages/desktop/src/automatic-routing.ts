@@ -68,7 +68,7 @@ export function startRoutedRun(opts:StartAgentRunOptions):AgentRunHandle{
           let extraArgs=route.provider===opts.provider?opts.extraArgs:undefined;
           const mcpEntry=opts.env?.KANBOTS_MCP_ENTRY;
           if(mcpEntry){
-            if(route.provider==='codex-cli')extraArgs=['-c',`mcp_servers.kanbots.command=${JSON.stringify(process.execPath)}`,'-c',`mcp_servers.kanbots.args=[${JSON.stringify(mcpEntry)}]`,'-c','mcp_servers.kanbots.env_vars=["KANBOTS_TOOL_BRIDGE_URL", "KANBOTS_TOOL_BRIDGE_TOKEN", "ELECTRON_RUN_AS_NODE"]'];
+            if(route.provider==='codex-cli')extraArgs=['-c',`mcp_servers.kanbots.command=${JSON.stringify(process.execPath)}`,'-c',`mcp_servers.kanbots.args=[${JSON.stringify(mcpEntry)}]`,'-c','mcp_servers.kanbots.env_vars=["KANBOTS_COORDINATOR","KANBOTS_TOOL_BRIDGE_URL", "KANBOTS_TOOL_BRIDGE_TOKEN", "ELECTRON_RUN_AS_NODE"]'];
             else{
               const config=join(sessions(),id+'-mcp.json');
               writeFileSync(config,JSON.stringify({mcpServers:{kanbots:{command:process.execPath,args:[mcpEntry]}}}),{mode:0o600});

@@ -111,6 +111,8 @@ export interface KanbotsBridge {
   minimizeWindow(): Promise<void>;
   toggleMaximizeWindow(): Promise<void>;
   closeWindow(): Promise<void>;
+  coordinatorState?: () => Promise<any>;
+  coordinatorAction?: (action:string,args?:any) => Promise<any>;
   routingState?(): Promise<import('@kanbots/api').RoutingState>;
   saveRouting?(config: import('@kanbots/api').RoutingConfig): Promise<import('@kanbots/api').RoutingState>;
   capacity?(): Promise<import('@kanbots/api').CapacitySnapshot>;

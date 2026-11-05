@@ -103,6 +103,8 @@ export interface CreateSupervisorOptions {
 const STOP_FORCE_RESOLVE_SLACK_MS = 2_000;
 
 export interface StartRunInput {
+  /** Exact implementation revision for isolated QA workers. */
+  baseRef?: string;
   threadId: number;
   issueNumber: number;
   prompt: string;
@@ -1010,7 +1012,7 @@ export async function createSupervisor(
 
     try {
       await prepareDir(worktreePath);
-      await makeWorktree({ repoPath, branch, worktreePath });
+      await makeWorktree({ repoPath, branch, worktreePath, ...(input.baseRef ? { baseRef: input.baseRef } : {}) });
       await stampIdentity({
         worktreePath,
         runId: run.id,

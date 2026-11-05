@@ -1553,6 +1553,7 @@ export interface RoutingState {
   lastReset: string | null;
 }
 export interface CapacityRow {
+  routingTier?: string; routingOrder?: number; preferredNow?: boolean; routingReason?: string;
   id: string; label: string; kind: 'subscription' | 'grant' | 'paygo' | 'unknown';
   usedPercent: number | null; remaining: number | null; spent: number | null;
   detail: string; available: boolean; resetsAt?: string | null;
