@@ -449,8 +449,8 @@ export function ProvidersSettingsModal({ onClose }: ProvidersSettingsModalProps)
                       <ProviderSection spec={spec} config={cfg} onChanged={(next) => setPayload(next)} />
                       {spec.id === 'codex-cli' ? <OpenAIReportingPanel report={payload.openaiReporting} onChanged={setPayload} /> : null}
                       {spec.id === 'claude-code' ? <AnthropicReportingSetup payload={payload} onChanged={setPayload} /> : null}
-                      {spec.id === 'codex-cli' || spec.id === 'claude-code' ? <AccountFunding provider={spec.id === 'codex-cli' ? 'openai' : 'anthropic'} payload={payload} onChanged={setPayload} /> : null}
-                      {spec.id === 'codex-cli' || spec.id === 'claude-code' ? <ApiConnections provider={spec.id === 'codex-cli' ? 'openai' : 'anthropic'} connections={payload.apiConnections ?? []} openaiReport={payload.openaiReporting} onChanged={setPayload} /> : null}
+                      {(spec.id === 'codex-cli' || spec.id === 'claude-code') && payload.fundingAccounts?.some(a => a.provider === (spec.id === 'codex-cli' ? 'openai' : 'anthropic') && a.pools.length > 0) ? <details className="kb-api-manual"><summary>Previously saved account balances</summary><AccountFunding provider={spec.id === 'codex-cli' ? 'openai' : 'anthropic'} payload={payload} onChanged={setPayload} /></details> : null}
+                      {spec.id === 'codex-cli' || spec.id === 'claude-code' ? <ApiConnections provider={spec.id === 'codex-cli' ? 'openai' : 'anthropic'} connections={payload.apiConnections ?? []} openaiReport={payload.openaiReporting} anthropicReports={payload.anthropicReportingAccounts} onChanged={setPayload} /> : null}
                     </div>
                   );
                 })}

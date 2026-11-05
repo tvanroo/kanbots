@@ -256,6 +256,8 @@ export interface ApiConnection {
   priority: number;
   keyPreview: string;
   funding: 'unknown' | 'paid' | 'grant' | 'subscription-credit';
+  rollover?: boolean | undefined;
+  afterGrant?: 'stop' | 'paygo' | undefined;
   budget: number | null;
   remaining: number | null;
   expirationMode?: 'unknown' | 'never' | 'date' | undefined;

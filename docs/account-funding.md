@@ -40,3 +40,9 @@ Existing per-key funding notes remain intact. The account UI offers explicit rev
 - [Anthropic usage and costs](https://platform.claude.com/docs/en/manage-claude/usage-cost-analytics-api)
 
 Future provider-ledger adapters must retain grant IDs, currencies, provider organization IDs, retrieval times and per-field provenance. They should replace only the matching provider-reported fields and leave manually confirmed missing details intact. Browser-assisted billing imports would be a separate integration, not a capability of today's API credentials.
+
+## Per-key setup (1.1.11)
+
+The primary entry point is now each API key's Payment control: pay-as-you-go, monthly grant, or other credit. Monthly grants store amount, next reset instant and display zone, rollover policy, and stop/pay-go after exhaustion. Unknown remaining balance stays unknown; entering an amount does not establish the remaining balance. Reset dates do not create credits automatically. Existing account-level pools remain accessible in a collapsed legacy section, without migration or duplicate balance creation. Verified organization IDs remain on keys for later shared-pool reconciliation.
+
+OpenAI and Anthropic key cards show reporting coverage separately from model access. These settings are persisted configuration, not an active API dispatch or spending enforcement path. A future router must classify an exhausted grant with pay-go fallback as paid capacity and re-rank against available subscription/grant capacity; stop must exclude it. Shared organization reports must not be subtracted independently from each key.

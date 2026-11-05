@@ -42,6 +42,7 @@ const connectionSchema = z.object({
   enabled: z.boolean(), priority: z.number().int().min(0).max(999),
   apiKey: z.string().trim().min(11).max(2000).optional(),
   funding: z.enum(['unknown', 'paid', 'grant', 'subscription-credit']),
+  rollover: z.boolean().optional(), afterGrant: z.enum(['stop', 'paygo']).optional(),
   budget: z.number().nonnegative().nullable(), remaining: z.number().nonnegative().nullable(),
   expirationMode: z.enum(['unknown', 'never', 'date']).optional(),
   expiresAt: z.string().datetime().nullable(),
