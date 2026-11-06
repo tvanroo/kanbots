@@ -27,6 +27,11 @@ type ScheduleReceipt={id?:string;status:'active'|'paused'|'unsupported';cadenceM
 type Workspace={schedules?:Record<string,ScheduleReceipt>;requests?:CoordinatorRequest[];handoff?:Handoff;queue?:Array<{id:string;number:number;budgetUsd:number;qa:boolean;maxReworks:number;readOnly:boolean}>;onboardedAt?:string;inventory?:Record<string,{number:number;kind:string;evidence:string;verifiedAt:string;sourceHash?:string}>;id:string;path:string;revision:number;mode:'internal'|'external'|'off';controller:string|null;leaseUntil:number;epoch:number;conversationId?:number;objective:string;summary:string;parallelism:number;qaDefault:boolean;maxReworks:number;budgetUsd:number;dependencies:Record<string,number[]>;jobs:Job[];releases:Release[];decisions:Array<{id:string;cardId:number;value:string;question?:string;label?:string;state:string}>;events:Array<{cursor:number;at:string;type:string;data:unknown}>;nextCursor:number;snapshot?:string;receipts:Record<string,{digest:string;state:string;result?:unknown;error?:string}>};
 type Registry={clients:Client[];workspaces:Workspace[]};
 export class CoordinatorService{
+  private updater?:{status:()=>any;check:()=>Promise<any>;request:(args:any,repoPath:string)=>Promise<any>;pending:()=>boolean};
+  updateIdle(){return !this.polling&&!this.inFlight.size;}
+  allowRequests(){this.closing=false;}
+  setUpdater(updater:NonNullable<CoordinatorService['updater']>){this.updater=updater;}
+  async resumeAfterUpdate(version:string){const w=this.current();this.closing=false;this.event(w,'application-updated',{version,instruction:'Reconcile saved work and continue the current objective. Do not duplicate workers.'});if(w.mode==='internal'&&w.conversationId)await this.uiAction('chat-send',{body:'KanBorg has updated and reopened this project. Read the durable coordination state and changes, reconcile saved workers and pending decisions, and continue the current authorized objective without duplicating work.'});}
   private state:Registry;private context:CoordinatorContext|null=null;private url='';private inFlight=new Map<string,Promise<any>>();private polling=false;private closing=false;private internalTokens=new Map<string,{workspaceId:string;actor:string;epoch:number;expires:number;clientId?:string}>();private launcher='';private entry='';
   constructor(private root=app.getPath('userData')){mkdirSync(root,{recursive:true,mode:0o700});this.state=existsSync(this.file())?JSON.parse(readFileSync(this.file(),'utf8')):{clients:[],workspaces:[]};}
   private file(){return join(this.root,'coordinators.json');}
@@ -52,9 +57,11 @@ export class CoordinatorService{
       ...(!compact?{instruction:'Replace this workspace reminder on takeover. Pause superseded harness reminders; do not claim completion without confirmation. No continuing responsibility means pause.'}:{})};
   }
   private session(w:Workspace){return {workspaceId:w.id,revision:w.revision,mode:w.mode,controller:w.controller,leaseUntil:w.leaseUntil,objective:w.objective,summary:w.summary,authority:{coordination:'assigned-controller',release:'assigned-controller within owner-authorized scope',pairing:'owner-only'},checkIn:this.checkinPolicy(w),parallelism:w.parallelism,qaDefault:w.qaDefault,budgetUsd:w.budgetUsd,maxReworks:w.maxReworks,conversationId:w.conversationId,onboardedAt:w.onboardedAt,handoff:w.handoff,requests:(w.requests??[]).filter(r=>r.state!=='completed')};}
-  ui(){return {workspace:this.context?this.session(this.current()):null,workspaces:this.state.workspaces.map(w=>({id:w.id,name:basename(w.path),open:w.path===this.context?.repoPath})),clients:this.state.clients.map(({tokenHash,...c})=>c),jobs:this.context?this.current().jobs:[],queue:this.context?this.current().queue??[]:[],releases:this.context?this.current().releases:[],decisions:this.context?this.current().decisions:[],guide:COORDINATOR_GUIDE};}
+  ui(){return {workspace:this.context?this.session(this.current()):null,workspaces:this.state.workspaces.map(w=>({id:w.id,name:basename(w.path),open:w.path===this.context?.repoPath})),clients:this.state.clients.map(({tokenHash,...c})=>c),jobs:this.context?this.current().jobs:[],queue:this.context?this.current().queue??[]:[],releases:this.context?this.current().releases:[],decisions:this.context?this.current().decisions:[],guide:COORDINATOR_GUIDE,applicationUpdate:this.updater?.status()??null};}
   async uiAction(action:string,args:any={}):Promise<any>{
     const w=this.current();
+    if(action==='check-application-update'){if(!this.updater)throw Error('Updater unavailable');return this.updater.check();}
+    if(action==='update-application'){if(!this.updater)throw Error('Updater unavailable');return this.updater.request(args,w.path);}
     if(action==='is-coordinator-run'){const conversation=w.conversationId?this.context!.store.chatConversations.findById(w.conversationId):null;return {matches:!!conversation&&this.context!.store.agentRuns.findById(args.runId)?.threadId===conversation.threadId};}
     if(action==='resolve-chat-decision'){const chat=w.conversationId?await this.h()['chat:get']({conversationId:w.conversationId}):null;const card=chat?.cards.find(c=>c.id===args.cardId&&c.status==='pending');if(!card)throw Error('This question is no longer pending.');return this.h()['cards:resolve']({cardId:args.cardId,value:args.value});}
     if(action==='onboarding-start'||action==='external-setup-start'){
@@ -194,7 +201,7 @@ Never approve your own pairing. No provider API keys are needed.\n\nClaude Deskt
   async call(actor:string,scope:string,name:string,raw:unknown):Promise<any>{
     if(this.closing)throw Error('Workspace is closing; reconnect after opening it.');
     const args=validateCoordinatorArgs(name,raw);
-    if(name==='getCapabilities')return {version:'1.2.12',authority:'active-coordinator',guide:COORDINATOR_GUIDE,scope,tools:COORDINATOR_TOOLS.map(t=>t.name),releaseActions:['merge','draft-pr'],hosted:false};
+    if(name==='getCapabilities')return {version:'1.2.13',authority:'active-coordinator',guide:COORDINATOR_GUIDE,scope,tools:COORDINATOR_TOOLS.map(t=>t.name),releaseActions:['merge','draft-pr'],hosted:false};
     if(name==='listWorkspaces')return this.state.workspaces.filter(w=>w.id===scope).map(w=>({workspaceId:w.id,name:basename(w.path),open:this.context?.repoPath===w.path}));
     if(args.workspaceId!==scope)throw Error('This connection is not permitted for that workspace');const w=this.resolve(scope);
     if(name==='renewCoordinator'){if(w.controller!==actor||w.mode==='off')throw Error('Control belongs elsewhere');w.leaseUntil=Date.now()+30*60000;this.save();return this.session(w);}
@@ -209,6 +216,7 @@ Never approve your own pairing. No provider API keys are needed.\n\nClaude Deskt
     if(!isWrite){const result=await this.read(w,name,args);if(['getWorkspaceSummary','getCoordinationSession'].includes(name)&&w.handoff?.from===actor&&w.handoff.state!=='requested')return {...result,coordinatorInstruction:pauseCheckins};return result;}
     if(w.handoff&&w.handoff.state!=='completed'&&!['updateCoordinationSession','completeHandoff'].includes(name))throw Error('Handoff requested. Stop new work and call completeHandoff with a current summary.');
     this.assertControl(w,actor);
+    if(this.updater?.pending()&&['dispatchTask','followUpRun','runQA','executeRelease','prepareExternalCoordinator'].includes(name))throw Error('An application update is waiting. Existing runs can finish; new work resumes after restart.');
     const key=actor+':'+args.requestId;const digest=hash(JSON.stringify({name,args}));const existing=w.receipts[key];
     if(existing){if(existing.digest!==digest)throw Error('Request ID was already used with different arguments');const running=this.inFlight.get(key);if(running)return running;if(existing.state==='done')return existing.result;throw Error(existing.error??'Request outcome is uncertain. Inspect workspace and run history; do not blindly repeat.');}
     if(args.revision!==w.revision)throw Error(`Stale revision. Current revision is ${w.revision}; refresh session.`);
@@ -219,6 +227,7 @@ Never approve your own pairing. No provider API keys are needed.\n\nClaude Deskt
   private async read(w:Workspace,name:string,a:any):Promise<any>{
     const h=this.h();
     switch(name){
+      case 'getApplicationUpdate':if(!this.updater)throw Error('Updater unavailable');return this.updater.check();
       case 'getCoordinatorRequests':return (w.requests??[]).filter(r=>r.state!=='completed');
       case 'getCoordinationSession':return this.session(w);
       case 'getOnboardingBrief':return {prompt:REPO_ONBOARDING_PROMPT,lastReconciledAt:w.onboardedAt??null,inventory:w.inventory??{}};
@@ -238,6 +247,7 @@ Never approve your own pairing. No provider API keys are needed.\n\nClaude Deskt
   private async mutate(w:Workspace,name:string,a:any):Promise<any>{
     const h=this.h();
     switch(name){
+      case 'updateApplication':if(!this.updater)throw Error('Updater unavailable');return this.updater.request(a,w.path);
       case 'acknowledgeCoordinatorRequest':{const r=w.requests?.find(r=>r.id===a.id);if(!r)throw Error('Request not found.');if(r.state!=='completed'){r.state=a.state;r.receivedBy=w.controller!;}return r;}
       case 'completeHandoff':{const h=w.handoff;if(!h||h.id!==a.handoffId||h.from!==w.controller||h.state==='completed')throw Error('Handoff is no longer current.');h.summary=a.summary;w.summary=a.summary;h.state='ready';return {...h,coordinatorInstruction:pauseCheckins};}
       case 'prepareExternalCoordinator':{if(w.mode!=='internal')throw Error('Prepare external harness setup from the built-in coordinator.');const client=this.state.clients.find(c=>c.workspaceId===w.id&&c.name===a.name&&c.status!=='revoked');const setup=client?{code:client.code,...this.config(client.id)}:await this.uiAction('add-client',{name:a.name});return {...setup,humanApprovalRequired:true,nextAction:'Show the setup request to the user. They connect their harness, approve pairing in KanBorg, then choose Use coordinator. Do not hand off automatically.'};}
@@ -279,7 +289,7 @@ Never approve your own pairing. No provider API keys are needed.\n\nClaude Deskt
     if(j.reworks>=j.maxReworks){j.state='needs-changes';j.error=reason;this.event(w,'needs-changes',{runId:j.runId,reason});return;}
     j.reworks++;j.state='implementing';delete j.reviewRunId;delete j.sha;this.save();await this.context!.supervisor.resume({runId:j.runId,prompt:`QA found problems. Fix only these, rerun relevant checks, and commit locally. Do not merge or push.\n${reason}`,costBudgetUsd:j.budgetUsd});this.event(w,'rework-started',{runId:j.runId,attempt:j.reworks});
   }
-  async tick(){if(this.polling||this.closing||this.inFlight.size||!this.context)return;this.polling=true;try{const w=this.current();
+  async tick(){if(this.polling||this.closing||this.inFlight.size||!this.context||this.updater?.pending())return;this.polling=true;try{const w=this.current();
     if(w.mode==='internal'&&w.conversationId&&(!w.handoff||w.handoff.state==='completed')){const pending=w.requests?.find(r=>r.state==='queued');if(pending){const chat=await this.h()['chat:get']({conversationId:w.conversationId});if(!chat.activeRun){pending.state='received';pending.receivedBy=w.controller!;this.save();try{const result=await this.uiAction('chat-send',{body:pending.prompt});if(result?.dispatchError)throw Error(result.dispatchError);this.event(w,'coordinator-request-received',{id:pending.id});}catch(e){this.event(w,'coordinator-request-blocked',{id:pending.id,error:clip(e instanceof Error?e.message:'Could not start request')});}}}}
     for(const q of [...(w.handoff&&w.handoff.state!=='completed'?[]:w.queue??[])]){
       const slots=w.jobs.filter(j=>active(this.run(j.runId).status)||(j.reviewRunId&&active(this.run(j.reviewRunId).status))).length;

@@ -10,7 +10,14 @@ const net=require('node:net');
  const root=fs.mkdtempSync(path.join(os.tmpdir(),'kanbots-launch-check-'));
  const server=net.createServer();await new Promise(r=>server.listen(0,'127.0.0.1',r));const port=server.address().port;await new Promise(r=>server.close(r));
  const env={...process.env};delete env.ELECTRON_RUN_AS_NODE;
- const child=spawn(binary,[`--user-data-dir=${root}`,`--remote-debugging-port=${port}`],{env,stdio:['ignore','pipe','pipe']});
+ let recoveryArgs=[];
+ if(process.argv.includes('--update-recovery')){
+  const repo=path.join(root,'restored-project');fs.mkdirSync(repo);execFileSync('git',['init',repo],{stdio:'ignore'});fs.writeFileSync(path.join(repo,'README.md'),'# Update recovery test\n');execFileSync('git',['-C',repo,'add','.']);execFileSync('git',['-C',repo,'-c','user.name=Smoke','-c','user.email=smoke@example.invalid','commit','-m','Test'],{stdio:'ignore'});
+  const job=path.join(root,'update-job');fs.mkdirSync(job);
+  fs.writeFileSync(path.join(root,'application-update.json'),JSON.stringify({id:'packaged-recovery',phase:'installing',version:require('../package.json').version,fromVersion:'1.2.12',repoPath:repo,job,requestedAt:new Date().toISOString()}));
+  recoveryArgs=['--kanborg-update-token=packaged-recovery'];
+ }
+ const child=spawn(binary,[`--user-data-dir=${root}`,`--remote-debugging-port=${port}`,...recoveryArgs],{env,stdio:['ignore','pipe','pipe']});
  let logs='',socket;child.stdout.on('data',b=>logs+=b);child.stderr.on('data',b=>logs+=b);
  try{
   let page;const until=Date.now()+25000;
@@ -31,6 +38,14 @@ const net=require('node:net');
    await new Promise(r=>setTimeout(r,250));
   }
   if(!state?.bridge||state.text.length<=20)throw Error('Renderer or desktop bridge failed to initialize');
+  if(process.argv.includes('--update-recovery')){
+   const deadline=Date.now()+20000;while(Date.now()<deadline&&!fs.existsSync(path.join(root,'update-job','healthy')))await new Promise(r=>setTimeout(r,250));
+   const receipt=JSON.parse(fs.readFileSync(path.join(root,'application-update.json'),'utf8'));
+   if(receipt.phase!=='completed')throw Error('Update workspace recovery failed: '+JSON.stringify(receipt));
+   const registry=JSON.parse(fs.readFileSync(path.join(root,'coordinators.json'),'utf8'));
+   if(!registry.workspaces.some(w=>fs.realpathSync(w.path)===fs.realpathSync(receipt.repoPath)&&w.events.some(e=>e.type==='application-updated')))throw Error('Recovery event or workspace missing');
+   console.log(JSON.stringify({updateRecovery:true,workspaceRestored:true,readyReceipt:true}));
+  }
   if(process.argv.includes('--board')){
    const repo=path.join(root,'sample-repository');fs.mkdirSync(repo);execFileSync('git',['init',repo],{stdio:'ignore'});fs.writeFileSync(path.join(repo,'README.md'),'# Sample project\n');execFileSync('git',['-C',repo,'add','README.md']);execFileSync('git',['-C',repo,'-c','user.name=Smoke Test','-c','user.email=smoke@example.invalid','commit','-m','Initial test repository'],{stdio:'ignore'});
    console.log('Opening isolated repository');

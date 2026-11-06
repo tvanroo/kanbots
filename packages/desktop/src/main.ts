@@ -1,5 +1,6 @@
+import { SelfUpdater } from './self-update.js';
 import { CoordinatorService } from './coordinator.js';
-import { startRoutedRun } from './automatic-routing.js';
+import { startRoutedRun as startRoutedRunUnchecked } from './automatic-routing.js';
 import { configureRoutingProviders, collectCapacity, invalidateCapacity } from './routing-capacity.js';
 import { routingState,saveRouting } from './routing-state.js';
 import { manageCodexResets, notifyClaudeReset } from './subscription-resets.js';
@@ -229,6 +230,9 @@ process.on('unhandledRejection', (reason) => {
 
 let activeWorkspace: ActiveWorkspace | null = null;
 let coordinators: CoordinatorService;
+let selfUpdater: SelfUpdater;
+let updateRestart=false;
+const startRoutedRun:typeof startRoutedRunUnchecked=(opts)=>{if(updateRestart)throw Error('KanBorg is restarting for an update. Work resumes after reopening.');return startRoutedRunUnchecked(opts);};
 /**
  * Free-floating cloud workspace (no git repo). Mutually exclusive
  * with `activeWorkspace` — opening one closes the other so the
@@ -2218,14 +2222,36 @@ if (process.platform === 'darwin') {
 const ownsLocalInstance = app.requestSingleInstanceLock();
 if (!ownsLocalInstance) app.quit();
 if (ownsLocalInstance) void app.whenReady().then(async () => {
+  selfUpdater=new SelfUpdater();
   coordinators=new CoordinatorService();
+  coordinators.setUpdater({status:()=>selfUpdater.status(),check:()=>selfUpdater.check(),request:(a,p)=>Promise.resolve(selfUpdater.enqueue(a,p)),pending:()=>selfUpdater.pending()});
   const coordinatorEntry=resolveMcpServerEntry();
   if(coordinatorEntry) await coordinators.start(coordinatorEntry);
   Menu.setApplicationMenu(null);
   registerIpc();
   await createWindow();
+  const recovery=selfUpdater.recovery();
+  if(recovery){
+    try{
+      await openWorkspaceInternal(recovery.repoPath);
+      await mainWindow!.loadFile(join(__dirname, 'web', 'index.html'));
+      selfUpdater.complete();
+      await coordinators.resumeAfterUpdate(app.getVersion());
+    }catch(e){selfUpdater.failRecovery(e instanceof Error?e.message:'Workspace recovery failed');}
+  }
+  const updateTimer=setInterval(()=>void selfUpdater.installWhenIdle(async()=>{
+    if(!activeWorkspace||!coordinators.updateIdle()||activeWorkspace.repoPath!==selfUpdater.status().update?.repoPath)return false;
+    return !activeWorkspace.store.agentRuns.listActive().length&&!deviceChatStore?.agentRuns.listActive().length&&!activeCloudRuns.size&&!activeWorkspace.autopilot.listActive().length;
+  },async()=>{
+    updateRestart=true;
+    await coordinators.beforeClose();
+    if(activeWorkspace?.store.agentRuns.listActive().length||deviceChatStore?.agentRuns.listActive().length||activeCloudRuns.size)throw Error('A new run started before restart. Let it finish and request the update again.');
+    await closeActiveWorkspace();
+    deviceChatStore?.close();deviceChatStore=null;
+    closeProvidersStoreForShutdown();
+  }).catch(async error=>{console.error('[update] Could not finish update:',error.message);updateRestart=false;coordinators.allowRequests();const record=selfUpdater.status().update;if(!activeWorkspace&&record?.repoPath)await openWorkspaceInternal(record.repoPath).catch(()=>{});}),3000);updateTimer.unref();
 
-  app.on('activate', async () => {
+  app.on('activate' , async () => {
     if (BrowserWindow.getAllWindows().length === 0) {
       await createWindow();
     }
@@ -2233,6 +2259,7 @@ if (ownsLocalInstance) void app.whenReady().then(async () => {
 });
 
 app.on('window-all-closed', async () => {
+  if(updateRestart)return;
   // The chat windows have their own lifecycle and may still be running;
   // BrowserWindow.getAllWindows() is empty here only when the user has
   // explicitly closed every window. Drop the workspace so processes don't
@@ -2244,6 +2271,7 @@ app.on('window-all-closed', async () => {
 });
 
 app.on('before-quit', async () => {
+  if(updateRestart)return;
   closeAllChatWindows();
   await closeActiveWorkspace();
   closeProvidersStoreForShutdown();
