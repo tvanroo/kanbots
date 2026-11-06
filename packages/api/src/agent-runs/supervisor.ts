@@ -606,7 +606,7 @@ export async function createSupervisor(
         store.agentRuns.update(run.id, {
           sessionId: streamEvent.sessionId,
           ...(streamEvent.provider ? {provider:streamEvent.provider} : {}),
-          ...(streamEvent.model !== null ? { model: streamEvent.model } : {}),
+          model: streamEvent.model,
         });
         return;
       }

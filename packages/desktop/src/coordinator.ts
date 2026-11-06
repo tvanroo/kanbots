@@ -24,9 +24,9 @@ type Client={id:string;name:string;workspaceId:string;role:'observer'|'coordinat
 type Job={runId:number;number:number;role:string;qa:boolean;maxReworks:number;reworks:number;budgetUsd:number;state:string;sha?:string;reviewRunId?:number;checkIds?:number[];error?:string};
 type Release={id:string;runId:number;sha:string;targetBranch:string;targetSha:string;action:'merge'|'draft-pr';title?:string;body?:string;state:string;result?:unknown};
 type Handoff={id:string;from:string|null;to:string;mode:'internal'|'external';state:'requested'|'ready'|'completed';requestedAt:string;summary:string;checkpoint:unknown;receivedBy?:string};
-type CoordinatorRequest={id:string;kind:'discovery'|'resume-workflows'|'workflow-change'|'workflow-action';prompt:string;state:'queued'|'received'|'completed';createdAt:string;receivedBy?:string};
+type CoordinatorRequest={id:string;kind:'discovery'|'resume-workflows'|'workflow-change'|'workflow-action'|'autopilot';prompt:string;state:'queued'|'received'|'completed';createdAt:string;receivedBy?:string};
 type ScheduleReceipt={id?:string;status:'active'|'paused'|'unsupported';cadenceMinutes?:number;cursor?:number;confirmedAt:string};
-type Workspace={workflow?:WorkflowState;workflowSignals?:Record<string,string>;schedules?:Record<string,ScheduleReceipt>;requests?:CoordinatorRequest[];handoff?:Handoff;queue?:Array<{id:string;number:number;budgetUsd:number;qa:boolean;maxReworks:number;readOnly:boolean}>;onboardedAt?:string;inventory?:Record<string,{number:number;kind:string;evidence:string;verifiedAt:string;sourceHash?:string}>;id:string;path:string;revision:number;mode:'internal'|'external'|'off';controller:string|null;leaseUntil:number;epoch:number;conversationId?:number;objective:string;summary:string;parallelism:number;qaDefault:boolean;maxReworks:number;budgetUsd:number;dependencies:Record<string,number[]>;jobs:Job[];releases:Release[];decisions:Array<{id:string;cardId:number;value:string;question?:string;label?:string;state:string}>;events:Array<{cursor:number;at:string;type:string;data:unknown}>;nextCursor:number;snapshot?:string;receipts:Record<string,{digest:string;state:string;result?:unknown;error?:string}>};
+type Workspace={autopilot?:{status:string;personas:Array<{id:string;name:string;prompt:string}>;effort:string;parallelism:number;objective:string;updatedAt:string;legacyWork:unknown[]};workflow?:WorkflowState;workflowSignals?:Record<string,string>;schedules?:Record<string,ScheduleReceipt>;requests?:CoordinatorRequest[];handoff?:Handoff;queue?:Array<{id:string;number:number;budgetUsd:number;qa:boolean;maxReworks:number;readOnly:boolean}>;onboardedAt?:string;inventory?:Record<string,{number:number;kind:string;evidence:string;verifiedAt:string;sourceHash?:string}>;id:string;path:string;revision:number;mode:'internal'|'external'|'off';controller:string|null;leaseUntil:number;epoch:number;conversationId?:number;objective:string;summary:string;parallelism:number;qaDefault:boolean;maxReworks:number;budgetUsd:number;dependencies:Record<string,number[]>;jobs:Job[];releases:Release[];decisions:Array<{id:string;cardId:number;value:string;question?:string;label?:string;state:string}>;events:Array<{cursor:number;at:string;type:string;data:unknown}>;nextCursor:number;snapshot?:string;receipts:Record<string,{digest:string;state:string;result?:unknown;error?:string}>};
 type Registry={templates?:Record<string,{id:string;name:string;version:number;config:WorkflowConfig;updatedAt:string;actor:string}>;clients:Client[];workspaces:Workspace[]};
 export class CoordinatorService{
   private workflowNotifier?:()=>void;
@@ -70,17 +70,18 @@ export class CoordinatorService{
   private compactRun(id:number){const r=this.run(id);return {runId:r.id,status:r.status,branch:r.branchName,model:r.model,provider:r.provider,costUsd:r.totalCostUsd,costSource:'run-reported; may include estimates',exitReason:r.exitReason,successSignal:r.successSignal};}
   private assertControl(w:Workspace,actor:string){if(w.controller!==actor||w.mode==='off')throw Error('This session is controlled elsewhere. Hand off in KanBorg Coordinators.');if(w.leaseUntil<Date.now())throw Error('Controller lease expired. Call renewCoordinator.');}
   private checkinPolicy(w:Workspace,compact=false){
-    const running=w.jobs.some(j=>['implementing','checks','reviewing'].includes(j.state))||!!w.queue?.length||(w.requests??[]).some(r=>['resume-workflows','workflow-action','workflow-change'].includes(r.kind)&&r.state!=='completed');
-    const continuing=!!w.objective.trim()||(w.requests??[]).some(r=>r.state!=='completed');
+    const running=w.jobs.some(j=>['implementing','checks','reviewing'].includes(j.state))||!!w.queue?.length||(w.requests??[]).some(r=>['resume-workflows','workflow-action','workflow-change','autopilot'].includes(r.kind)&&r.state!=='completed');
+    const continuing=w.autopilot?.status==='active'||!!w.objective.trim()||(w.requests??[]).some(r=>r.state!=='completed');
     return {owner:w.controller,key:`kanborg:${w.id}`,cadenceMinutes:w.mode==='off'||(!running&&!continuing)?null:running?(w.workflow?.config.cadence.working??5):(w.workflow?.config.cadence.idle??15),
       ...(!compact?{prompt:COORDINATOR_REMINDER}:{}),execution:'harness-managed',confirmed:w.controller?w.schedules?.[w.controller]??null:null,
       retirementPending:Object.entries(w.schedules??{}).filter(([owner,r])=>owner!==w.controller&&r.status==='active').map(([owner,r])=>({owner,id:r.id,status:'pause-required'})),
       ...(!compact?{instruction:'Replace this workspace reminder on takeover. Pause superseded harness reminders; do not claim completion without confirmation. No continuing responsibility means pause.'}:{})};
   }
-  private session(w:Workspace){return {workflowVersion:w.workflow?.version??1,workflowContract:w.workflow?.config??newWorkflow().config,workspaceId:w.id,revision:w.revision,mode:w.mode,controller:w.controller,leaseUntil:w.leaseUntil,objective:w.objective,summary:w.summary,authority:{coordination:'assigned-controller',release:w.workflow?.config.releaseOwner==='user'?'owner decision required; tool authorization remains enforced':'assigned-controller within owner-authorized scope',pairing:'owner-only'},checkIn:this.checkinPolicy(w),parallelism:w.parallelism,qaDefault:w.qaDefault,budgetUsd:w.budgetUsd,maxReworks:w.maxReworks,conversationId:w.conversationId,onboardedAt:w.onboardedAt,handoff:w.handoff,requests:(w.requests??[]).filter(r=>r.state!=='completed')};}
+  private session(w:Workspace){return {autopilot:w.autopilot??null,workflowVersion:w.workflow?.version??1,workflowContract:w.workflow?.config??newWorkflow().config,workspaceId:w.id,revision:w.revision,mode:w.mode,controller:w.controller,leaseUntil:w.leaseUntil,objective:w.objective,summary:w.summary,authority:{coordination:'assigned-controller',release:w.workflow?.config.releaseOwner==='user'?'owner decision required; tool authorization remains enforced':'assigned-controller within owner-authorized scope',pairing:'owner-only'},checkIn:this.checkinPolicy(w),parallelism:w.parallelism,qaDefault:w.qaDefault,budgetUsd:w.budgetUsd,maxReworks:w.maxReworks,conversationId:w.conversationId,onboardedAt:w.onboardedAt,handoff:w.handoff,requests:(w.requests??[]).filter(r=>r.state!=='completed')};}
   ui(){return {workspace:this.context?this.session(this.current()):null,workspaces:this.state.workspaces.map(w=>({id:w.id,name:basename(w.path),open:w.path===this.context?.repoPath})),clients:this.state.clients.map(({tokenHash,...c})=>c),jobs:this.context?this.current().jobs:[],queue:this.context?this.current().queue??[]:[],releases:this.context?this.current().releases:[],decisions:this.context?this.current().decisions:[],guide:COORDINATOR_GUIDE,applicationUpdate:this.updater?.status()??null};}
   async uiAction(action:string,args:any={}):Promise<any>{
     const w=this.current();
+    if(action==='autopilot'){validateCoordinatorArgs('manageAutopilot',{workspaceId:w.id,requestId:'app-autopilot-change',revision:w.revision,...args});return this.manageAutopilot(w,args);}
     if(action.startsWith('workflow:')){const name=action.slice(9);const result=await this.workflowAction(w,name,args,'user');return result;}
     if(action==='check-application-update'){if(!this.updater)throw Error('Updater unavailable');return this.updater.check();}
     if(action==='update-application'){if(!this.updater)throw Error('Updater unavailable');return this.updater.request(args,w.path);}
@@ -109,6 +110,13 @@ export class CoordinatorService{
     if(action==='config')return this.config(String(args.id));
     if(action==='approve-client'||action==='revoke-client'){
       const c=this.state.clients.find(c=>c.id===args.id&&c.workspaceId===w.id);if(!c)throw Error('Connection not found');c.status=action==='approve-client'?'approved':'revoked';if(c.status==='revoked'&&w.controller===c.id){w.mode='off';w.controller=null;w.epoch++;}this.event(w,action,{clientId:c.id});return this.ui();
+    }
+    if(action==='request-perspective'){
+      const name=String(args.name??'').trim().slice(0,100),prompt=String(args.prompt??'').trim(),notes=String(args.notes??'').trim();
+      if(!name||!prompt||prompt.length>12000||notes.length>4000)throw Error('Choose a perspective and keep its guidance concise.');
+      if(w.mode==='off')await this.uiAction('handoff',{mode:'internal'});
+      const request:CoordinatorRequest={id:randomUUID(),kind:'discovery',state:'queued',createdAt:new Date().toISOString(),prompt:`Review this repository from the ${name} perspective. Perspective guidance: ${prompt}\nOwner notes: ${notes||'None'}. Read existing tasks and active assignments first. Delegate a read-only review through dispatchTask using automatic routing; do not select a fixed provider or model. Reconcile findings with existing cards, add useful nonduplicate suggestions to the board, and report the results through this coordinator. This is a one-time discovery request, not permission to implement suggestions or start continuous Autopilot.`};
+      w.requests??=[];w.requests.push(request);w.revision++;this.event(w,'coordinator-request',{requestId:request.id,kind:request.kind});return request;
     }
     if(action==='request-discovery'){
       w.requests??=[];const existing=w.requests.find(r=>r.kind==='discovery'&&r.state!=='completed');if(existing)return existing;
@@ -223,7 +231,7 @@ Never approve your own pairing. No provider API keys are needed.\n\nClaude Deskt
   async call(actor:string,scope:string,name:string,raw:unknown):Promise<any>{
     if(this.closing)throw Error('Workspace is closing; reconnect after opening it.');
     const args=validateCoordinatorArgs(name,raw);
-    if(name==='getCapabilities')return {version:'1.2.19',authority:'active-coordinator',guide:COORDINATOR_GUIDE,scope,tools:COORDINATOR_TOOLS.map(t=>t.name),releaseActions:['merge','draft-pr'],hosted:false};
+    if(name==='getCapabilities')return {version:'1.2.20',authority:'active-coordinator',guide:COORDINATOR_GUIDE,scope,tools:COORDINATOR_TOOLS.map(t=>t.name),releaseActions:['merge','draft-pr'],hosted:false};
     if(name==='listWorkspaces')return this.state.workspaces.filter(w=>w.id===scope).map(w=>({workspaceId:w.id,name:basename(w.path),open:this.context?.repoPath===w.path}));
     if(args.workspaceId!==scope)throw Error('This connection is not permitted for that workspace');const w=this.resolve(scope);
     if(name==='renewCoordinator'){if(w.controller!==actor||w.mode==='off')throw Error('Control belongs elsewhere');w.leaseUntil=Date.now()+30*60000;this.save();return this.session(w);}
@@ -272,6 +280,7 @@ Never approve your own pairing. No provider API keys are needed.\n\nClaude Deskt
     const h=this.h();
     switch(name){
       case 'recordWorkflowEvent':if(!a.evidence.trim())throw Error('Record the exact revision and supporting evidence.');await this.workflowSignal(w,a.number,a.event,a.evidence,a.requestId);return workflowGuidance(w.workflow!,a.number);
+      case 'manageAutopilot':return this.manageAutopilot(w,a);
       case 'applyWorkflowChange':return this.workflowAction(w,'apply',a,w.controller!);
       case 'undoWorkflowChange':return this.workflowAction(w,'undo',a,w.controller!);
       case 'updateWorkflowCard':return this.workflowAction(w,'card',a,w.controller!);
@@ -303,6 +312,26 @@ Never approve your own pairing. No provider API keys are needed.\n\nClaude Deskt
       case 'executeRelease':if(w.workflow?.config.releaseOwner==='user'&&!w.releases.some(r=>r.id===a.releaseId&&r.state==='approved'))throw Error('This workflow reserves releases for the user. Ask for the owner decision or an explicitly requested policy change.');return this.executeRelease(w,String(a.releaseId));
       default:throw Error('Unsupported action');
     }
+  }
+  private async manageAutopilot(w:Workspace,a:any){
+    if(a.action==='start'){
+      if(!a.personas?.length)throw Error('Choose at least one perspective.');
+      if(w.autopilot?.status==='active')throw Error('An autopilot assignment is already active. Update or pause it through your coordinator.');
+      const legacy=await this.h()['autopilot:list-active']();
+      for(const loop of legacy)await this.h()['autopilot:stop']({sessionId:loop.id,stopChildren:false});
+      if(w.mode==='off')await this.uiAction('handoff',{mode:'internal'});
+      w.autopilot={status:'active',personas:a.personas,effort:a.effort??'medium',parallelism:a.parallelism??1,objective:a.objective??'Continuously discover and deliver useful improvements within the project scope.',updatedAt:new Date().toISOString(),legacyWork:legacy.flatMap((loop:any)=>loop.children??[])};
+    }else{
+      if(!w.autopilot)throw Error('No autopilot assignment exists for this project.');
+      if(a.action==='pause')w.autopilot.status='paused';
+      if(a.action==='resume')w.autopilot.status='active';
+      if(a.action==='complete')w.autopilot.status='completed';
+      if(a.personas)w.autopilot.personas=a.personas;if(a.effort)w.autopilot.effort=a.effort;if(a.parallelism)w.autopilot.parallelism=a.parallelism;if(a.objective!==undefined)w.autopilot.objective=a.objective;w.autopilot.updatedAt=new Date().toISOString();
+    }
+    const plan=w.autopilot!;w.parallelism=plan.parallelism;
+    for(const r of w.requests??[])if(r.kind==='autopilot'&&r.state!=='completed')r.state='completed';
+    w.requests??=[];w.requests.push({id:randomUUID(),kind:'autopilot',state:'queued',createdAt:new Date().toISOString(),prompt:`Autopilot ${a.action}: ${JSON.stringify(plan)}. You are the sole coordinator and user-facing contact. Read current session, workflow, requests, active workers and decisions. ${plan.status==='active'?'Create or update a parent objective card and link discovered work. Delegate read-only discovery using the selected perspectives through dispatchTask; deduplicate against existing work, prioritize and dispatch implementation and independent QA using the shared automatic routing and funding policies. Keep at most the requested parallelism. Continue the authorized objective after results arrive; report meaningful results and blockers through this same coordinator.':'Do not create new autopilot assignments. Existing workers are preserved; observe their outcomes and report through this same coordinator.'} Do not start the legacy independent autopilot loop or pin a stale model. Adopt the listed legacy workers without restarting or duplicating them. Pause/resume/update/complete this assignment with manageAutopilot; do not claim a change before saving it. Follow the project workflow and existing release authority. Ownership follows coordinator handoffs; no separate harness or reminder is needed.`});
+    w.revision++;this.event(w,'autopilot-updated',{status:plan.status,actor:w.controller});return this.ui();
   }
   private async workflowAction(w:Workspace,action:string,a:any,actor:string):Promise<any>{
     const issues=await this.h()['issues:list']({state:'all'});w.workflow??=newWorkflow();const flow=w.workflow;materialize(flow,issues);

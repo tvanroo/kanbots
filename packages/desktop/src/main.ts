@@ -128,44 +128,6 @@ import {
   QWEN_SETTINGS_PATH,
   startQwenLogin,
 } from './qwen-auth.js';
-import {
-  cancelCloudLogin,
-  clearCloudAuth,
-  CloudAuthRequiredError,
-  dismissCloudPrompt,
-  getCloudStatus,
-  getCloudToken,
-  pollCloudLogin,
-  startCloudLogin,
-  type CloudPollResult,
-  type CloudStatus,
-} from './cloud-auth.js';
-import {
-  clearCloudProjectBinding,
-  getCloudProjectBinding,
-  setCloudProjectBinding,
-  type CloudProjectBinding,
-} from './cloud-bindings.js';
-import {
-  createCloudClient,
-  type AgentRunListResponse,
-  type AgentRunSummary,
-  type AttachmentListResponse,
-  type CardSummary,
-  type CommentListResponse,
-  type CommentSummary,
-  type CreateAgentRunRequest,
-  type CreateCardRequest,
-  type CreateOrgRequest,
-  type CreateOrgResponse,
-  type CreateProjectRequest,
-  type ListCardsQuery,
-  type OrgListResponse,
-  type ProjectListResponse,
-  type ProjectSummary,
-  type UpdateCardRequest,
-  type UserMe,
-} from '@kanborg/cloud-client';
 import { watchDbFile, type DbWatcher } from './db-watcher.js';
 import {
   createSubscriptionRegistry,
@@ -177,8 +139,6 @@ import {
   getAppStore,
   registerProvidersIpc,
 } from './providers-ipc.js';
-import { registerCloudComposerHandlers } from './cloud-composer.js';
-import { startCloudRun, type CloudRunHandle } from './cloud-run-dispatcher.js';
 import {
   broadcastWorkspaceTouched,
   registerWorkspaceTreeIpc,
@@ -234,19 +194,6 @@ let coordinators: CoordinatorService;
 let selfUpdater: SelfUpdater;
 let updateRestart=false;
 const startRoutedRun:typeof startRoutedRunUnchecked=(opts)=>{if(updateRestart)throw Error('KanBorg is restarting for an update. Work resumes after reopening.');return startRoutedRunUnchecked(opts);};
-/**
- * Free-floating cloud workspace (no git repo). Mutually exclusive
- * with `activeWorkspace` — opening one closes the other so the
- * renderer always sees exactly one active workspace.
- */
-let activeCloudWorkspace: ActiveCloudWorkspaceInfo | null = null;
-let cloudComposerUnregister: (() => void) | null = null;
-const activeCloudRuns = new Map<string, CloudRunHandle>();
-/**
- * In-flight cloud run-event SSE streams keyed by subscription id.
- * Renderer holds the matching ids; calling -stream-stop aborts.
- */
-const cloudRunStreamControllers = new Map<string, AbortController>();
 let mainWindow: BrowserWindow | null = null;
 const chatWindows = new Set<BrowserWindow>();
 
@@ -259,26 +206,6 @@ const chatWindows = new Set<BrowserWindow>();
  */
 let deviceChatStore: Store | null = null;
 let deviceChatSupervisor: AgentSupervisor | null = null;
-
-const DEFAULT_CLOUD_BASE_URL =
-  process.env['KANBOTS_CLOUD_BASE_URL'] ?? 'https://app.kanbots.dev';
-
-/**
- * Process-wide cloud client. The base URL and token are resolved
- * lazily on each call so login/logout/endpoint changes propagate
- * without restarting the app.
- */
-const cloudClient = createCloudClient({
-  getToken: getCloudToken,
-  getBaseUrl: async () => {
-    const status = await getCloudStatus();
-    return status.baseUrl ?? DEFAULT_CLOUD_BASE_URL;
-  },
-  // Forward a Vercel deployment-protection bypass token when one is set in
-  // the environment. Lets developers point at protected preview/branch
-  // deploys (e.g. staging) without disabling protection. Unset by default.
-  getBypassToken: async () => process.env['KANBOTS_CLOUD_BYPASS_TOKEN'] ?? null,
-});
 
 function appIconOption(): { icon: string } | Record<string, never> {
   const candidate = join(__dirname, 'icon.png');
@@ -335,36 +262,6 @@ async function pruneMissingRecents(): Promise<RecentWorkspace[]> {
   const present = list.filter((r) => existsSync(r.repoPath));
   if (present.length !== list.length) await writeRecents(present);
   return present;
-}
-
-function cloudRecentsPath(): string {
-  return join(app.getPath('userData'), 'cloud-workspaces.json');
-}
-
-async function readCloudRecents(): Promise<RecentCloudWorkspace[]> {
-  try {
-    const raw = await readFile(cloudRecentsPath(), 'utf-8');
-    const parsed = JSON.parse(raw) as { recents?: RecentCloudWorkspace[] };
-    return Array.isArray(parsed.recents) ? parsed.recents : [];
-  } catch (err) {
-    if ((err as NodeJS.ErrnoException).code === 'ENOENT') return [];
-    return [];
-  }
-}
-
-async function writeCloudRecents(list: RecentCloudWorkspace[]): Promise<void> {
-  const path = cloudRecentsPath();
-  await mkdir(join(path, '..'), { recursive: true });
-  await writeFile(path, JSON.stringify({ recents: list }, null, 2), 'utf-8');
-}
-
-async function recordCloudRecent(entry: Omit<RecentCloudWorkspace, 'lastOpenedAt'>): Promise<void> {
-  const list = await readCloudRecents();
-  const filtered = list.filter(
-    (r) => !(r.orgSlug === entry.orgSlug && r.projectSlug === entry.projectSlug),
-  );
-  filtered.unshift({ ...entry, lastOpenedAt: new Date().toISOString() });
-  await writeCloudRecents(filtered.slice(0, RECENTS_LIMIT));
 }
 
 function stripHouseRules(config: WorkspaceConfig): WorkspaceConfig {
@@ -461,7 +358,6 @@ async function closeActiveWorkspace(): Promise<void> {
   // Free-floating cloud workspace has no local resources, so closing
   // is just clearing the state. Done first so renderer never sees
   // both kinds set at once.
-  closeActiveCloudWorkspace();
   // Chat windows are bound to the workspace's SQLite db; close them before
   // ripping the workspace down so the renderer stops sending IPC into
   // handlers that are about to disappear.
@@ -950,74 +846,6 @@ function activeWorkspaceInfo(): ActiveWorkspaceInfo | null {
   return { repoPath: activeWorkspace.repoPath, config: activeWorkspace.config };
 }
 
-/**
- * Open a free-floating cloud workspace. Closes any active local
- * workspace first (mutually exclusive). Verifies the project exists
- * by hitting the cloud API; if not, returns an error so the picker
- * can re-render.
- */
-async function openCloudWorkspaceInternal(
-  orgSlug: string,
-  projectSlug: string,
-): Promise<ActiveCloudWorkspaceInfo> {
-  const orgList = await cloudClient.orgs.list({ limit: 100 });
-  const org = orgList.data.find((o) => o.slug === orgSlug);
-  if (org === undefined) throw new Error(`org '${orgSlug}' not found or you no longer have access`);
-
-  const projectList = await cloudClient.projects.list(orgSlug);
-  const project = projectList.data.find((p) => p.slug === projectSlug);
-  if (project === undefined) {
-    throw new Error(`project '${projectSlug}' not found in '${orgSlug}'`);
-  }
-
-  await closeActiveWorkspace();
-
-  const binding = await getCloudProjectBinding(orgSlug, projectSlug);
-  const info: ActiveCloudWorkspaceInfo = {
-    orgSlug,
-    orgDisplayName: org.display_name,
-    projectSlug,
-    projectDisplayName: project.display_name,
-    localRepoPath: binding?.localRepoPath ?? null,
-  };
-  activeCloudWorkspace = info;
-  rememberWorkspace(app.getPath('userData'),null);
-  await recordCloudRecent({
-    orgSlug,
-    orgDisplayName: org.display_name,
-    projectSlug,
-    projectDisplayName: project.display_name,
-  });
-
-  // Composer (suggest-a-feature) runs the local Claude/Codex CLI but needs
-  // the cloud backlog as context. Register while the cloud workspace is
-  // open; tear down on close so a future cloud or local workspace can
-  // re-register the same channel without conflict.
-  cloudComposerUnregister = registerCloudComposerHandlers({
-    cloudClient,
-    getActiveCloudWorkspace: () => activeCloudWorkspace,
-    onSuggestEvent: (event) => {
-      const sender = mainWindow?.webContents;
-      if (!sender || sender.isDestroyed()) return;
-      sender.send('composer:suggest:event', event);
-    },
-  });
-
-  return info;
-}
-
-function closeActiveCloudWorkspace(): void {
-  activeCloudWorkspace = null;
-  if (cloudComposerUnregister !== null) {
-    try {
-      cloudComposerUnregister();
-    } catch {
-      // best-effort
-    }
-    cloudComposerUnregister = null;
-  }
-}
-
 function deviceChatDbPath(): string {
   return join(app.getPath('userData'), 'device-chats.db');
 }
@@ -1031,9 +859,6 @@ function deviceChatDbPath(): string {
  */
 function resolveChatCwd(): string {
   if (activeWorkspace !== null) return activeWorkspace.repoPath;
-  if (activeCloudWorkspace !== null && activeCloudWorkspace.localRepoPath !== null) {
-    return activeCloudWorkspace.localRepoPath;
-  }
   return app.getPath('userData');
 }
 
@@ -1109,61 +934,7 @@ function registerDeviceChatIpc(): void {
 // The sign-in flow itself, status probes, and prompt-dismiss must stay
 // reachable without auth (a not-signed-in user has to be able to sign
 // in), so they are intentionally NOT listed here.
-const CLOUD_REQUIRED_CHANNELS: ReadonlySet<string> = new Set([
-  // Cloud REST operations — every one of these makes an authenticated
-  // request to app.kanbots.dev, so they cannot run without a session.
-  'kanbots:cloud:users-me',
-  'kanbots:cloud:orgs-list',
-  'kanbots:cloud:orgs-create',
-  'kanbots:cloud:projects-list',
-  'kanbots:cloud:projects-create',
-  'kanbots:cloud:cards-list',
-  'kanbots:cloud:cards-create',
-  'kanbots:cloud:cards-get',
-  'kanbots:cloud:cards-update',
-  'kanbots:cloud:cards-archive',
-  'kanbots:cloud:cards-unarchive',
-  'kanbots:cloud:comments-list',
-  'kanbots:cloud:comments-add',
-  'kanbots:cloud:attachments-list',
-  'kanbots:cloud:runs-list-for-card',
-  'kanbots:cloud:runs-create',
-  'kanbots:cloud:runs-get',
-  'kanbots:cloud:start-agent-run',
-  'kanbots:cloud:runs-stream-start',
-  'kanbots:cloud:runs-stream-stop',
-  'kanbots:cloud:runs-stop',
-  'kanbots:cloud:cost-today',
-  'kanbots:cloud:project-binding-get',
-  'kanbots:cloud:project-binding-set',
-  'kanbots:cloud:project-binding-clear',
-  // Cloud workspace lifecycle — opening or listing remote workspaces.
-  'kanbots:open-cloud-workspace',
-  'kanbots:close-cloud-workspace',
-  'kanbots:recent-cloud-workspaces',
-]);
-
 function registerIpc(): void {
-  // Wrap ipcMain.handle so that channels in CLOUD_REQUIRED_CHANNELS
-  // reject when there is no active cloud session. Local workspace and
-  // app-level channels (the default) are pass-through so the app boots
-  // and operates fully offline.
-  const origHandle = ipcMain.handle.bind(ipcMain);
-  ipcMain.handle = ((channel: string, listener: Parameters<typeof ipcMain.handle>[1]) => {
-    if (!CLOUD_REQUIRED_CHANNELS.has(channel)) {
-      origHandle(channel, listener);
-      return;
-    }
-    origHandle(channel, async (event, ...args: unknown[]) => {
-      const status = await getCloudStatus();
-      if (!status.authed) throw new CloudAuthRequiredError();
-      return (listener as (...a: unknown[]) => unknown)(event, ...args);
-    });
-  }) as typeof ipcMain.handle;
-
-  // Provider config (Claude Code / Codex CLI defaults) is per-user, so its
-  // handlers live at app scope, not workspace scope — survives cloud and
-  // local workspace transitions. Wrapped by the cloud-auth gate above.
   registerProvidersIpc();
 
   // Workspace file tree + git-status IPC. Read source of truth lazily
@@ -1171,9 +942,6 @@ function registerIpc(): void {
   // local repo) and local-mode (current git workspace).
   registerWorkspaceTreeIpc({
     getCurrentRepoRoot: () => {
-      if (activeCloudWorkspace !== null && activeCloudWorkspace.localRepoPath !== null) {
-        return activeCloudWorkspace.localRepoPath;
-      }
       if (activeWorkspace !== null) return activeWorkspace.repoPath;
       return null;
     },
@@ -1186,12 +954,10 @@ function registerIpc(): void {
   registerDeviceChatIpc();
 
   ipcMain.handle('kanbots:bootstrap', async (): Promise<BootstrapPayload> => {
-    const [recents, cloudRecents, claudeAuthed, codexAuthed, cloudStatus] = await Promise.all([
+    const [recents, claudeAuthed, codexAuthed] = await Promise.all([
       pruneMissingRecents(),
-      readCloudRecents(),
       isClaudeAuthenticated(),
       isCodexAuthenticated(),
-      getCloudStatus(),
     ]);
     // Cheap file/env probes — running each CLI's full status command would
     // shell out and can take seconds. The deeper checks still run via the
@@ -1236,9 +1002,9 @@ function registerIpc(): void {
       Boolean(process.env.QWEN_API_KEY);
     return {
       workspace: activeWorkspaceInfo(),
-      cloudWorkspace: activeCloudWorkspace,
+      cloudWorkspace: null,
       recents,
-      cloudRecents,
+      cloudRecents: [],
       claudeAuthed,
       codexAuthed,
       geminiAuthed,
@@ -1249,8 +1015,8 @@ function registerIpc(): void {
       droidAuthed,
       ccrAuthed,
       qwenAuthed,
-      cloudAuthed: cloudStatus.authed,
-      cloudPromptDismissed: cloudStatus.promptDismissed,
+      cloudAuthed: false,
+      cloudPromptDismissed: true,
     };
   });
 
@@ -1411,492 +1177,6 @@ function registerIpc(): void {
   ipcMain.handle('kanbots:qwen-login-cancel', async (): Promise<void> => {
     cancelQwenLogin();
   });
-
-  ipcMain.handle('kanbots:cloud-auth-status', async (): Promise<CloudStatus> => {
-    return getCloudStatus();
-  });
-
-  ipcMain.handle(
-    'kanbots:cloud-login-start',
-    async (
-      _event,
-      opts?: { baseUrl?: string },
-    ): Promise<
-      | {
-          ok: true;
-          userCode: string;
-          verificationUri: string;
-          verificationUriComplete: string;
-          expiresAt: number;
-          intervalMs: number;
-        }
-      | { ok: false; error: string }
-    > => {
-      return startCloudLogin(opts);
-    },
-  );
-
-  ipcMain.handle('kanbots:cloud-login-poll', async (): Promise<CloudPollResult> => {
-    return pollCloudLogin();
-  });
-
-  ipcMain.handle('kanbots:cloud-login-cancel', async (): Promise<void> => {
-    cancelCloudLogin();
-  });
-
-  ipcMain.handle('kanbots:cloud-logout', async (): Promise<void> => {
-    await clearCloudAuth();
-  });
-
-  ipcMain.handle('kanbots:cloud-prompt-dismiss', async (): Promise<void> => {
-    await dismissCloudPrompt();
-  });
-
-  ipcMain.handle('kanbots:cloud:users-me', async (): Promise<UserMe> => {
-    return cloudClient.users.me();
-  });
-
-  ipcMain.handle(
-    'kanbots:cloud:orgs-list',
-    async (
-      _event,
-      opts?: { cursor?: string; limit?: number },
-    ): Promise<OrgListResponse> => {
-      return cloudClient.orgs.list(opts);
-    },
-  );
-
-  ipcMain.handle(
-    'kanbots:cloud:orgs-create',
-    async (_event, body: CreateOrgRequest): Promise<CreateOrgResponse> => {
-      return cloudClient.orgs.create(body);
-    },
-  );
-
-  ipcMain.handle(
-    'kanbots:cloud:projects-list',
-    async (_event, orgSlug: string): Promise<ProjectListResponse> => {
-      return cloudClient.projects.list(orgSlug);
-    },
-  );
-
-  ipcMain.handle(
-    'kanbots:cloud:projects-create',
-    async (
-      _event,
-      args: { orgSlug: string; body: CreateProjectRequest },
-    ): Promise<ProjectSummary> => {
-      return cloudClient.projects.create(args.orgSlug, args.body);
-    },
-  );
-
-  ipcMain.handle(
-    'kanbots:cloud:cards-list',
-    async (
-      _event,
-      args: { orgSlug: string; projectSlug: string; query?: ListCardsQuery },
-    ) => {
-      return cloudClient.cards.list(args.orgSlug, args.projectSlug, args.query);
-    },
-  );
-
-  ipcMain.handle(
-    'kanbots:cloud:cards-create',
-    async (
-      _event,
-      args: { orgSlug: string; projectSlug: string; body: CreateCardRequest },
-    ) => {
-      return cloudClient.cards.create(args.orgSlug, args.projectSlug, args.body);
-    },
-  );
-
-  ipcMain.handle(
-    'kanbots:cloud:cards-get',
-    async (
-      _event,
-      args: { orgSlug: string; projectSlug: string; number: number },
-    ) => {
-      return cloudClient.cards.get(args.orgSlug, args.projectSlug, args.number);
-    },
-  );
-
-  ipcMain.handle(
-    'kanbots:open-cloud-workspace',
-    async (
-      _event,
-      args: { orgSlug: string; projectSlug: string },
-    ): Promise<{ ok: true } | { ok: false; error: string }> => {
-      try {
-        await openCloudWorkspaceInternal(args.orgSlug, args.projectSlug);
-        if (mainWindow) mainWindow.webContents.reloadIgnoringCache();
-        return { ok: true };
-      } catch (err) {
-        return { ok: false, error: err instanceof Error ? err.message : String(err) };
-      }
-    },
-  );
-
-  ipcMain.handle('kanbots:close-cloud-workspace', async (): Promise<void> => {
-    closeActiveCloudWorkspace();
-    if (mainWindow) mainWindow.webContents.reloadIgnoringCache();
-  });
-
-  ipcMain.handle(
-    'kanbots:recent-cloud-workspaces',
-    async (): Promise<RecentCloudWorkspace[]> => {
-      return readCloudRecents();
-    },
-  );
-
-  ipcMain.handle(
-    'kanbots:cloud:cost-today',
-    async (_event, orgSlug: string): Promise<{ totalUsd: number; since: string }> => {
-      return cloudClient.billing.costToday(orgSlug);
-    },
-  );
-
-  ipcMain.handle(
-    'kanbots:cloud:project-binding-get',
-    async (
-      _event,
-      args: { orgSlug: string; projectSlug: string },
-    ): Promise<CloudProjectBinding | null> => {
-      return getCloudProjectBinding(args.orgSlug, args.projectSlug);
-    },
-  );
-
-  ipcMain.handle(
-    'kanbots:cloud:project-binding-set',
-    async (
-      _event,
-      args: { orgSlug: string; projectSlug: string; localRepoPath: string },
-    ): Promise<CloudProjectBinding> => {
-      const result = await setCloudProjectBinding(
-        args.orgSlug,
-        args.projectSlug,
-        args.localRepoPath,
-      );
-      // Reflect on the active cloud workspace so the renderer's
-      // header updates without a full bootstrap reload.
-      if (
-        activeCloudWorkspace !== null &&
-        activeCloudWorkspace.orgSlug === args.orgSlug &&
-        activeCloudWorkspace.projectSlug === args.projectSlug
-      ) {
-        activeCloudWorkspace = {
-          ...activeCloudWorkspace,
-          localRepoPath: result.localRepoPath,
-        };
-      }
-      return result;
-    },
-  );
-
-  ipcMain.handle(
-    'kanbots:cloud:project-binding-clear',
-    async (
-      _event,
-      args: { orgSlug: string; projectSlug: string },
-    ): Promise<void> => {
-      await clearCloudProjectBinding(args.orgSlug, args.projectSlug);
-      if (
-        activeCloudWorkspace !== null &&
-        activeCloudWorkspace.orgSlug === args.orgSlug &&
-        activeCloudWorkspace.projectSlug === args.projectSlug
-      ) {
-        activeCloudWorkspace = { ...activeCloudWorkspace, localRepoPath: null };
-      }
-    },
-  );
-
-  ipcMain.handle(
-    'kanbots:cloud:cards-update',
-    async (
-      _event,
-      args: {
-        orgSlug: string;
-        projectSlug: string;
-        number: number;
-        body: UpdateCardRequest;
-        ifMatch?: string;
-      },
-    ): Promise<CardSummary> => {
-      const opts = args.ifMatch !== undefined ? { ifMatch: args.ifMatch } : undefined;
-      return cloudClient.cards.update(
-        args.orgSlug,
-        args.projectSlug,
-        args.number,
-        args.body,
-        opts,
-      );
-    },
-  );
-
-  ipcMain.handle(
-    'kanbots:cloud:cards-archive',
-    async (
-      _event,
-      args: { orgSlug: string; projectSlug: string; number: number },
-    ): Promise<void> => {
-      await cloudClient.cards.archive(args.orgSlug, args.projectSlug, args.number);
-    },
-  );
-
-  ipcMain.handle(
-    'kanbots:cloud:cards-unarchive',
-    async (
-      _event,
-      args: { orgSlug: string; projectSlug: string; number: number },
-    ): Promise<CardSummary> => {
-      return cloudClient.cards.unarchive(args.orgSlug, args.projectSlug, args.number);
-    },
-  );
-
-  ipcMain.handle(
-    'kanbots:cloud:comments-list',
-    async (
-      _event,
-      args: { orgSlug: string; projectSlug: string; number: number },
-    ): Promise<CommentListResponse> => {
-      return cloudClient.comments.list(args.orgSlug, args.projectSlug, args.number);
-    },
-  );
-
-  ipcMain.handle(
-    'kanbots:cloud:comments-add',
-    async (
-      _event,
-      args: { orgSlug: string; projectSlug: string; number: number; body: string },
-    ): Promise<CommentSummary> => {
-      return cloudClient.comments.add(args.orgSlug, args.projectSlug, args.number, args.body);
-    },
-  );
-
-  ipcMain.handle(
-    'kanbots:cloud:attachments-list',
-    async (
-      _event,
-      args: { orgSlug: string; projectSlug: string; number: number },
-    ): Promise<AttachmentListResponse> => {
-      return cloudClient.attachments.list(args.orgSlug, args.projectSlug, args.number);
-    },
-  );
-
-  ipcMain.handle(
-    'kanbots:cloud:runs-list-for-card',
-    async (
-      _event,
-      args: { orgSlug: string; projectSlug: string; number: number },
-    ): Promise<AgentRunListResponse> => {
-      return cloudClient.runs.listForCard(args.orgSlug, args.projectSlug, args.number);
-    },
-  );
-
-  ipcMain.handle(
-    'kanbots:cloud:runs-create',
-    async (
-      _event,
-      args: {
-        orgSlug: string;
-        projectSlug: string;
-        number: number;
-        body: CreateAgentRunRequest;
-      },
-    ): Promise<AgentRunSummary> => {
-      return cloudClient.runs.create(args.orgSlug, args.projectSlug, args.number, args.body);
-    },
-  );
-
-  ipcMain.handle(
-    'kanbots:cloud:runs-get',
-    async (
-      _event,
-      args: { orgSlug: string; projectSlug: string; runId: string },
-    ): Promise<AgentRunSummary> => {
-      return cloudClient.runs.get(args.orgSlug, args.projectSlug, args.runId);
-    },
-  );
-
-  ipcMain.handle(
-    'kanbots:cloud:start-agent-run',
-    async (
-      _event,
-      args: {
-        orgSlug: string;
-        projectSlug: string;
-        number: number;
-        prompt: string;
-        appendSystemPrompt?: string;
-        model?: string;
-        provider?:
-          | 'claude-code'
-          | 'codex-cli'
-          | 'gemini-cli'
-          | 'amp-cli'
-          | 'cursor-cli'
-          | 'copilot-cli'
-          | 'opencode-cli'
-          | 'droid-cli'
-          | 'ccr-cli'
-          | 'qwen-cli'
-          | 'acp';
-      },
-    ): Promise<{ runId: string }> => {
-      if (activeCloudWorkspace === null) {
-        throw new Error('No active cloud workspace.');
-      }
-      if (
-        activeCloudWorkspace.orgSlug !== args.orgSlug
-        || activeCloudWorkspace.projectSlug !== args.projectSlug
-      ) {
-        throw new Error('Cloud workspace mismatch — reopen the project and try again.');
-      }
-      if (activeCloudWorkspace.localRepoPath === null) {
-        throw new Error(
-          'This cloud project is not bound to a local repository. Open Cloud Settings → Bind local repo, then try again.',
-        );
-      }
-      const handle = await startCloudRun({
-        cloudClient,
-        orgSlug: args.orgSlug,
-        projectSlug: args.projectSlug,
-        cardNumber: args.number,
-        prompt: args.prompt,
-        ...(args.appendSystemPrompt !== undefined
-          ? { appendSystemPrompt: args.appendSystemPrompt }
-          : {}),
-        ...(args.model !== undefined ? { model: args.model } : {}),
-        ...(args.provider !== undefined ? { provider: args.provider } : {}),
-        cwd: activeCloudWorkspace.localRepoPath,
-        onFileTouched: (payload) => broadcastWorkspaceTouched(payload),
-      });
-      activeCloudRuns.set(handle.runId, handle);
-      // Reap the handle once the run finishes so the map doesn't grow
-      // unbounded across a long-lived desktop session.
-      void handle.done.finally(() => {
-        activeCloudRuns.delete(handle.runId);
-      });
-      return { runId: handle.runId };
-    },
-  );
-
-  ipcMain.handle(
-    'kanbots:cloud:runs-stream-start',
-    async (
-      event,
-      args: {
-        orgSlug: string;
-        projectSlug: string;
-        runId: string;
-        lastEventId?: string;
-      },
-    ): Promise<{ subscriptionId: string }> => {
-      const subscriptionId = randomUUID();
-      const controller = new AbortController();
-      cloudRunStreamControllers.set(subscriptionId, controller);
-      const sender = event.sender;
-
-      void (async () => {
-        try {
-          const iter = cloudClient.runs.stream(
-            args.orgSlug,
-            args.projectSlug,
-            args.runId,
-            {
-              ...(args.lastEventId !== undefined ? { lastEventId: args.lastEventId } : {}),
-              signal: controller.signal,
-            },
-          );
-          for await (const ev of iter) {
-            if (sender.isDestroyed()) break;
-            // sync-09: stop_signal is the downstream cancel channel.
-            // When the cloud injects one (via the new
-            // `/runs/:id/stop` endpoint or autopilot timeout), the
-            // local handle.stop() kills the in-progress CLI so it
-            // doesn't keep eating tokens for a run nobody is watching.
-            //
-            // sync-01: decision_answer is delivered the same way after
-            // the user answers in the cloud UI. The handle's
-            // continueWithDecision spawns a follow-up CLI invocation
-            // in the same worktree whose prompt is the answer text.
-            // (Implementation is staged — for now we just surface a
-            // tagged renderer event so the UI can prompt the user.)
-            try {
-              if (typeof ev.event === 'string') {
-                if (ev.event === 'stop_signal') {
-                  const localHandle = activeCloudRuns.get(args.runId);
-                  if (localHandle !== undefined) localHandle.stop();
-                }
-                // The decision_answer fan-out is intentionally a
-                // renderer-side concern today: the user clicks
-                // "Continue from answer" and the UI invokes
-                // `kanbots:cloud:start-agent-run` with the answer as
-                // prompt. We just forward the event verbatim so the
-                // renderer can light the affordance.
-              }
-            } catch {
-              // Listener crash mustn't tear down the SSE pump.
-            }
-            sender.send('kanbots:cloud:run-event', {
-              subscriptionId,
-              event: ev,
-            });
-          }
-          if (!sender.isDestroyed()) {
-            sender.send('kanbots:cloud:run-event', {
-              subscriptionId,
-              done: true,
-            });
-          }
-        } catch (err) {
-          if (controller.signal.aborted) return;
-          if (sender.isDestroyed()) return;
-          sender.send('kanbots:cloud:run-event', {
-            subscriptionId,
-            error: err instanceof Error ? err.message : String(err),
-          });
-        } finally {
-          cloudRunStreamControllers.delete(subscriptionId);
-        }
-      })();
-
-      return { subscriptionId };
-    },
-  );
-
-  ipcMain.handle(
-    'kanbots:cloud:runs-stream-stop',
-    async (_event, subscriptionId: string): Promise<void> => {
-      const controller = cloudRunStreamControllers.get(subscriptionId);
-      if (controller !== undefined) {
-        controller.abort();
-        cloudRunStreamControllers.delete(subscriptionId);
-      }
-    },
-  );
-
-  // sync-09: renderer-initiated stop. Aborts the locally-running CLI if
-  // the run is one of ours (in `activeCloudRuns`); always also POSTs
-  // to the cloud's stop endpoint so the run row transitions to
-  // `stopped` for cross-device consistency.
-  ipcMain.handle(
-    'kanbots:cloud:runs-stop',
-    async (
-      _event,
-      args: { orgSlug: string; projectSlug: string; runId: string; reason?: string },
-    ): Promise<{ ok: true } | { ok: false; error: string }> => {
-      const local = activeCloudRuns.get(args.runId);
-      if (local !== undefined) local.stop();
-      try {
-        await cloudClient.runs.stop(args.orgSlug, args.projectSlug, args.runId, {
-          ...(args.reason !== undefined ? { reason: args.reason } : {}),
-        });
-        return { ok: true };
-      } catch (err) {
-        return { ok: false, error: err instanceof Error ? err.message : String(err) };
-      }
-    },
-  );
 
   ipcMain.handle('kanbots:pick-folder', async (): Promise<string | null> => {
     if (!mainWindow) return null;
@@ -2262,11 +1542,11 @@ if (ownsLocalInstance) void app.whenReady().then(async () => {
   }
   const updateTimer=setInterval(()=>void selfUpdater.installWhenIdle(async()=>{
     if(!activeWorkspace||!coordinators.updateIdle()||activeWorkspace.repoPath!==selfUpdater.status().update?.repoPath)return false;
-    return !activeWorkspace.store.agentRuns.listActive().length&&!deviceChatStore?.agentRuns.listActive().length&&!activeCloudRuns.size&&!activeWorkspace.autopilot.listActive().length;
+    return !activeWorkspace.store.agentRuns.listActive().length&&!deviceChatStore?.agentRuns.listActive().length&&!activeWorkspace.autopilot.listActive().length;
   },async()=>{
     updateRestart=true;
     await coordinators.beforeClose();
-    if(activeWorkspace?.store.agentRuns.listActive().length||deviceChatStore?.agentRuns.listActive().length||activeCloudRuns.size)throw Error('A new run started before restart. Let it finish and request the update again.');
+    if(activeWorkspace?.store.agentRuns.listActive().length||deviceChatStore?.agentRuns.listActive().length)throw Error('A new run started before restart. Let it finish and request the update again.');
     await closeActiveWorkspace();
     deviceChatStore?.close();deviceChatStore=null;
     closeProvidersStoreForShutdown();

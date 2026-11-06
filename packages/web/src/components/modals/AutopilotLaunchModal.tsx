@@ -1,3 +1,4 @@
+import { getBridge } from '../../desktop-bridge.js';
 import { Logo } from '../Logo.js';
 import { useEffect, useMemo, useState } from 'react';
 import { api } from '../../api.js';
@@ -16,6 +17,11 @@ type Parallelism = 1 | 2 | 3 | 4;
 const PARALLELISM_OPTIONS: Parallelism[] = [1, 2, 3, 4];
 
 export function AutopilotLaunchModal({ onClose, onStarted }: AutopilotLaunchModalProps) {
+  const bridge=getBridge();const coordinated=!!bridge?.coordinatorAction;
+  const [coordinator,setCoordinator]=useState<any>(null);
+  useEffect(()=>{void bridge?.coordinatorState?.().then(setCoordinator);},[]);
+  const openCoordinator=()=>{onClose();window.dispatchEvent(new CustomEvent('kanbots:open-coordinator'));};
+  async function control(action:string){setSubmitting(true);setError(null);try{setCoordinator(await bridge?.coordinatorAction?.('autopilot',{action}));}catch(e){setError(String(e));}finally{setSubmitting(false);}}
   const [tab, setTab] = useState<Tab>('feature-dev');
   const [personas, setPersonas] = useState<Persona[]>(() => listPersonas());
   const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set());
@@ -52,11 +58,15 @@ export function AutopilotLaunchModal({ onClose, onStarted }: AutopilotLaunchModa
   }
 
   async function start(): Promise<void> {
-    if (tab !== 'feature-dev') return;
-    if (selected.length === 0 || submitting) return;
+    if (tab !== 'feature-dev'&&!coordinated) return;
+    if ((tab==='feature-dev'&&selected.length === 0) || submitting) return;
     setSubmitting(true);
     setError(null);
     try {
+      if(coordinated){
+        await bridge!.coordinatorAction!('autopilot',{action:'start',personas:tab==='qa'?[{id:'qa',name:'QA reviewer',prompt:'Assess the current project against its acceptance criteria. Delegate independent checks, collect reproducible evidence, file defects without automatically implementing them, and report findings through the coordinator.'}]:selected.map(p=>({id:p.id,name:p.name,prompt:p.prompt})),effort,parallelism,...(tab==='qa'?{objective:'Complete a QA assessment of the current project and deliver findings. End this assignment when the assessment is delivered.'}:{})});
+        openCoordinator();return;
+      }
       const result = await api.startAutopilot({
         kind: 'feature-dev',
         config: {
@@ -84,7 +94,7 @@ export function AutopilotLaunchModal({ onClose, onStarted }: AutopilotLaunchModa
         <div className="kb-modal-head">
           <Logo size={11} withWordmark />
           <span style={{ color: 'var(--ink-4)' }}>·</span>
-          <h2>Start an autopilot</h2>
+          <h2>Autopilot</h2>
           <span className="grow" />
           <button type="button" className="x-btn" onClick={onClose} aria-label="Close">
             <svg
@@ -115,11 +125,12 @@ export function AutopilotLaunchModal({ onClose, onStarted }: AutopilotLaunchModa
                 className={`kb-tdm-tab${tab === 'qa' ? ' active' : ''}`}
                 onClick={() => setTab('qa')}
               >
-                QA <span style={{ color: 'var(--ink-4)', fontSize: 10, marginLeft: 6 }}>soon</span>
+                QA {!coordinated?<span style={{ color: 'var(--ink-4)', fontSize: 10, marginLeft: 6 }}>soon</span>:null}
               </button>
             </div>
           </div>
 
+          {coordinated?<div style={{padding:'16px 22px',color:'var(--ink-2)'}}><strong>Managed by your {coordinator?.workspace?.mode==='external'?'external':'built-in'} coordinator</strong><p>Discovery, implementation and QA use automatic routing. Your coordinator chooses the next work and reports here or in your connected harness.</p>{coordinator?.workspace?.autopilot?<div><p>Autopilot: {coordinator.workspace.autopilot.status} · {coordinator.workspace.autopilot.personas.map((p:any)=>p.name).join(', ')}</p><button className="kb-btn" disabled={submitting} onClick={()=>void control(coordinator.workspace.autopilot.status==='active'?'pause':'resume')}>{coordinator.workspace.autopilot.status==='active'?'Pause new work':'Resume'}</button> <button className="kb-btn" disabled={submitting} onClick={()=>void control('complete')}>End assignment</button> <button className="kb-btn" onClick={openCoordinator}>Open coordinator</button><p>Pausing preserves running workers. Ask your coordinator to change scope or stop specific workers.</p></div>:null}</div>:null}
           <div style={{ padding: '0 22px 18px' }}>
             {tab === 'feature-dev' ? (
               <FeatureDevTab
@@ -127,6 +138,7 @@ export function AutopilotLaunchModal({ onClose, onStarted }: AutopilotLaunchModa
                 selectedIds={selectedIds}
                 onToggle={toggle}
                 onPersonasChanged={refreshPersonas}
+                coordinated={coordinated}
                 modelSelection={modelSelection}
                 onModelChange={setModelSelection}
                 effort={effort}
@@ -135,7 +147,7 @@ export function AutopilotLaunchModal({ onClose, onStarted }: AutopilotLaunchModa
                 onParallelismChange={setParallelism}
               />
             ) : (
-              <QaComingSoon />
+              coordinated?<div><h3>Coordinator-led QA</h3><p>Your coordinator delegates independent checks, tracks defects and reports findings in your existing harness. Checks follow the project workflow.</p></div>:<QaComingSoon />
             )}
           </div>
         </div>
@@ -145,7 +157,7 @@ export function AutopilotLaunchModal({ onClose, onStarted }: AutopilotLaunchModa
             <span className="hint">
               {selected.length === 0
                 ? 'Pick one or more personas.'
-                : `Round-robin across ${selected.length} persona${selected.length === 1 ? '' : 's'} · ${parallelism} in parallel · ${effort} effort · ${modelSelection?.model ?? 'default model'}. Runs until you stop it.`}
+                : `Round-robin across ${selected.length} persona${selected.length === 1 ? '' : 's'} · ${parallelism} in parallel · ${effort} effort · ${coordinated?'automatic routing':modelSelection?.model ?? 'default model'}. Runs until you stop it.`}
             </span>
           ) : null}
           <span className="grow" />
@@ -160,17 +172,17 @@ export function AutopilotLaunchModal({ onClose, onStarted }: AutopilotLaunchModa
           >
             Cancel
           </button>
-          {tab === 'feature-dev' ? (
+          {tab === 'feature-dev'||coordinated ? (
             <button
               type="button"
               className="kb-btn primary"
-              disabled={selected.length === 0 || submitting}
+              disabled={(tab==='feature-dev'&&selected.length === 0) || submitting || (coordinated&&coordinator?.workspace?.autopilot?.status==='active')}
               onClick={() => void start()}
               style={{ marginLeft: 8 }}
             >
               {submitting
                 ? 'Starting…'
-                : `Start autopilot${selected.length > 0 ? ` (${selected.length})` : ''}`}
+                : coordinated?'Assign to coordinator':`Start autopilot${selected.length > 0 ? ` (${selected.length})` : ''}`}
             </button>
           ) : null}
         </div>
@@ -184,6 +196,7 @@ function FeatureDevTab({
   selectedIds,
   onToggle,
   onPersonasChanged,
+  coordinated,
   modelSelection,
   onModelChange,
   effort,
@@ -195,6 +208,7 @@ function FeatureDevTab({
   selectedIds: Set<string>;
   onToggle: (id: string) => void;
   onPersonasChanged: () => void;
+  coordinated: boolean;
   modelSelection: ModelPickerValue | null;
   onModelChange: (m: ModelPickerValue) => void;
   effort: Effort;
@@ -205,13 +219,12 @@ function FeatureDevTab({
   return (
     <>
       <div style={{ color: 'var(--ink-2)', fontSize: 12.5, marginBottom: 12 }}>
-        Pick one or more personas. The autopilot will cycle through them in order, ideating and shipping
-        features until you stop it.
+        Pick perspectives for discovering improvements. Your coordinator prioritizes useful proposals, delegates work, and keeps you informed.
       </div>
       <div
         style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 14 }}
       >
-        <label className="kb-pill-select">
+        {coordinated?<span className="kb-pill-select">Automatic routing · subscriptions, grants and allowed API capacity</span>:<label className="kb-pill-select">
           <span className="lbl">model</span>
           <ModelPicker
             value={modelSelection}
@@ -220,7 +233,7 @@ function FeatureDevTab({
             className="kb-pill-select-native mono"
           />
           <span className="caret">▾</span>
-        </label>
+        </label>}
         <label className="kb-pill-select">
           <span className="lbl">effort</span>
           <select

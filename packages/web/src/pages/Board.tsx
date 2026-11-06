@@ -410,6 +410,14 @@ export function Board({ onOpenDetail, onOpenCreate, onOpenPalette, onOpenStats }
     setSuggesting(true);
     setMoveError(null);
     try {
+      const bridge = getBridge();
+      if (bridge?.coordinatorAction) {
+        await bridge.coordinatorAction('request-perspective', {
+          name: persona.name, prompt: persona.prompt, notes: userNotes ?? '',
+        });
+        window.dispatchEvent(new CustomEvent('kanbots:open-coordinator'));
+        return;
+      }
       const drafted = await api.suggestFeature(persona.prompt, provider, userNotes);
       await api.createIssue({
         title: drafted.title,

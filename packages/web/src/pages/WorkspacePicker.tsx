@@ -1,28 +1,14 @@
 import { useEffect, useState } from 'react';
 import { getBridge, type RecentWorkspace } from '../desktop-bridge.js';
 import { Logo } from '../components/Logo.js';
-import { CloudSettingsModal } from '../components/modals/CloudSettingsModal.js';
 
-export function WorkspacePicker({
-  initialRecents,
-  cloudAuthed,
-  onOpened,
-  onBrowseCloud,
-  onCloudAuthChanged,
-}: {
+export function WorkspacePicker({ initialRecents, onOpened }: {
   initialRecents: RecentWorkspace[];
-  cloudAuthed: boolean;
   onOpened: () => void;
-  /** Switch to the cloud project picker. Only meaningful when signed in. */
-  onBrowseCloud?: () => void;
-  /** Notify parent that cloud auth state may have changed (login / logout). */
-  onCloudAuthChanged?: (authed: boolean) => void;
 }) {
   const [recents, setRecents] = useState<RecentWorkspace[]>(initialRecents);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [showCloudModal, setShowCloudModal] = useState(false);
-  const [signingOut, setSigningOut] = useState(false);
 
   useEffect(() => {
     const bridge = getBridge();
@@ -56,20 +42,6 @@ export function WorkspacePicker({
     const path = await bridge.pickFolder();
     if (!path) return;
     await open(path);
-  }
-
-  async function signOut(): Promise<void> {
-    if (signingOut) return;
-    if (!window.confirm('Sign out of Kanbots Cloud (upstream) on this device?')) return;
-    const bridge = getBridge();
-    if (!bridge) return;
-    setSigningOut(true);
-    try {
-      await bridge.cloudLogout();
-      onCloudAuthChanged?.(false);
-    } finally {
-      setSigningOut(false);
-    }
   }
 
   return (
@@ -115,52 +87,7 @@ export function WorkspacePicker({
           <p className="muted picker-empty">No recent workspaces yet.</p>
         )}
 
-        <div className="picker-cloud-footer">
-          {cloudAuthed ? (
-            <>
-              <span className="muted">Signed in to Kanbots Cloud (upstream).</span>{' '}
-              {onBrowseCloud !== undefined ? (
-                <>
-                  <button
-                    type="button"
-                    className="picker-cloud-link"
-                    onClick={onBrowseCloud}
-                  >
-                    Browse cloud projects
-                  </button>
-                  <span className="muted"> · </span>
-                </>
-              ) : null}
-              <button
-                type="button"
-                className="picker-cloud-link"
-                onClick={() => void signOut()}
-                disabled={signingOut}
-              >
-                {signingOut ? 'Signing out…' : 'Sign out'}
-              </button>
-            </>
-          ) : (
-            <>
-              <span className="muted">Want team sync?</span>{' '}
-              <button
-                type="button"
-                className="picker-cloud-link"
-                onClick={() => setShowCloudModal(true)}
-              >
-                Sign in to Kanbots Cloud (upstream)
-              </button>
-            </>
-          )}
-        </div>
       </div>
-
-      {showCloudModal ? (
-        <CloudSettingsModal
-          onClose={() => setShowCloudModal(false)}
-          onChanged={(status) => onCloudAuthChanged?.(status.authed)}
-        />
-      ) : null}
     </div>
   );
 }

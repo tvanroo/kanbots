@@ -309,7 +309,7 @@ function RollupTable({ rows }: { rows: PersonaModelRollupRow[] }): React.ReactEl
             <tr key={`${r.personaId}-${r.model ?? '?'}-${r.provider ?? '?'}`}>
               <td className="persona">{personaLabel(r.personaId)}</td>
               <td className="muted">
-                {r.model ?? '—'}
+                {r.provider === 'codex-cli' && r.model?.startsWith('claude-') ? 'Model not recorded (legacy)' : r.model ?? 'Provider default (not reported)'}
                 {r.provider ? (
                   <span style={{ marginLeft: 6, color: 'var(--ink-4)' }}>
                     · {providerShortLabel(r.provider)}

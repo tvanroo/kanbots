@@ -359,15 +359,7 @@ export function LeftRail({
               <span className="kb-rail-account-icon" aria-hidden>⚡</span>
               Providers
             </button>
-            <button
-              type="button"
-              role="menuitem"
-              className="kb-rail-account-item"
-              onClick={() => pick(onOpenCloud)}
-            >
-              <span className="kb-rail-account-icon" aria-hidden>☁</span>
-              Cloud
-            </button>
+
             <button
               type="button"
               role="menuitem"

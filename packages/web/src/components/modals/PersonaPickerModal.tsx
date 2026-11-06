@@ -1,6 +1,5 @@
 import { Logo } from '../Logo.js';
 import { useEffect, useMemo, useState } from 'react';
-import { api } from '../../api.js';
 import { createPersona, deletePersona, listPersonas, type Persona } from '../../personas.js';
 import type { ProviderId } from '../../types.js';
 
@@ -19,34 +18,6 @@ export interface PersonaPickerModalProps {
   subtitle?: string;
 }
 
-const PROVIDER_LABELS: Record<ProviderId, string> = {
-  'claude-code': 'Claude',
-  'codex-cli': 'Codex',
-  'gemini-cli': 'Gemini',
-  'amp-cli': 'Amp',
-  'cursor-cli': 'Cursor',
-  'copilot-cli': 'Copilot',
-  'opencode-cli': 'OpenCode',
-  'droid-cli': 'Droid',
-  'ccr-cli': 'CCR',
-  'qwen-cli': 'Qwen',
-  acp: 'ACP',
-};
-
-const ALL_PROVIDERS: readonly ProviderId[] = [
-  'claude-code',
-  'codex-cli',
-  'gemini-cli',
-  'amp-cli',
-  'cursor-cli',
-  'copilot-cli',
-  'opencode-cli',
-  'droid-cli',
-  'ccr-cli',
-  'qwen-cli',
-  'acp',
-];
-
 export function PersonaPickerModal({
   onClose,
   onPick,
@@ -64,10 +35,6 @@ export function PersonaPickerModal({
   const [draftPrompt, setDraftPrompt] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set());
-  const [configuredProviders, setConfiguredProviders] = useState<Set<ProviderId>>(
-    () => new Set(),
-  );
-  const [provider, setProvider] = useState<ProviderId>('claude-code');
   const [userNotes, setUserNotes] = useState('');
 
   const selectedPersonas = useMemo(
@@ -75,36 +42,6 @@ export function PersonaPickerModal({
     [personas, selectedIds],
   );
 
-  useEffect(() => {
-    let cancelled = false;
-    void (async () => {
-      try {
-        const payload = await api.getProviders();
-        if (cancelled) return;
-        const configured = payload.providers
-          .filter((p) => p.enabled && p.hasKey)
-          .map((p) => p.id);
-        setConfiguredProviders(new Set(configured));
-        if (configured.length > 0) {
-          const preferred =
-            payload.settings.defaultProvider &&
-            configured.includes(payload.settings.defaultProvider)
-              ? payload.settings.defaultProvider
-              : (configured[0] as ProviderId);
-          setProvider(preferred);
-        }
-      } catch {
-        // best-effort: if providers fail to load, fall back to the default
-        // (claude-code). The IPC call will surface a clear error if it
-        // turns out nothing is configured.
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  const noProvidersConfigured = configuredProviders.size === 0;
   const trimmedNotes = userNotes.trim();
   const notesArg = trimmedNotes.length > 0 ? trimmedNotes : undefined;
 
@@ -157,13 +94,13 @@ export function PersonaPickerModal({
         return next;
       });
     } else {
-      onPick(created, provider, notesArg);
+      onPick(created, undefined, notesArg);
     }
   }
 
   function handleCardClick(persona: Persona): void {
     if (!multiSelect) {
-      onPick(persona, provider, notesArg);
+      onPick(persona, undefined, notesArg);
       return;
     }
     setSelectedIds((prev) => {
@@ -180,10 +117,10 @@ export function PersonaPickerModal({
   function handleConfirm(): void {
     if (!multiSelect || selectedPersonas.length === 0) return;
     if (onConfirm) {
-      onConfirm(selectedPersonas, provider, notesArg);
+      onConfirm(selectedPersonas, undefined, notesArg);
     } else {
       // Backwards-compat fallback: emit each pick individually.
-      for (const p of selectedPersonas) onPick(p, provider, notesArg);
+      for (const p of selectedPersonas) onPick(p, undefined, notesArg);
     }
   }
 
@@ -218,54 +155,12 @@ export function PersonaPickerModal({
           <div style={{ padding: '18px 22px' }}>
             <div style={{ marginBottom: 16, color: 'var(--ink-2)', fontSize: 12.5 }}>
               {subtitle ??
-                'The selected agent will look at your repo and the backlog through the lens you pick. Feature suggestions shift accordingly.'}
+                'Choose a perspective for your coordinator to explore. It will review existing work and bring useful suggestions onto the board.'}
             </div>
 
-            <div
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: 8,
-                marginBottom: 12,
-                fontSize: 12.5,
-                flexWrap: 'wrap',
-              }}
-            >
-              <span style={{ color: 'var(--ink-2)' }}>Run with:</span>
-              <div role="radiogroup" aria-label="Suggestion agent" style={{ display: 'flex', gap: 6 }}>
-                {ALL_PROVIDERS.map((id) => {
-                  const isConfigured = configuredProviders.has(id);
-                  const isSelected = provider === id;
-                  return (
-                    <button
-                      key={id}
-                      type="button"
-                      role="radio"
-                      aria-checked={isSelected}
-                      disabled={!isConfigured}
-                      className={`kb-btn ${isSelected ? 'primary' : 'ghost'}`}
-                      onClick={() => {
-                        if (isConfigured) setProvider(id);
-                      }}
-                      title={isConfigured ? PROVIDER_LABELS[id] : `${PROVIDER_LABELS[id]} — not configured. Add an API key in Settings.`}
-                      style={{
-                        padding: '4px 10px',
-                        fontSize: 12,
-                        opacity: isConfigured ? 1 : 0.5,
-                        cursor: isConfigured ? 'pointer' : 'not-allowed',
-                      }}
-                    >
-                      {PROVIDER_LABELS[id]}
-                    </button>
-                  );
-                })}
-              </div>
-              {noProvidersConfigured ? (
-                <span style={{ color: 'var(--ink-3)', fontSize: 11.5 }}>
-                  No providers configured — set one up in Settings.
-                </span>
-              ) : null}
-            </div>
+            <p style={{ color: 'var(--ink-2)', fontSize: 12.5 }}>
+              Your coordinator delegates this review using automatic provider routing.
+            </p>
 
             <div className="kb-field" style={{ marginBottom: 16 }}>
               <label className="kb-field-label" htmlFor="kb-suggest-notes">
@@ -406,7 +301,7 @@ export function PersonaPickerModal({
                     style={{ fontSize: 12.5 }}
                   />
                   <div className="kb-field-hint" style={{ marginTop: 4 }}>
-                    Becomes the system-prompt prefix when Claude generates a suggestion.
+                    Guides the worker reviewing your project from this perspective.
                   </div>
                 </div>
 

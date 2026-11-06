@@ -10,7 +10,6 @@ import { Board } from './pages/Board.js';
 // Cloud-only launch — phase 1 unification: cloud workspaces render through
 // the same ShellHost+Board path as local, fed by mode-aware api.ts. The
 // former CloudBoard/CloudColumn/CloudCardModal files have been deleted.
-import { CloudWorkspacePicker } from './pages/CloudWorkspacePicker.js';
 import { ProvidersOverlay } from './pages/ProvidersOverlay.js';
 // Local-first launch: the local workspace picker is reachable again.
 // Users can open a folder without signing in to Kanbots Cloud (upstream).
@@ -19,13 +18,11 @@ import { api, setCloudCtx } from './api.js';
 import { Window } from './components/shell/Window.js';
 import { Shell } from './components/shell/Shell.js';
 import { LeftRail } from './components/rail/LeftRail.js';
-import { CloudFirstRunPrompt } from './components/CloudFirstRunPrompt.js';
 import { TaskDetailModal } from './components/modals/TaskDetailModal.js';
 import { TaskCreateModal } from './components/modals/TaskCreateModal.js';
 import { SplitModal } from './components/modals/SplitModal.js';
 import { ArchiveModal } from './components/modals/ArchiveModal.js';
 import { CardTemplatesSettingsModal } from './components/modals/CardTemplatesSettingsModal.js';
-import { CloudSettingsModal } from './components/modals/CloudSettingsModal.js';
 import { HouseRulesSettingsModal } from './components/modals/HouseRulesSettingsModal.js';
 import { RepoScriptsSettingsModal } from './components/modals/RepoScriptsSettingsModal.js';
 import { ProvidersSettingsModal } from './components/modals/ProvidersSettingsModal.js';
@@ -112,7 +109,6 @@ function ShellHost({
   const [archiveOpen, setArchiveOpen] = useState(false);
   const [statsOpen, setStatsOpen] = useState(false);
   const [providersSettingsOpen, setProvidersSettingsOpen] = useState(false);
-  const [cloudSettingsOpen, setCloudSettingsOpen] = useState(false);
   const [houseRulesOpen, setHouseRulesOpen] = useState(false);
   const [scriptsOpen, setScriptsOpen] = useState<
     null | { autoRun?: 'setup' | 'cleanup' }
@@ -247,7 +243,6 @@ function ShellHost({
                 onOpenArchive={() => setArchiveOpen(true)}
                 onOpenStats={() => setStatsOpen(true)}
                 onOpenProviders={() => setProvidersSettingsOpen(true)}
-                onOpenCloud={() => setCloudSettingsOpen(true)}
                 onOpenRules={() => setHouseRulesOpen(true)}
                 onOpenScripts={() => setScriptsOpen({})}
                 onOpenRepos={() => setReposOpen(true)}
@@ -306,9 +301,6 @@ function ShellHost({
       {statsOpen ? <Stats onClose={() => setStatsOpen(false)} /> : null}
       {providersSettingsOpen ? (
         <ProvidersSettingsModal onClose={() => setProvidersSettingsOpen(false)} />
-      ) : null}
-      {cloudSettingsOpen ? (
-        <CloudSettingsModal onClose={() => setCloudSettingsOpen(false)} />
       ) : null}
       {houseRulesOpen ? (
         <HouseRulesSettingsModal onClose={() => setHouseRulesOpen(false)} />
@@ -374,28 +366,9 @@ export function App({
   initialCloudPromptDismissed,
 }: AppProps) {
   const [providersTick, setProvidersTick] = useState(0);
-  const [cloudAuthed, setCloudAuthed] = useState<boolean>(initialCloudAuthed);
-  const [cloudPromptDismissed, setCloudPromptDismissed] = useState<boolean>(
-    initialCloudPromptDismissed,
-  );
-  // Local-first: every launch lands on the local WorkspacePicker. Signed-in
-  // users can switch to the Cloud picker via the explicit link there. The
-  // cloud picker mode is only entered by explicit user action (clicking the
-  // link, or signing in via the first-run prompt).
-  const [pickerMode, setPickerMode] = useState<'cloud' | 'local'>('local');
-
-  // Cloud-only launch — phase 1: install the cloud ctx on api.ts before any
-  // hook below fires its initial fetch. Setting module state during render
-  // is fine here because it's idempotent and the children's useFetch reads
-  // it during the same render pass.
-  if (cloudWorkspace !== null) {
-    setCloudCtx({
-      orgSlug: cloudWorkspace.orgSlug,
-      projectSlug: cloudWorkspace.projectSlug,
-    });
-  } else {
-    setCloudCtx(null);
-  }
+  // KanBorg is local-only; inherited hosted accounts are not activated.
+  setCloudCtx(null);
+  cloudWorkspace = null;
 
   const hasOpenWorkspace = workspace !== null || cloudWorkspace !== null;
   const { data: config } = useFetch(hasOpenWorkspace ? 'config' : null, () => api.config());
@@ -404,52 +377,8 @@ export function App({
     () => api.getProviders(),
   );
 
-  // Local-first launch: the cloud sign-in prompt is OPTIONAL. It shows on
-  // the very first run (no dismissal recorded yet, no active session) and
-  // sits as a one-time prompt. The user can sign in OR pick "Continue
-  // locally" to dismiss; either way it never blocks the app again.
-  if (hasBridge && !cloudAuthed && !cloudPromptDismissed) {
-    return (
-      <CloudFirstRunPrompt
-        onSignedIn={() => {
-          setCloudAuthed(true);
-          setCloudPromptDismissed(true);
-          setPickerMode('cloud');
-        }}
-        onDismissed={() => {
-          setCloudPromptDismissed(true);
-          setPickerMode('local');
-        }}
-      />
-    );
-  }
-
-  // No workspace open → show a picker. Local-first: every user lands on the
-  // local picker by default. Signed-in users can switch to the cloud picker
-  // via the "Browse cloud projects" link; the cloud picker offers an "Open
-  // a folder" escape hatch back to local.
-  if (hasBridge && workspace === null && cloudWorkspace === null) {
-    if (pickerMode === 'local' || !cloudAuthed) {
-      return (
-        <WorkspacePicker
-          initialRecents={initialRecents}
-          cloudAuthed={cloudAuthed}
-          onOpened={() => window.location.reload()}
-          {...(cloudAuthed ? { onBrowseCloud: () => setPickerMode('cloud') } : {})}
-          onCloudAuthChanged={(authed) => {
-            setCloudAuthed(authed);
-            setCloudPromptDismissed(true);
-          }}
-        />
-      );
-    }
-    return (
-      <CloudWorkspacePicker
-        initialRecents={initialCloudRecents}
-        onPickLocal={() => setPickerMode('local')}
-        onOpened={() => window.location.reload()}
-      />
-    );
+  if (hasBridge && workspace === null) {
+    return <WorkspacePicker initialRecents={initialRecents} onOpened={() => window.location.reload()} />;
   }
 
   // Providers gate. The overlay is non-dismissible — the kanban renders
