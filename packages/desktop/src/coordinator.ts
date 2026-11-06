@@ -22,7 +22,7 @@ type Client={id:string;name:string;workspaceId:string;role:'observer'|'coordinat
 type Job={runId:number;number:number;role:string;qa:boolean;maxReworks:number;reworks:number;budgetUsd:number;state:string;sha?:string;reviewRunId?:number;checkIds?:number[];error?:string};
 type Release={id:string;runId:number;sha:string;targetBranch:string;targetSha:string;action:'merge'|'draft-pr';title?:string;body?:string;state:string;result?:unknown};
 type Handoff={id:string;from:string|null;to:string;mode:'internal'|'external';state:'requested'|'ready'|'completed';requestedAt:string;summary:string;checkpoint:unknown;receivedBy?:string};
-type CoordinatorRequest={id:string;kind:'discovery';prompt:string;state:'queued'|'received'|'completed';createdAt:string;receivedBy?:string};
+type CoordinatorRequest={id:string;kind:'discovery'|'resume-workflows';prompt:string;state:'queued'|'received'|'completed';createdAt:string;receivedBy?:string};
 type ScheduleReceipt={id?:string;status:'active'|'paused'|'unsupported';cadenceMinutes?:number;cursor?:number;confirmedAt:string};
 type Workspace={schedules?:Record<string,ScheduleReceipt>;requests?:CoordinatorRequest[];handoff?:Handoff;queue?:Array<{id:string;number:number;budgetUsd:number;qa:boolean;maxReworks:number;readOnly:boolean}>;onboardedAt?:string;inventory?:Record<string,{number:number;kind:string;evidence:string;verifiedAt:string;sourceHash?:string}>;id:string;path:string;revision:number;mode:'internal'|'external'|'off';controller:string|null;leaseUntil:number;epoch:number;conversationId?:number;objective:string;summary:string;parallelism:number;qaDefault:boolean;maxReworks:number;budgetUsd:number;dependencies:Record<string,number[]>;jobs:Job[];releases:Release[];decisions:Array<{id:string;cardId:number;value:string;question?:string;label?:string;state:string}>;events:Array<{cursor:number;at:string;type:string;data:unknown}>;nextCursor:number;snapshot?:string;receipts:Record<string,{digest:string;state:string;result?:unknown;error?:string}>};
 type Registry={clients:Client[];workspaces:Workspace[]};
@@ -31,7 +31,24 @@ export class CoordinatorService{
   updateIdle(){return !this.polling&&!this.inFlight.size;}
   allowRequests(){this.closing=false;}
   setUpdater(updater:NonNullable<CoordinatorService['updater']>){this.updater=updater;}
-  async resumeAfterUpdate(version:string){const w=this.current();this.closing=false;this.event(w,'application-updated',{version,instruction:'Reconcile saved work and continue the current objective. Do not duplicate workers.'});if(w.mode==='internal'&&w.conversationId)await this.uiAction('chat-send',{body:'KanBorg has updated and reopened this project. Read the durable coordination state and changes, reconcile saved workers and pending decisions, and continue the current authorized objective without duplicating work.'});}
+  async resumeAfterUpdate(version:string,updateId=version){
+    const w=this.current();this.closing=false;
+    // One durable kick per update. A restart between saving it and advancing the
+    // pipelines must not create a second coordinator turn or duplicate workers.
+    const id=`update-resume:${updateId}`;w.requests??=[];
+    if(w.mode==='off'){if(!w.events.some(e=>e.type==='application-updated'&&(e.data as any)?.requestId===id))this.event(w,'application-updated',{version,requestId:id,instruction:'Coordination remains paused.'});return {queued:false,reason:'Coordination is paused'};}
+    let request=w.requests.find(r=>r.id===id);
+    if(!request){
+      request={id,kind:'resume-workflows',state:'queued',createdAt:new Date().toISOString(),prompt:`KanBorg ${version} has restarted after an update. Resume the current owner-authorized objective now, not just a status report. Read current coordination state, pending decisions and compact worker results. Preserve running assignments and completed evidence. Advance ready dependencies and dispatch the next authorized implementation or QA through KanBorg. Resume interrupted work from its compact handoff; investigate failed work before deciding how to continue. Do not repeat completed tests, restart intentionally paused work, answer owner-reserved decisions, or approve a release merely because the app restarted. Acknowledge this request as received before acting and completed after the eligible work is running or its real blocker is recorded. If no work remains, record that explicitly.`};
+      w.requests.push(request);w.revision++;
+      this.event(w,'application-updated',{version,requestId:id,instruction:'Read getCoordinatorRequests and resume the current authorized objective.'});
+      this.event(w,'coordinator-request',{requestId:id,kind:request.kind});
+    }
+    // Advance existing pipelines and queued assignments immediately. External
+    // coordinators pick up the durable request on their next connection/check-in.
+    await this.tick();return request;
+  }
+
   private state:Registry;private context:CoordinatorContext|null=null;private url='';private inFlight=new Map<string,Promise<any>>();private polling=false;private closing=false;private internalTokens=new Map<string,{workspaceId:string;actor:string;epoch:number;expires:number;clientId?:string}>();private launcher='';private entry='';
   constructor(private root=app.getPath('userData')){mkdirSync(root,{recursive:true,mode:0o700});this.state=existsSync(this.file())?JSON.parse(readFileSync(this.file(),'utf8')):{clients:[],workspaces:[]};}
   private file(){return join(this.root,'coordinators.json');}
@@ -49,7 +66,7 @@ export class CoordinatorService{
   private compactRun(id:number){const r=this.run(id);return {runId:r.id,status:r.status,branch:r.branchName,model:r.model,provider:r.provider,costUsd:r.totalCostUsd,costSource:'run-reported; may include estimates',exitReason:r.exitReason,successSignal:r.successSignal};}
   private assertControl(w:Workspace,actor:string){if(w.controller!==actor||w.mode==='off')throw Error('This session is controlled elsewhere. Hand off in KanBorg Coordinators.');if(w.leaseUntil<Date.now())throw Error('Controller lease expired. Call renewCoordinator.');}
   private checkinPolicy(w:Workspace,compact=false){
-    const running=w.jobs.some(j=>['implementing','checks','reviewing'].includes(j.state))||!!w.queue?.length;
+    const running=w.jobs.some(j=>['implementing','checks','reviewing'].includes(j.state))||!!w.queue?.length||(w.requests??[]).some(r=>r.kind==='resume-workflows'&&r.state!=='completed');
     const continuing=!!w.objective.trim()||(w.requests??[]).some(r=>r.state!=='completed');
     return {owner:w.controller,key:`kanborg:${w.id}`,cadenceMinutes:w.mode==='off'||(!running&&!continuing)?null:running?5:15,
       ...(!compact?{prompt:COORDINATOR_REMINDER}:{}),execution:'harness-managed',confirmed:w.controller?w.schedules?.[w.controller]??null:null,
@@ -201,7 +218,7 @@ Never approve your own pairing. No provider API keys are needed.\n\nClaude Deskt
   async call(actor:string,scope:string,name:string,raw:unknown):Promise<any>{
     if(this.closing)throw Error('Workspace is closing; reconnect after opening it.');
     const args=validateCoordinatorArgs(name,raw);
-    if(name==='getCapabilities')return {version:'1.2.15',authority:'active-coordinator',guide:COORDINATOR_GUIDE,scope,tools:COORDINATOR_TOOLS.map(t=>t.name),releaseActions:['merge','draft-pr'],hosted:false};
+    if(name==='getCapabilities')return {version:'1.2.16',authority:'active-coordinator',guide:COORDINATOR_GUIDE,scope,tools:COORDINATOR_TOOLS.map(t=>t.name),releaseActions:['merge','draft-pr'],hosted:false};
     if(name==='listWorkspaces')return this.state.workspaces.filter(w=>w.id===scope).map(w=>({workspaceId:w.id,name:basename(w.path),open:this.context?.repoPath===w.path}));
     if(args.workspaceId!==scope)throw Error('This connection is not permitted for that workspace');const w=this.resolve(scope);
     if(name==='renewCoordinator'){if(w.controller!==actor||w.mode==='off')throw Error('Control belongs elsewhere');w.leaseUntil=Date.now()+30*60000;this.save();return this.session(w);}

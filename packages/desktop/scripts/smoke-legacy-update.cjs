@@ -14,13 +14,16 @@ const fs=require('node:fs');const path=require('node:path');const os=require('no
  const script=path.join(job,'legacy-helper.sh');fs.writeFileSync(script,mod.exports.UPDATE_HELPER);
  const version=require('../package.json').version;
  fs.writeFileSync(path.join(profile,'application-update.json'),JSON.stringify({id:'legacy-test',phase:'installing',version,fromVersion:'1.2.13',repoPath:repo,target,stage,job,requestedAt:new Date().toISOString()}));
+ const repoPath=fs.realpathSync(repo);const workspaceId=require('node:crypto').createHash('sha256').update(repoPath).digest('hex').slice(0,24);
+ fs.writeFileSync(path.join(profile,'coordinators.json'),JSON.stringify({clients:[],workspaces:[{id:workspaceId,path:repoPath,revision:0,mode:'external',controller:'test-coordinator',leaseUntil:Date.now()+1800000,epoch:1,objective:'Continue the fixture objective',summary:'Preserve existing work',parallelism:2,qaDefault:true,maxReworks:1,budgetUsd:5,dependencies:{},jobs:[],releases:[],decisions:[],events:[],nextCursor:1,receipts:{}}]}));
  let helper;
  try{
   helper=spawn('/bin/sh',[script,'99999999',target,path.join(stage,'KanBorg.app'),path.join(stage,'previous.app'),job,'legacy-test',profile],{stdio:'ignore'});
   await new Promise((resolve,reject)=>{const timer=setTimeout(()=>reject(Error('Legacy update timed out')),105000);helper.once('exit',code=>{clearTimeout(timer);code===0?resolve():reject(Error('Legacy helper failed: '+code));});helper.once('error',reject);});
   const receipt=JSON.parse(fs.readFileSync(path.join(profile,'application-update.json'),'utf8'));const startup=JSON.parse(fs.readFileSync(path.join(job,'startup.json'),'utf8'));const registry=JSON.parse(fs.readFileSync(path.join(profile,'coordinators.json'),'utf8'));
   if(receipt.phase!=='completed'||!startup.recoveryTokenMatches||!registry.workspaces.some(w=>fs.realpathSync(w.path)===fs.realpathSync(repo)))throw Error('Legacy update did not restore its project and confirm health');
-  console.log(JSON.stringify({legacyInstaller:'1.2.13',installedVersion:version,healthConfirmed:true,isolatedProfilePreserved:true,projectRestored:true}));
+  if(!registry.workspaces.some(w=>w.requests?.some(r=>r.kind==='resume-workflows'&&r.state==='queued'))||receipt.workflowResumePending)throw Error('External coordinator resume request was not durably queued');
+  console.log(JSON.stringify({externalResumeQueued:true,legacyInstaller:'1.2.13',installedVersion:version,healthConfirmed:true,isolatedProfilePreserved:true,projectRestored:true}));
  }finally{
   if(helper?.exitCode===null)helper.kill('SIGTERM');
   const startupFile=path.join(job,'startup.json');if(fs.existsSync(startupFile)){const {pid}=JSON.parse(fs.readFileSync(startupFile,'utf8'));try{const command=execFileSync('/bin/ps',['-p',String(pid),'-o','command='],{encoding:'utf8'});if(command.includes(target+'/Contents/MacOS/KanBorg'))process.kill(pid,'SIGTERM');}catch{}}

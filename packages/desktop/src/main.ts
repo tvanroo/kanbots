@@ -2234,7 +2234,7 @@ if (ownsLocalInstance) void app.whenReady().then(async () => {
   Menu.setApplicationMenu(null);
   registerIpc();
   const recovery=selfUpdater.recovery();
-  const restorePath=recovery?.repoPath??startupWorkspace(app.getPath('userData'));
+  const restorePath=recovery?.repoPath??selfUpdater.workflowRecovery()?.repoPath??startupWorkspace(app.getPath('userData'));
   let restored=false;
   if(restorePath){
     try{await openWorkspaceInternal(restorePath);restored=true;}
@@ -2242,7 +2242,12 @@ if (ownsLocalInstance) void app.whenReady().then(async () => {
   }
   // Load the board only after restoration, avoiding a flash of the project picker.
   await createWindow();
-  if(recovery&&restored){selfUpdater.complete();await coordinators.resumeAfterUpdate(app.getVersion()).catch(e=>console.error('[update] Coordinator needs attention:',e.message));}
+  if(recovery&&restored)selfUpdater.complete();
+  const workflowRecovery=selfUpdater.workflowRecovery();
+  if(workflowRecovery&&restored){
+    try{await coordinators.resumeAfterUpdate(app.getVersion(),workflowRecovery.id);selfUpdater.workflowResumeQueued();}
+    catch(e){console.error('[update] Workflow resume remains pending:',e instanceof Error?e.message:String(e));}
+  }
   const updateTimer=setInterval(()=>void selfUpdater.installWhenIdle(async()=>{
     if(!activeWorkspace||!coordinators.updateIdle()||activeWorkspace.repoPath!==selfUpdater.status().update?.repoPath)return false;
     return !activeWorkspace.store.agentRuns.listActive().length&&!deviceChatStore?.agentRuns.listActive().length&&!activeCloudRuns.size&&!activeWorkspace.autopilot.listActive().length;

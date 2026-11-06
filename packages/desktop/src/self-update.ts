@@ -18,7 +18,7 @@ export function startupSwitch(name:string,args=process.argv):string{
   }
   return '';
 }
-export type UpdateRecord = { id:string; phase:'staging'|'waiting'|'installing'|'completed'|'failed'|'cancelled'; version:string; fromVersion:string; repoPath:string; target:string; stage:string; job:string; error?:string; requestedAt:string; completedAt?:string };
+export type UpdateRecord = { id:string; phase:'staging'|'waiting'|'installing'|'completed'|'failed'|'cancelled'; version:string; fromVersion:string; repoPath:string; target:string; stage:string; job:string; error?:string; requestedAt:string; completedAt?:string; workflowResumePending?:boolean };
 export function newerVersion(candidate:string,current:string){
   const parse=(v:string)=>/^\d+\.\d+\.\d+$/.test(v)?v.split('.').map(Number):null;
   const a=parse(candidate),b=parse(current);if(!a||!b)return false;
@@ -167,6 +167,8 @@ export class SelfUpdater {
     }catch(e){this.record!.phase='failed';this.record!.error=e instanceof Error?e.message:'Could not restart';this.save();this.busy=false;throw e;}
   }
   recovery(){const r=this.record;return r&&r.phase==='installing'&&r.version===app.getVersion()&&startupSwitch('kanborg-update-token')===r.id?r:null;}
-  complete(){if(!this.recovery())return;this.record!.phase='completed';this.record!.completedAt=new Date().toISOString();this.save();writeFileSync(join(this.record!.job,'healthy'),'ready',{mode:0o600});}
+  complete(){if(!this.recovery())return;this.record!.phase='completed';this.record!.workflowResumePending=true;this.record!.completedAt=new Date().toISOString();this.save();writeFileSync(join(this.record!.job,'healthy'),'ready',{mode:0o600});}
+  workflowRecovery(){const r=this.record;return r?.phase==='completed'&&r.version===app.getVersion()&&r.workflowResumePending?r:null;}
+  workflowResumeQueued(){if(this.record?.phase==='completed'){this.record.workflowResumePending=false;this.save();}}
   failRecovery(message:string){if(this.record){this.record.error=message;this.save();}}
 }
