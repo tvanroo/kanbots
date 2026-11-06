@@ -15,7 +15,7 @@ const net=require('node:net');
   const repo=path.join(root,'restored-project');fs.mkdirSync(repo);execFileSync('git',['init',repo],{stdio:'ignore'});fs.writeFileSync(path.join(repo,'README.md'),'# Update recovery test\n');execFileSync('git',['-C',repo,'add','.']);execFileSync('git',['-C',repo,'-c','user.name=Smoke','-c','user.email=smoke@example.invalid','commit','-m','Test'],{stdio:'ignore'});
   const job=path.join(root,'update-job');fs.mkdirSync(job);
   fs.writeFileSync(path.join(root,'application-update.json'),JSON.stringify({id:'packaged-recovery',phase:'installing',version:require('../package.json').version,fromVersion:'1.2.12',repoPath:repo,job,requestedAt:new Date().toISOString()}));
-  if(process.argv.includes('--restore-project')){fs.unlinkSync(path.join(root,'application-update.json'));fs.writeFileSync(path.join(root,'workspaces.json'),JSON.stringify({recents:[{repoPath:repo,displayName:'Restored project'}]}));}else recoveryArgs=['--kanborg-update-token=packaged-recovery'];
+  if(process.argv.includes('--restore-project')){fs.unlinkSync(path.join(root,'application-update.json'));fs.writeFileSync(path.join(root,'workspaces.json'),JSON.stringify({recents:[{repoPath:repo,displayName:'Restored project'}]}));}else recoveryArgs=process.argv.includes('--split-update-args')?['--kanborg-update-token','packaged-recovery']:['--kanborg-update-token=packaged-recovery'];
  }
  const child=spawn(binary,[`--user-data-dir=${root}`,`--remote-debugging-port=${port}`,...recoveryArgs],{env,stdio:['ignore','pipe','pipe']});
  let logs='',socket;child.stdout.on('data',b=>logs+=b);child.stderr.on('data',b=>logs+=b);

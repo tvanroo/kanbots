@@ -7,6 +7,17 @@ import { dirname, join, resolve, basename } from 'node:path';
 import { execFile, spawn } from 'node:child_process';
 import { promisify } from 'node:util';
 const exec = promisify(execFile);
+// Electron's switch reader does not reliably consume a separate value for custom
+// switches. Releases 1.2.13/14 passed the recovery token that way; accept both.
+export function startupSwitch(name:string,args=process.argv):string{
+  const parsed=app.commandLine.getSwitchValue(name);if(parsed)return parsed;
+  const key=`--${name}`;
+  for(let i=0;i<args.length;i++){
+    if(args[i]!.startsWith(key+'='))return args[i]!.slice(key.length+1);
+    if(args[i]===key&&args[i+1]&&!args[i+1]!.startsWith('--'))return args[i+1]!;
+  }
+  return '';
+}
 export type UpdateRecord = { id:string; phase:'staging'|'waiting'|'installing'|'completed'|'failed'|'cancelled'; version:string; fromVersion:string; repoPath:string; target:string; stage:string; job:string; error?:string; requestedAt:string; completedAt?:string };
 export function newerVersion(candidate:string,current:string){
   const parse=(v:string)=>/^\d+\.\d+\.\d+$/.test(v)?v.split('.').map(Number):null;
@@ -25,11 +36,11 @@ if ! /bin/mv "$target" "$backup"; then echo 'failed: could not preserve old app'
 if ! /bin/mv "$staged" "$target"; then
   /bin/mv "$backup" "$target"
   echo rolled-back > "$job/helper-status"
-  "$target/Contents/MacOS/KanBorg" --user-data-dir "$data" >> "$job/launch.log" 2>&1 &
+  "$target/Contents/MacOS/KanBorg" "--user-data-dir=$data" >> "$job/launch.log" 2>&1 &
   exit 1
 fi
 echo launching > "$job/helper-status"
-"$target/Contents/MacOS/KanBorg" --kanborg-update-token "$token" --user-data-dir "$data" >> "$job/launch.log" 2>&1 &
+"$target/Contents/MacOS/KanBorg" "--kanborg-update-token=$token" "--user-data-dir=$data" >> "$job/launch.log" 2>&1 &
 newpid=$!
 i=0
 while [ "$i" -lt 90 ]; do
@@ -43,7 +54,7 @@ if kill -0 "$newpid" 2>/dev/null; then echo 'failed: replacement is still runnin
 /bin/mv "$target" "$job/failed.app"
 /bin/mv "$backup" "$target"
 echo rolled-back > "$job/helper-status"
-"$target/Contents/MacOS/KanBorg" --user-data-dir "$data" >> "$job/launch.log" 2>&1 &
+"$target/Contents/MacOS/KanBorg" "--user-data-dir=$data" >> "$job/launch.log" 2>&1 &
 `;
 
 /** GitHub release updates plus explicit local DMGs. No credentials or user-data migration. */
@@ -57,6 +68,10 @@ export class SelfUpdater {
   constructor(private root=app.getPath('userData')){
     this.file=join(root,'application-update.json');
     if(existsSync(this.file))this.record=JSON.parse(readFileSync(this.file,'utf8'));
+    if(this.record?.phase==='installing'){
+      const token=startupSwitch('kanborg-update-token');
+      writeFileSync(join(this.record.job,'startup.json'),JSON.stringify({pid:process.pid,version:app.getVersion(),expectedVersion:this.record.version,recoveryTokenPresent:!!token,recoveryTokenMatches:token===this.record.id,at:new Date().toISOString()}),{mode:0o600});
+    }
     if(this.record?.phase==='staging'){this.record.phase='failed';this.record.error='Staging was interrupted. Request the update again.';this.save();}
   }
   private save(){writeFileSync(this.file+'.tmp',JSON.stringify(this.record),{mode:0o600});renameSync(this.file+'.tmp',this.file);}
@@ -151,7 +166,7 @@ export class SelfUpdater {
       app.exit(0);
     }catch(e){this.record!.phase='failed';this.record!.error=e instanceof Error?e.message:'Could not restart';this.save();this.busy=false;throw e;}
   }
-  recovery(){const r=this.record;return r&&r.phase==='installing'&&r.version===app.getVersion()&&app.commandLine.getSwitchValue('kanborg-update-token')===r.id?r:null;}
+  recovery(){const r=this.record;return r&&r.phase==='installing'&&r.version===app.getVersion()&&startupSwitch('kanborg-update-token')===r.id?r:null;}
   complete(){if(!this.recovery())return;this.record!.phase='completed';this.record!.completedAt=new Date().toISOString();this.save();writeFileSync(join(this.record!.job,'healthy'),'ready',{mode:0o600});}
   failRecovery(message:string){if(this.record){this.record.error=message;this.save();}}
 }

@@ -1,5 +1,5 @@
 import { rememberWorkspace, startupWorkspace } from './workspace-resume.js';
-import { SelfUpdater } from './self-update.js';
+import { SelfUpdater, startupSwitch } from './self-update.js';
 import { CoordinatorService } from './coordinator.js';
 import { startRoutedRun as startRoutedRunUnchecked } from './automatic-routing.js';
 import { configureRoutingProviders, collectCapacity, invalidateCapacity } from './routing-capacity.js';
@@ -2209,7 +2209,7 @@ function tomlString(s: string): string {
 app.setName('Kanbots Local');
 app.setPath(
   'userData',
-  app.commandLine.getSwitchValue('user-data-dir') || join(app.getPath('appData'), 'Kanbots Local'),
+  startupSwitch('user-data-dir') || join(app.getPath('appData'), 'Kanbots Local'),
 );
 
 // Finder launches with a short PATH. Keep the user's existing entries first.
