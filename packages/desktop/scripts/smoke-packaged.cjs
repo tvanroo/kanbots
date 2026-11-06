@@ -54,6 +54,18 @@ const net=require('node:net');
    const setupView=await call('Runtime.evaluate',{expression:"JSON.stringify({step:document.body.innerText.includes('Step 1 of 3'),copy:[...document.querySelectorAll('button')].some(b=>b.offsetParent&&b.textContent==='Copy setup request'),prematureApproval:[...document.querySelectorAll('button')].some(b=>b.offsetParent&&/Approve (pairing|connection)/.test(b.textContent))})",returnByValue:true});
    const setup=JSON.parse(setupView.result.value);if(!setup.step||!setup.copy||setup.prematureApproval)throw Error('Setup does not present one clear current action');
    const setupImage=await call('Page.captureScreenshot',{format:'png'});fs.writeFileSync(path.resolve('output/packaged-coordinator-setup.png'),Buffer.from(setupImage.data,'base64'));console.log(JSON.stringify({clearSetupNextAction:true}));
+   await call('Runtime.evaluate',{expression:`[...document.querySelectorAll('button')].find(b=>b.textContent==='Change coordinator').click()`});
+   await new Promise(r=>setTimeout(r,200));
+   await call('Runtime.evaluate',{expression:`[...document.querySelectorAll('button')].find(b=>b.textContent==='Copy prompt for new coordinator').click()`});
+   await new Promise(r=>setTimeout(r,1000));
+   const copiedView=await call('Runtime.evaluate',{expression:`JSON.stringify({notice:document.body.innerText.includes('Copied to clipboard. Paste this request into DeepSeek Harness'),chooser:[...document.querySelectorAll('button')].some(b=>b.textContent==='Copied — copy again')})`,returnByValue:true});
+   const copied=JSON.parse(copiedView.result.value);if(!copied.notice||!copied.chooser)throw Error('Clipboard confirmation or coordinator chooser missing');
+   await call('Runtime.evaluate',{expression:`Object.defineProperty(navigator.clipboard,'writeText',{configurable:true,value:async()=>{throw new Error('Test clipboard failure')}});[...document.querySelectorAll('button')].find(b=>b.textContent==='Copied — copy again').click()`});
+   await new Promise(r=>setTimeout(r,700));
+   const failedView=await call('Runtime.evaluate',{expression:`JSON.stringify({error:document.body.innerText.includes('Could not copy to your clipboard.'),falseSuccess:!!document.querySelector('.kb-coordinator-copy-notice')})`,returnByValue:true});
+   const failed=JSON.parse(failedView.result.value);if(!failed.error||failed.falseSuccess)throw Error('Clipboard failure was not reported correctly');
+   console.log(JSON.stringify({clipboardConfirmation:true,chooserStaysOpen:true,clipboardFailureHandled:true}));
+
 
 
   }
