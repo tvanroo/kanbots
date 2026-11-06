@@ -1,8 +1,8 @@
 import { execFile } from 'node:child_process';
 import { readFile,writeFile,realpath,mkdir } from 'node:fs/promises';
 import { resolve,dirname,relative,isAbsolute } from 'node:path';
-import { COORDINATOR_TOOLS, KANBOTS_TOOLS } from '@kanbots/mcp';
-import type { StartAgentRunOptions,StreamEvent } from '@kanbots/dispatcher';
+import { COORDINATOR_TOOLS, KANBOTS_TOOLS } from '@kanborg/mcp';
+import type { StartAgentRunOptions,StreamEvent } from '@kanborg/dispatcher';
 import { unlockApiConnection, listApiConnections } from './api-connections.js';
 import { reserveCharge,settleCharge } from './routing-state.js';
 import type { Candidate } from './routing-capacity.js';

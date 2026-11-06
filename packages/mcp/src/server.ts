@@ -16,8 +16,8 @@ import { join } from 'node:path';
 // server from starting. Cloud-dependent tools surface their own errors
 // when invoked without a session (the desktop tool-bridge enforces the
 // real auth boundary; this layer only proxies).
-const coordinated=process.env.KANBOTS_COORDINATOR==='1'||!!process.env.KANBOTS_COORDINATOR_CLIENT;
-const dataDir=process.env.KANBOTS_LOCAL_DATA??join(homedir(),'Library','Application Support','Kanbots Local');
+const coordinated=process.env.KANBOTS_COORDINATOR==='1'||!!(process.env.KANBORG_COORDINATOR_CLIENT??process.env.KANBOTS_COORDINATOR_CLIENT);
+const dataDir=process.env.KANBORG_LOCAL_DATA??process.env.KANBOTS_LOCAL_DATA??join(homedir(),'Library','Application Support','Kanbots Local');
 
 const BRIDGE_URL = process.env.KANBOTS_TOOL_BRIDGE_URL;
 const BRIDGE_TOKEN = process.env.KANBOTS_TOOL_BRIDGE_TOKEN;
@@ -31,8 +31,8 @@ if (!coordinated && (!BRIDGE_URL || !BRIDGE_TOKEN)) {
 
 async function callBridge(name: string, args: unknown): Promise<unknown> {
   let url=BRIDGE_URL,token=BRIDGE_TOKEN;
-  if(process.env.KANBOTS_COORDINATOR_CLIENT){
-    const id=process.env.KANBOTS_COORDINATOR_CLIENT;
+  const id=process.env.KANBORG_COORDINATOR_CLIENT??process.env.KANBOTS_COORDINATOR_CLIENT;
+  if(id){
     if(!/^[0-9a-f-]{36}$/.test(id))throw Error('Invalid paired client');
     const endpoint=JSON.parse(await readFile(join(dataDir,'coordinator-endpoint.json'),'utf8'));
     const profile=JSON.parse(await readFile(join(dataDir,'coordinator-clients',id+'.json'),'utf8'));
@@ -40,10 +40,10 @@ async function callBridge(name: string, args: unknown): Promise<unknown> {
     if(!/^http:\/\/127\.0\.0\.1:\d+$/.test(url!))throw Error('Invalid local endpoint');
     const session=await fetch(`${url}/session`,{method:'POST',headers:{authorization:`Bearer ${token}`},redirect:'error',signal:AbortSignal.timeout(5000)});
     const reply=await session.json() as {token?:string;error?:string};
-    if(!session.ok||!reply.token)throw Error(reply.error??'Pair in Kanbots Coordinators');
+    if(!session.ok||!reply.token)throw Error(reply.error??'Pair in KanBorg Coordinators');
     token=reply.token;
   }
-  if(!url||!/^http:\/\/127\.0\.0\.1:\d+$/.test(url)||!token)throw Error('Open Kanbots Local and check coordinator pairing.');
+  if(!url||!/^http:\/\/127\.0\.0\.1:\d+$/.test(url)||!token)throw Error('Open KanBorg and check coordinator pairing.');
   const response = await fetch(`${url}/tool/${encodeURIComponent(name)}`, {
     method: 'POST',
     redirect:'error',
@@ -74,7 +74,7 @@ async function callBridge(name: string, args: unknown): Promise<unknown> {
 }
 
 const server = new Server(
-  { name: 'kanbots-local', version: '1.2.0' },
+  { name: 'kanborg', version: '1.2.5' },
   { capabilities: { tools: {} }, ...(coordinated?{instructions:COORDINATOR_GUIDE}:{}) },
 );
 
@@ -105,7 +105,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
   }
 });
 
-if(coordinated) await callBridge('getCapabilities',{}).catch(error=>process.stderr.write(`[kanbots-local] ${error instanceof Error?error.message:'Pair in Kanbots Coordinators'}\n`));
+if(coordinated) await callBridge('getCapabilities',{}).catch(error=>process.stderr.write(`[kanbots-local] ${error instanceof Error?error.message:'Pair in KanBorg Coordinators'}\n`));
 const transport = new StdioServerTransport();
 server
   .connect(transport)

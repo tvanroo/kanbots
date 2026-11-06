@@ -1,6 +1,6 @@
-import type { IssueSource } from '@kanbots/core';
-import type { AgentRunProvider } from '@kanbots/dispatcher';
-import type { Store } from '@kanbots/local-store';
+import type { IssueSource } from '@kanborg/core';
+import type { AgentRunProvider } from '@kanborg/dispatcher';
+import type { Store } from '@kanborg/local-store';
 import type { AgentSupervisor } from '../agent-runs/supervisor.js';
 import type { AutopilotManager } from '../autopilot/orchestrator.js';
 import type {

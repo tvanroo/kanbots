@@ -1,17 +1,17 @@
 {
-  "name": "@kanbots/desktop",
-  "version": "1.2.4",
+  "name": "@kanborg/desktop",
+  "version": "1.2.5",
   "private": true,
-  "description": "kanbots desktop app (Electron)",
+  "description": "KanBorg desktop app (Electron)",
   "main": "./dist/main.cjs",
   "scripts": {
-    "build:deps": "pnpm --filter \"@kanbots/desktop^...\" --workspace-concurrency=1 build",
+    "build:deps": "pnpm --filter \"@kanborg/desktop^...\" --workspace-concurrency=1 build",
     "build:main": "tsup",
-    "build:web": "pnpm --filter @kanbots/web build",
+    "build:web": "pnpm --filter @kanborg/web build",
     "copy:web": "node scripts/copy-web.cjs",
     "ensure:native": "node scripts/ensure-native.cjs",
     "build": "pnpm build:deps && pnpm build:main && pnpm copy:web",
-    "dev": "pnpm ensure:native && dotenv -c -e ../../.env.local -- concurrently -k -n web,main,electron -c blue,yellow,magenta \"pnpm --filter @kanbots/web dev\" \"tsup --watch\" \"wait-on http://127.0.0.1:5173 ./dist/main.cjs && KANBOTS_RENDERER_URL=http://127.0.0.1:5173 electronmon ./dist/main.cjs\"",
+    "dev": "pnpm ensure:native && dotenv -c -e ../../.env.local -- concurrently -k -n web,main,electron -c blue,yellow,magenta \"pnpm --filter @kanborg/web dev\" \"tsup --watch\" \"wait-on http://127.0.0.1:5173 ./dist/main.cjs && KANBOTS_RENDERER_URL=http://127.0.0.1:5173 electronmon ./dist/main.cjs\"",
     "launch": "pnpm ensure:native && pnpm build && electron ./dist/main.cjs",
     "package": "pnpm ensure:native && pnpm build && electron-builder",
     "package:linux": "pnpm ensure:native && pnpm build && electron-builder --linux",
@@ -32,13 +32,13 @@
     "zod": "^3.24.1"
   },
   "devDependencies": {
-    "@kanbots/api": "workspace:*",
-    "@kanbots/cloud-client": "workspace:*",
-    "@kanbots/core": "workspace:*",
-    "@kanbots/dispatcher": "workspace:*",
-    "@kanbots/local-store": "workspace:*",
-    "@kanbots/mcp": "workspace:*",
-    "@kanbots/web": "workspace:*",
+    "@kanborg/api": "workspace:*",
+    "@kanborg/cloud-client": "workspace:*",
+    "@kanborg/core": "workspace:*",
+    "@kanborg/dispatcher": "workspace:*",
+    "@kanborg/local-store": "workspace:*",
+    "@kanborg/mcp": "workspace:*",
+    "@kanborg/web": "workspace:*",
     "@types/better-sqlite3": "^7.6.13",
     "@types/node": "^22.10.5",
     "concurrently": "^9.1.2",
@@ -58,8 +58,8 @@
   },
   "build": {
     "appId": "com.tvanroo.kanbots.local",
-    "productName": "Kanbots Local",
-    "executableName": "Kanbots Local",
+    "productName": "KanBorg",
+    "executableName": "KanBorg",
     "beforePack": "./scripts/before-pack.cjs",
     "asar": true,
     "asarUnpack": [
@@ -75,21 +75,13 @@
       "dist/**/*",
       "package.json"
     ],
-    "publish": [
-      {
-        "provider": "github",
-        "owner": "leodavinci1",
-        "repo": "kanbots",
-        "releaseType": "draft"
-      }
-    ],
     "linux": {
       "target": [
         "AppImage",
         "tar.xz"
       ],
       "category": "Development",
-      "artifactName": "kanbots-${version}-linux-x64.${ext}"
+      "artifactName": "kanborg-${version}-linux-x64.${ext}"
     },
     "mac": {
       "target": [
@@ -109,7 +101,7 @@
         }
       ],
       "category": "public.app-category.developer-tools",
-      "artifactName": "kanbots-local-${version}-mac-${arch}.${ext}",
+      "artifactName": "kanborg-${version}-mac-${arch}.${ext}",
       "identity": null,
       "hardenedRuntime": false,
       "gatekeeperAssess": false
@@ -126,16 +118,17 @@
           ]
         }
       ],
-      "artifactName": "kanbots-${version}-win-x64.${ext}"
+      "artifactName": "kanborg-${version}-win-x64.${ext}"
     },
     "nsis": {
       "oneClick": false,
       "perMachine": false,
       "allowToChangeInstallationDirectory": true,
       "deleteAppDataOnUninstall": false,
-      "shortcutName": "kanbots"
+      "shortcutName": "KanBorg"
     },
     "npmRebuild": false,
     "nodeGypRebuild": false
-  }
+  },
+  "homepage": "https://kanborg.ai"
 }

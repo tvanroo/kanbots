@@ -38,7 +38,7 @@ test('API execution uses saved key only in provider header and records usage',as
  const original=global.fetch;let charge=0;let settled;const dir=fs.mkdtempSync('/private/tmp/kanbots-api-task-');
  try{
  const {apiTurn}=load('api-task',{
- '@kanbots/mcp':{KANBOTS_TOOLS:[]},'./api-connections.js':{unlockApiConnection:()=> 'test-only-key',listApiConnections:()=>[{id:'key',provider:'anthropic'}]},
+ '@kanborg/mcp':{KANBOTS_TOOLS:[]},'./api-connections.js':{unlockApiConnection:()=> 'test-only-key',listApiConnections:()=>[{id:'key',provider:'anthropic'}]},
  './routing-state.js':{reserveCharge:()=>{charge++;return 'r1';},settleCharge:(...args)=>{settled=args;}}
  });
  global.fetch=async(url,opts)=>{assert.equal(url,'https://api.anthropic.com/v1/messages');assert.equal(opts.headers['x-api-key'],'test-only-key');assert.ok(!opts.body.includes('test-only-key'));return {ok:true,json:async()=>({content:[{type:'text',text:'Done'}],stop_reason:'end_turn',usage:{input_tokens:100,output_tokens:10}})};};
@@ -50,7 +50,7 @@ test('API execution uses saved key only in provider header and records usage',as
 });
 test('API refuses insufficient funds before calling provider; ambiguous failures keep reservation',async()=>{
  const original=global.fetch;let settled=0;try{
- const mocks={'@kanbots/mcp':{KANBOTS_TOOLS:[]},'./api-connections.js':{unlockApiConnection:()=> 'test',listApiConnections:()=>[{id:'key',provider:'openai'}]},'./routing-state.js':{reserveCharge:()=>null,settleCharge:()=>settled++}};
+ const mocks={'@kanborg/mcp':{KANBOTS_TOOLS:[]},'./api-connections.js':{unlockApiConnection:()=> 'test',listApiConnections:()=>[{id:'key',provider:'openai'}]},'./routing-state.js':{reserveCharge:()=>null,settleCharge:()=>settled++}};
  const route={row:{id:'key',provider:'openai'},model:{id:'gpt-test',input:1,output:5,context:64000,maxOutput:4096},pool:'org',available:0,since:0};
  let calls=0;global.fetch=async()=>{calls++;throw Error('network');};
  const args=[route,{cwd:'/tmp',prompt:'test'},[{role:'user',text:'test'}],new AbortController().signal,()=>{},5];
@@ -67,7 +67,7 @@ test('router switches exhausted API grant to subscription and preserves routed s
  let starts=0;
  const worker=()=>{starts++;const e=new EventEmitter();let resolve;const done=new Promise(r=>resolve=r);const h={pid:null,on:(n,f)=>{e.on(n,f);return h;},off:()=>h,stop:()=>{},done};setImmediate(()=>{e.emit('event',{kind:'session',sessionId:'native-session',model:'gpt-test'});e.emit('event',{kind:'text',text:'Done'});resolve({exitCode:0,result:{isError:false},killedByStop:false});});return h;};
  const {startRoutedRun}=load('automatic-routing',{
- electron:{app:{getPath:()=>dir}},'@kanbots/dispatcher':{startAgentRun:worker},
+ electron:{app:{getPath:()=>dir}},'@kanborg/dispatcher':{startAgentRun:worker},
  './api-task.js':{RouteUnavailable,apiTurn:async()=>{throw new RouteUnavailable('grant empty');}},
  './routing-capacity.js':{collectCapacity:async()=>({candidates:[api,sub]}),invalidateCapacity:()=>{}},
  './routing-state.js':{readRouting:()=>({config:{enabled:true,maxRunUsd:5}}),recordDecision:()=>{}}
@@ -84,7 +84,7 @@ test('routing excludes stopped and unknown grants, reclassifies allowed pay-go, 
  const base={id:'key',provider:'anthropic',name:'Test key',enabled:true,funding:'grant',remaining:100,budget:200,models:[{id:model.id}],renewal:'none',expiresAt:new Date(date+72*3600000).toISOString()};
  async function candidates(row){
   const {collectCapacity}=load('routing-capacity',{
-   '@kanbots/api':{readClaudeSubscriptionUsage:async()=>null},
+   '@kanborg/api':{readClaudeSubscriptionUsage:async()=>null},
    './api-connections.js':{listApiConnections:()=>[row]},
    './anthropic-reporting.js':{getAnthropicReportingAccounts:()=>[],updateAnthropicReporting:async()=>{}},
    './claude-auth.js':{getClaudeDetails:async()=>null},'./subscription-resets.js':{manageCodexResets:async()=>null},

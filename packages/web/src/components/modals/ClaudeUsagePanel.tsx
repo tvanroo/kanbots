@@ -1,6 +1,6 @@
 import { QuotaMeter } from '../usage/QuotaMeter.js';
 import { useEffect, useState } from 'react';
-import type { CostUsageResult, CostUsageWindow } from '@kanbots/api';
+import type { CostUsageResult, CostUsageWindow } from '@kanborg/api';
 import { getBridge } from '../../desktop-bridge.js';
 
 export function ClaudeUsagePanel() {

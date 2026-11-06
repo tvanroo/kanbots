@@ -4,7 +4,7 @@ import {
   type RecentCloudWorkspace,
 } from '../desktop-bridge.js';
 import { Logo } from '../components/Logo.js';
-import type { OrgSummary, ProjectSummary } from '@kanbots/cloud-client';
+import type { OrgSummary, ProjectSummary } from '@kanborg/cloud-client';
 
 export interface CloudWorkspacePickerProps {
   initialRecents: RecentCloudWorkspace[];
@@ -122,7 +122,7 @@ export function CloudWorkspacePicker({
           <Logo size={28} withWordmark />
         </h1>
         <p className="picker-sub">
-          Pick a Kanbots Cloud project to open. Tasks and runs are stored on the cloud
+          Pick a Kanbots Cloud (upstream) project to open. Tasks and runs are stored on the cloud
           and shared with your team.
         </p>
 

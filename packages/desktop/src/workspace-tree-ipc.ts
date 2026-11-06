@@ -3,7 +3,7 @@ import { readdir, readFile, stat } from 'node:fs/promises';
 import { isAbsolute, join, normalize, relative, resolve, sep } from 'node:path';
 import { promisify } from 'node:util';
 import { clipboard, dialog, ipcMain, shell, type WebContents } from 'electron';
-import { removeWorktree as removeGitWorktree } from '@kanbots/dispatcher';
+import { removeWorktree as removeGitWorktree } from '@kanborg/dispatcher';
 
 const execFileAsync = promisify(execFile);
 

@@ -4,7 +4,7 @@ import { randomUUID } from 'node:crypto';
 import { spawn } from 'node:child_process';
 import { existsSync,readFileSync,writeFileSync,mkdirSync,renameSync } from 'node:fs';
 import { join } from 'node:path';
-import { startAgentRun,type StartAgentRunOptions,type AgentRunHandle,type RunSummary,type StreamEvent } from '@kanbots/dispatcher';
+import { startAgentRun,type StartAgentRunOptions,type AgentRunHandle,type RunSummary,type StreamEvent } from '@kanborg/dispatcher';
 import { apiTurn,RouteUnavailable,type TranscriptEntry } from './api-task.js';
 import { collectCapacity,invalidateCapacity,type Candidate } from './routing-capacity.js';
 import { readRouting,recordDecision } from './routing-state.js';

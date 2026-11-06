@@ -1,7 +1,7 @@
 import { app, safeStorage } from 'electron';
 import { existsSync, readFileSync, writeFileSync, renameSync } from 'node:fs';
 import { join } from 'node:path';
-import type { OpenAIReporting } from '@kanbots/api';
+import type { OpenAIReporting } from '@kanborg/api';
 type Stored = OpenAIReporting & { encryptedKey?: string };
 const path = () => join(app.getPath('userData'), 'openai-reporting.json');
 function read(): Stored {

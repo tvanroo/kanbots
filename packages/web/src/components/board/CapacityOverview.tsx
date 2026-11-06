@@ -1,6 +1,6 @@
 import { useEffect,useRef,useState } from 'react';
 import { createPortal } from 'react-dom';
-import type { CapacitySnapshot } from '@kanbots/api';
+import type { CapacitySnapshot } from '@kanborg/api';
 import { getBridge } from '../../desktop-bridge.js';
 export function CapacityOverview(){
   const [data,setData]=useState<CapacitySnapshot|null>(null);const [open,setOpen]=useState(false);const [position,setPosition]=useState({top:0,left:0});const ref=useRef<HTMLButtonElement>(null);const closeTimer=useRef<ReturnType<typeof setTimeout> | undefined>(undefined);

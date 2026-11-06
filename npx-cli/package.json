@@ -3,7 +3,7 @@
   "version": "0.0.1",
   "description": "A kanban board that runs Claude Code and Codex agents in parallel.",
   "license": "MIT",
-  "homepage": "https://github.com/leodavinci1/kanbots",
+  "homepage": "https://kanborg.ai",
   "repository": {
     "type": "git",
     "url": "https://github.com/leodavinci1/kanbots",

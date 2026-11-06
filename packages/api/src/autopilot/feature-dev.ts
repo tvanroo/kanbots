@@ -4,7 +4,7 @@ import type {
   AutopilotEffort,
   AutopilotPersonaSnapshot,
   AutopilotSession,
-} from '@kanbots/local-store';
+} from '@kanborg/local-store';
 import type { SuggestFeatureBacklogEntry } from '../bridge.js';
 import { collectSuggestionEntries } from '../suggestion-context.js';
 import { dispatchAutopilotChild } from './dispatch-helpers.js';

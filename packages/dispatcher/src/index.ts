@@ -1,4 +1,4 @@
-export const PACKAGE_NAME = '@kanbots/dispatcher';
+export const PACKAGE_NAME = '@kanborg/dispatcher';
 
 export {
   ComposerError,

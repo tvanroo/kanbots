@@ -6,8 +6,8 @@ import {
   type Issue,
   type StatusKey,
   type UpdateIssuePatch,
-} from '@kanbots/core';
-import type { AgentRun, Message } from '@kanbots/local-store';
+} from '@kanborg/core';
+import type { AgentRun, Message } from '@kanborg/local-store';
 import { z } from 'zod';
 import type {
   DecoratedIssue,

@@ -1,4 +1,4 @@
-import type { PullRequest } from '@kanbots/core';
+import type { PullRequest } from '@kanborg/core';
 import { z } from 'zod';
 import type { PrCommentPayload, PrCommentsListResult } from '../bridge.js';
 import { badRequest, notFound, parseArgs } from './errors.js';

@@ -1,5 +1,5 @@
 /**
- * Typed HTTP client for the Kanbots Cloud v1 API. Uses a user-scoped
+ * Typed HTTP client for the Kanbots Cloud (upstream) v1 API. Uses a user-scoped
  * bearer token (kind='user' agent_token) so it can act on behalf of
  * the signed-in user across all their orgs — same authority as the
  * Clerk session in the browser.

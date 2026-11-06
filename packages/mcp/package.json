@@ -1,17 +1,21 @@
 {
-  "name": "@kanbots/mcp",
+  "name": "@kanborg/mcp",
   "version": "0.1.0",
-  "description": "MCP server exposing kanbots state to model clients",
+  "description": "MCP server exposing KanBorg state to model clients",
   "license": "MIT",
   "author": "Leonardo Cunha",
-  "homepage": "https://github.com/leodavinci1/kanbots#readme",
-  "bugs": "https://github.com/leodavinci1/kanbots/issues",
+  "homepage": "https://kanborg.ai",
+  "bugs": "https://github.com/tvanroo/kanbots/issues",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/leodavinci1/kanbots.git",
+    "url": "git+https://github.com/tvanroo/kanbots.git",
     "directory": "packages/mcp"
   },
-  "keywords": ["kanbots", "mcp", "model-context-protocol"],
+  "keywords": [
+    "kanbots",
+    "mcp",
+    "model-context-protocol"
+  ],
   "publishConfig": {
     "access": "public"
   },
@@ -19,7 +23,8 @@
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "bin": {
-    "kanbots-mcp-server": "./dist/server.js"
+    "kanbots-mcp-server": "./dist/server.js",
+    "kanborg-mcp-server": "./dist/server.js"
   },
   "exports": {
     ".": {
@@ -34,7 +39,9 @@
     },
     "./package.json": "./package.json"
   },
-  "files": ["dist"],
+  "files": [
+    "dist"
+  ],
   "scripts": {
     "build": "tsup",
     "dev": "tsup --watch",

@@ -111,7 +111,7 @@ export function Window({
           <button
             type="button"
             className="kb-chat-fab"
-            title="Open chat with kanbots agent"
+            title="Open chat with KanBorg agent"
             aria-label="Open agent chat"
             onClick={() => {
               void bridge.openChat?.(null);

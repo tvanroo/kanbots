@@ -153,7 +153,7 @@ const SPECS: ProviderSpec[] = [
   },
 ];
 
-// Mirror @kanbots/llm catalogue. Keep in sync.
+// Mirror @kanborg/llm catalogue. Keep in sync.
 const MODELS_BY_PROVIDER: Record<ProviderId, Array<{ id: string; label: string }>> = {
   'claude-code': [
     { id: 'claude-opus-4-7', label: 'Claude Opus 4.7' },

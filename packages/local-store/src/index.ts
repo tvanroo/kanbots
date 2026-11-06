@@ -99,7 +99,7 @@ function wrap(db: Db): Store {
   };
 }
 
-export const PACKAGE_NAME = '@kanbots/local-store';
+export const PACKAGE_NAME = '@kanborg/local-store';
 
 export type { Db } from './db.js';
 export { migrations, runMigrations };
@@ -173,9 +173,9 @@ export type {
 } from './repos/workspace-repos.js';
 
 export {
-  describeKanbotsDir,
+  describeKanBorgDir,
   ensureGitignoreEntry,
-  ensureKanbotsDir,
+  ensureKanBorgDir,
   findGitRoot,
   HOUSE_RULES_MAX_BYTES,
   readWorkspaceConfig,
@@ -186,7 +186,7 @@ export {
   type CheckCommandOverride,
   type CheckCommandOverrides,
   type GitHubWorkspaceConfig,
-  type KanbotsDir,
+  type KanBorgDir,
   type LocalWorkspaceConfig,
   type WorkspaceConfig,
   type WorkspaceDefaults,

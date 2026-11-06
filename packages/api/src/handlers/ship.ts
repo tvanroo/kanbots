@@ -17,7 +17,7 @@
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { z } from 'zod';
-import type { PullRequest } from '@kanbots/core';
+import type { PullRequest } from '@kanborg/core';
 import {
   detectLocalBase,
   isWorktreeClean,

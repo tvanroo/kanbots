@@ -6,7 +6,7 @@ import { promisify } from 'node:util';
 
 const execFileAsync = promisify(execFile);
 
-export interface KanbotsDir {
+export interface KanBorgDir {
   root: string;
   dbPath: string;
   worktreesDir: string;
@@ -152,7 +152,7 @@ function validateCheckOverrides(input: unknown): CheckCommandOverrides | undefin
   return Object.keys(out).length > 0 ? out : undefined;
 }
 
-export function describeKanbotsDir(repoPath: string): KanbotsDir {
+export function describeKanBorgDir(repoPath: string): KanBorgDir {
   const root = join(repoPath, '.kanbots');
   return {
     root,
@@ -162,14 +162,14 @@ export function describeKanbotsDir(repoPath: string): KanbotsDir {
   };
 }
 
-export async function ensureKanbotsDir(repoPath: string): Promise<KanbotsDir> {
-  const dir = describeKanbotsDir(repoPath);
+export async function ensureKanBorgDir(repoPath: string): Promise<KanBorgDir> {
+  const dir = describeKanBorgDir(repoPath);
   await mkdir(dir.worktreesDir, { recursive: true });
   return dir;
 }
 
 export async function readWorkspaceConfig(repoPath: string): Promise<WorkspaceConfig | null> {
-  const { configPath } = describeKanbotsDir(repoPath);
+  const { configPath } = describeKanBorgDir(repoPath);
   try {
     const raw = await readFile(configPath, 'utf8');
     const parsed = JSON.parse(raw) as unknown;
@@ -184,7 +184,7 @@ export async function writeWorkspaceConfig(
   repoPath: string,
   config: WorkspaceConfig,
 ): Promise<void> {
-  const { configPath } = describeKanbotsDir(repoPath);
+  const { configPath } = describeKanBorgDir(repoPath);
   await writeFile(configPath, JSON.stringify(config, null, 2) + '\n', 'utf8');
 }
 

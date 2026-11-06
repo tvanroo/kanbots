@@ -1,7 +1,7 @@
 import { app } from 'electron';
 import { readFileSync,writeFileSync,renameSync } from 'node:fs';
 import { join } from 'node:path';
-import type { ApiConnection } from '@kanbots/api';
+import type { ApiConnection } from '@kanborg/api';
 export type PricedModel={id:string; input:number; output:number; context:number; maxOutput:number; released:string};
 let pending:Promise<any>|undefined;
 export async function modelCatalogue():Promise<any>{

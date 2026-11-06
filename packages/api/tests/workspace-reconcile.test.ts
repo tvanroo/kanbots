@@ -1,4 +1,4 @@
-import { openStoreInMemory } from '@kanbots/local-store';
+import { openStoreInMemory } from '@kanborg/local-store';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { reconcileIssueLabels } from '../src/workspace-reconcile.js';
 import { FakeIssueSource } from './helpers/fakes.js';

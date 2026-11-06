@@ -1,7 +1,7 @@
 import { ipcMain, type IpcMainInvokeEvent } from 'electron';
 import { toIpcError } from './errors.js';
 import type { OwnedSubscriptionRegistry } from './subscriptions.js';
-import type { Handlers } from '@kanbots/api';
+import type { Handlers } from '@kanborg/api';
 
 export const CHANNEL_PREFIX = 'kanbots:invoke:';
 const SUBSCRIBE_CHANNEL = 'agent-runs:events:subscribe';

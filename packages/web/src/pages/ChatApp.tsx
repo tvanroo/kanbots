@@ -384,7 +384,7 @@ function ChatRoom({ conversationId }: { conversationId: number }) {
             <div className="kb-chat-empty-emoji">💬</div>
             <div className="kb-chat-empty-title">Start the conversation</div>
             <div className="kb-chat-empty-sub">
-              Ask the kanbots agent anything about your board or codebase.
+              Ask the KanBorg agent anything about your board or codebase.
             </div>
           </div>
         ) : null}

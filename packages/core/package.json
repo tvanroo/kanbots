@@ -1,17 +1,21 @@
 {
-  "name": "@kanbots/core",
+  "name": "@kanborg/core",
   "version": "0.1.0",
-  "description": "Domain types, GitHub issue source contract, and shared utilities for kanbots",
+  "description": "Domain types, GitHub issue source contract, and shared utilities for KanBorg",
   "license": "MIT",
   "author": "Leonardo Cunha",
-  "homepage": "https://github.com/leodavinci1/kanbots#readme",
-  "bugs": "https://github.com/leodavinci1/kanbots/issues",
+  "homepage": "https://kanborg.ai",
+  "bugs": "https://github.com/tvanroo/kanbots/issues",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/leodavinci1/kanbots.git",
+    "url": "git+https://github.com/tvanroo/kanbots.git",
     "directory": "packages/core"
   },
-  "keywords": ["kanbots", "kanban", "github-issues"],
+  "keywords": [
+    "kanbots",
+    "kanban",
+    "github-issues"
+  ],
   "publishConfig": {
     "access": "public"
   },
@@ -24,7 +28,9 @@
       "import": "./dist/index.js"
     }
   },
-  "files": ["dist"],
+  "files": [
+    "dist"
+  ],
   "scripts": {
     "build": "tsup",
     "dev": "tsup --watch",
@@ -39,7 +45,7 @@
     "@octokit/request-error": "^6.1.8"
   },
   "devDependencies": {
-    "@kanbots/local-store": "workspace:*",
+    "@kanborg/local-store": "workspace:*",
     "@types/node": "^22.10.5",
     "tsup": "^8.3.5",
     "typescript": "^5.7.3",

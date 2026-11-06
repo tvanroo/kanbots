@@ -3,7 +3,7 @@ import type { CSSProperties } from 'react';
 export interface LogoProps {
   /** Visual size of the mark glyph in pixels. Defaults to 14 (modal-chip scale). */
   size?: number;
-  /** Show the "kanbots" wordmark next to the mark. */
+  /** Show the "KanBorg" wordmark next to the mark. */
   withWordmark?: boolean;
   /** Override CSS color of the mark. Defaults to var(--accent). */
   tone?: 'accent' | 'ink' | 'muted';
@@ -12,7 +12,7 @@ export interface LogoProps {
 }
 
 /**
- * Shared kanbots brand mark used across the web app.
+ * Shared KanBorg brand mark used across the web app.
  *
  * The mark is four rounded rectangles arranged like a kanban board: three
  * outlined columns + one filled column emphasizing the active card. Mirrors
@@ -77,7 +77,7 @@ export function Logo({
             letterSpacing: '-0.01em',
           }}
         >
-          kanbots
+          KanBorg
         </span>
       ) : null}
     </span>

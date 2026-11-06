@@ -85,7 +85,7 @@ function slugify(s: string): string {
   );
 }
 
-const SPEC_SYSTEM_PROMPT = `You are running in /spec mode for a kanbots task.
+const SPEC_SYSTEM_PROMPT = `You are running in /spec mode for a KanBorg task.
 
 1. Read the user's request below (description / scope / acceptance criteria).
 2. Investigate the affected files via Read / Glob / Grep.

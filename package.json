@@ -1,10 +1,9 @@
 {
-  "name": "kanbots",
+  "name": "kanborg",
   "version": "0.0.0",
   "private": true,
-  "description": "Local collaboration interface for working on GitHub Issues with Claude Code agents",
+  "description": "Shared project coordination and intelligent model capacity across your preferred harnesses",
   "license": "MIT",
-  "author": "hello@kanbots.dev",
   "type": "module",
   "engines": {
     "node": ">=20"
@@ -18,8 +17,8 @@
     "lint": "eslint .",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
-    "desktop": "pnpm --filter @kanbots/desktop launch",
-    "desktop:dev": "pnpm --filter @kanbots/desktop dev",
+    "desktop": "pnpm --filter @kanborg/desktop launch",
+    "desktop:dev": "pnpm --filter @kanborg/desktop dev",
     "release:dry": "pnpm -r publish --access public --dry-run --no-git-checks",
     "release": "pnpm -r publish --access public"
   },
@@ -38,5 +37,6 @@
       "electron",
       "esbuild"
     ]
-  }
+  },
+  "homepage": "https://kanborg.ai"
 }

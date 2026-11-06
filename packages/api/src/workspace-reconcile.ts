@@ -4,8 +4,8 @@ import {
   withAgentLabel,
   withStatusLabel,
   type IssueSource,
-} from '@kanbots/core';
-import type { Store } from '@kanbots/local-store';
+} from '@kanborg/core';
+import type { Store } from '@kanborg/local-store';
 
 export interface ReconcileLabelsResult {
   demoted: number[];

@@ -52,8 +52,8 @@ export function OpenAIReportingPanel({ report, onChanged }: { report: OpenAIRepo
           <input type="text" aria-label="OpenAI Admin keys setup address" readOnly value={setupUrl} onFocus={event => event.currentTarget.select()} />
           {copyStatus ? <span role="status">{copyStatus}</span> : null}
         </div>
-        <p>Choose the organization that holds your API credits. Create an Admin key named <strong>Kanbots Local reporting</strong>, then copy it.</p>
-        <p>2. Paste it below and select <strong>Save &amp; connect</strong>. Kanbots checks access automatically.</p>
+        <p>Choose the organization that holds your API credits. Create an Admin key named <strong>KanBorg reporting</strong>, then copy it.</p>
+        <p>2. Paste it below and select <strong>Save &amp; connect</strong>. KanBorg checks access automatically.</p>
         <details><summary>Can’t create an Admin key?</summary><p>Sign in as an API organization owner, or ask your organization owner to provide a reporting credential. A ChatGPT subscription or a normal model API key does not provide this administrative access.</p></details>
       </div> : null}
       {editing ? <div className="kb-api-field"><label htmlFor={inputId}>{report?.keyPreview ? 'Replace reporting key' : 'OpenAI Admin API key'}</label><input id={inputId} type="password" autoComplete="off" spellCheck={false} disabled={busy} aria-invalid={invalidKey} aria-describedby={error ? `${inputId}-error` : undefined} value={key} onChange={e => { setKey(e.target.value); setError(''); setInvalidKey(false); }} placeholder="Paste reporting key" /></div> : null}

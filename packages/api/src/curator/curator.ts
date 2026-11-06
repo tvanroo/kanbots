@@ -1,6 +1,6 @@
 import { spawn as nodeSpawn, type ChildProcess } from 'node:child_process';
 import { z } from 'zod';
-import type { AgentRun, LearningTag, Store } from '@kanbots/local-store';
+import type { AgentRun, LearningTag, Store } from '@kanborg/local-store';
 import { CURATOR_JSON_SCHEMA, CURATOR_SYSTEM_PROMPT, renderCuratorPrompt } from './prompt.js';
 
 /** Default model used for curator dispatches — small + cheap. Override via

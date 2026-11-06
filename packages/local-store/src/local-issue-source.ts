@@ -4,7 +4,7 @@ import type {
   Issue,
   IssueSource,
   UpdateIssuePatch,
-} from '@kanbots/core';
+} from '@kanborg/core';
 import { LocalIssueNotFoundError, type LocalIssuesRepo } from './repos/local-issues.js';
 
 export interface LocalIssueSourceOptions {

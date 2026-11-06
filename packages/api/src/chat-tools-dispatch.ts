@@ -1,4 +1,4 @@
-import { withStatusLabel } from '@kanbots/core';
+import { withStatusLabel } from '@kanborg/core';
 import type { Handlers } from './handlers/index.js';
 import type { ToolDispatcher } from './tool-bridge.js';
 

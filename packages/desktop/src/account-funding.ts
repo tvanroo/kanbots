@@ -1,7 +1,7 @@
 import { app } from 'electron';
 import { existsSync, readFileSync, writeFileSync, renameSync } from 'node:fs';
 import { join } from 'node:path';
-import type { FundingAccount, FundingAccountInput, FundingPool } from '@kanbots/api';
+import type { FundingAccount, FundingAccountInput, FundingPool } from '@kanborg/api';
 import { listApiConnections } from './api-connections.js';
 type Saved = FundingAccountInput & { updatedAt: string };
 const file = () => join(app.getPath('userData'), 'account-funding.json');

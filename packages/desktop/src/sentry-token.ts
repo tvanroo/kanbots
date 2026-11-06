@@ -1,5 +1,5 @@
 import { safeStorage } from 'electron';
-import type { SentryTokenEncryption } from '@kanbots/local-store';
+import type { SentryTokenEncryption } from '@kanborg/local-store';
 
 export interface EncryptedToken {
   buffer: Buffer;

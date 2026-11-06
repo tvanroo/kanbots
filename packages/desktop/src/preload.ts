@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer, type IpcRendererEvent } from 'electron';
-import type { ChannelArgs, ChannelName, ChannelResult } from '@kanbots/api';
+import type { ChannelArgs, ChannelName, ChannelResult } from '@kanborg/api';
 import type {
   AgentRunListResponse,
   AgentRunSummary,
@@ -19,20 +19,20 @@ import type {
   ProjectSummary,
   UpdateCardRequest,
   UserMe,
-} from '@kanbots/cloud-client';
+} from '@kanborg/cloud-client';
 import type {
   BootstrapPayload,
   CloudLoginPollResult,
   CloudLoginStartResult,
   CloudStatusPayload,
-  KanbotsBridge,
+  KanBorgBridge,
   RecentCloudWorkspace,
   RecentWorkspace,
 } from './types.js';
 
 const INVOKE_PREFIX = 'kanbots:invoke:';
 
-const api: KanbotsBridge = {
+const api: KanBorgBridge = {
   bootstrap: () => ipcRenderer.invoke('kanbots:bootstrap') as Promise<BootstrapPayload>,
   pickFolder: () => ipcRenderer.invoke('kanbots:pick-folder') as Promise<string | null>,
   openWorkspace: (repoPath: string) =>

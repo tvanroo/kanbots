@@ -4,13 +4,13 @@ import type {
   Issue,
   IssueSource,
   UpdateIssuePatch,
-} from '@kanbots/core';
+} from '@kanborg/core';
 import type {
   AgentEvent,
   AgentRunStatus,
   Card,
   Store,
-} from '@kanbots/local-store';
+} from '@kanborg/local-store';
 import type { AgentSupervisor } from '../../src/agent-runs/supervisor.js';
 
 interface ApiError extends Error {

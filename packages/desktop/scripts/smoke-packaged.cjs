@@ -1,5 +1,5 @@
 // Launch the real packaged app with isolated settings and verify its renderer loads.
-// Usage: node scripts/smoke-packaged.cjs /path/to/Kanbots\ Local.app/Contents/MacOS/Kanbots\ Local
+// Usage: node scripts/smoke-packaged.cjs /path/to/KanBorg\ Local.app/Contents/MacOS/KanBorg\ Local
 const {spawn,execFileSync}=require('node:child_process');
 const fs=require('node:fs');
 const os=require('node:os');

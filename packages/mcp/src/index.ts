@@ -5,7 +5,7 @@
  * server simply forwards each call as an HTTP POST to the bridge.
  */
 
-export const PACKAGE_NAME = '@kanbots/mcp';
+export const PACKAGE_NAME = '@kanborg/mcp';
 
 export {
   CLOUD_SIGNIN_HINT,
@@ -25,7 +25,7 @@ export const KANBOTS_TOOLS: readonly ToolDef[] = [
   {
     name: 'listIssues',
     description:
-      'List issues in the current kanbots workspace. Returns title, number, status, agent, labels, etc.',
+      'List issues in the current KanBorg workspace. Returns title, number, status, agent, labels, etc.',
     inputSchema: {
       type: 'object',
       additionalProperties: false,

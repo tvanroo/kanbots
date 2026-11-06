@@ -1,7 +1,7 @@
 // Renderer ↔ main IPC bridge contract.
 //
-// Channel definitions are the canonical ones from `@kanbots/api`.
-// Keep the `KanbotsBridge` interface here because it also includes
+// Channel definitions are the canonical ones from `@kanborg/api`.
+// Keep the `KanBorgBridge` interface here because it also includes
 // the desktop-only lifecycle methods (bootstrap, openWorkspace, etc.).
 
 import type {
@@ -12,7 +12,7 @@ import type {
   ChannelResult,
   PostMessageResult,
   UploadAttachmentResult,
-} from '@kanbots/api';
+} from '@kanborg/api';
 import type {
   AgentRunListResponse,
   AgentRunSummary,
@@ -32,7 +32,7 @@ import type {
   ProjectSummary,
   UpdateCardRequest,
   UserMe,
-} from '@kanbots/cloud-client';
+} from '@kanborg/cloud-client';
 import type {
   ActiveCloudWorkspaceInfo,
   ActiveWorkspaceInfo,
@@ -54,7 +54,7 @@ export type {
   UploadAttachmentResult,
 };
 
-export interface KanbotsBridge {
+export interface KanBorgBridge {
   bootstrap(): Promise<BootstrapPayload>;
   pickFolder(): Promise<string | null>;
   openWorkspace(repoPath: string): Promise<{ ok: true } | { ok: false; error: string }>;
@@ -65,10 +65,10 @@ export interface KanbotsBridge {
   closeWindow(): Promise<void>;
   coordinatorState?: () => Promise<any>;
   coordinatorAction?: (action:string,args?:any) => Promise<any>;
-  routingState?(): Promise<import('@kanbots/api').RoutingState>;
-  saveRouting?(config: import('@kanbots/api').RoutingConfig): Promise<import('@kanbots/api').RoutingState>;
-  capacity?(): Promise<import('@kanbots/api').CapacitySnapshot>;
-  claudeSubscriptionUsage?(): Promise<import('@kanbots/api').CostUsageResult>;
+  routingState?(): Promise<import('@kanborg/api').RoutingState>;
+  saveRouting?(config: import('@kanborg/api').RoutingConfig): Promise<import('@kanborg/api').RoutingState>;
+  capacity?(): Promise<import('@kanborg/api').CapacitySnapshot>;
+  claudeSubscriptionUsage?(): Promise<import('@kanborg/api').CostUsageResult>;
   claudeAuthStatus(): Promise<{ authed: boolean }>;
   claudeLoginStart(installIfMissing?: boolean): Promise<{ ok: true } | { ok: false; error: string }>;
   claudeLoginCancel(): Promise<void>;
@@ -286,7 +286,7 @@ export interface KanbotsBridge {
 
 declare global {
   interface Window {
-    kanbots?: KanbotsBridge;
+    kanbots?: KanBorgBridge;
   }
 }
 

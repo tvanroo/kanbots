@@ -2,7 +2,7 @@ import { execFile } from 'node:child_process';
 import { mkdir } from 'node:fs/promises';
 import { dirname } from 'node:path';
 import { promisify } from 'node:util';
-import type { AgentRun, DiffHunk } from '@kanbots/local-store';
+import type { AgentRun, DiffHunk } from '@kanborg/local-store';
 import { z } from 'zod';
 import type {
   DiffFile,

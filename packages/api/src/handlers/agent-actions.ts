@@ -1,12 +1,12 @@
-import type { Issue } from '@kanbots/core';
-import type { AgentRun, Store } from '@kanbots/local-store';
+import type { Issue } from '@kanborg/core';
+import type { AgentRun, Store } from '@kanborg/local-store';
 import { z } from 'zod';
 import type { DecoratedIssue, SplitResult } from '../bridge.js';
 import { buildActiveRunMap, decorateIssue } from './issues.js';
 import { badRequest, parseArgs } from './errors.js';
 import type { HandlerDeps } from './types.js';
 
-const REVIEWER_SYSTEM_PROMPT = `You are a code reviewer for a kanbots task.
+const REVIEWER_SYSTEM_PROMPT = `You are a code reviewer for a KanBorg task.
 
 Your job is to read the diff already in this worktree and produce a focused review.
 

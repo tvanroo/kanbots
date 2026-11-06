@@ -33,7 +33,7 @@ export interface CloudSession {
 }
 
 export const CLOUD_SIGNIN_HINT =
-  'Sign in via the Kanbots desktop app to enable cloud features.';
+  'Sign in via the KanBorg desktop app to enable cloud features.';
 
 /**
  * Read the cloud session status from `cloud-config.json`. Never throws and

@@ -1,10 +1,10 @@
-# Kanbots Local coordinators (1.2.4)
+# KanBorg coordinators (1.2.5)
 
 Open a project. When an external coordinator is not active, the board shows **Your built-in coordinator**, a message box, and guided action buttons. **Populate board from repository** starts the discovery prompt in the built-in chat without a separate mode-selection step. **Connect external coordinator** starts a setup conversation; the coordinator can prepare or reuse a named connection and guide pairing. The **Coordinators** control opens full progress and connection settings.
 
 ## Start with the defaults
 
-Use the inline message box to describe an objective, or open **Coordinators** to continue its chat. For an external harness, the guided chat prepares a connection; alternatively add a named external harness, copy its MCP configuration into that harness, connect, approve its matching pairing code in Kanbots, and choose **Use coordinator**. DeepSeek Harness has a dedicated configuration copy button; the standard MCP configuration is also available. The connection uses local stdio and requires Kanbots Local to be running with that project open. A remote-only MCP client needs a future transport integration.
+Use the inline message box to describe an objective, or open **Coordinators** to continue its chat. For an external harness, the guided chat prepares a connection; alternatively add a named external harness, copy its MCP configuration into that harness, connect, approve its matching pairing code in KanBorg, and choose **Use coordinator**. DeepSeek Harness has a dedicated configuration copy button; the standard MCP configuration is also available. The connection uses local stdio and requires KanBorg to be running with that project open. A remote-only MCP client needs a future transport integration.
 
 One coordinator controls a workspace at a time. Switching preserves tasks, summaries and workers. Stop an independent Autopilot session before handing control to a coordinator. The default workflow allows two workers, a $5 per-run budget setting, repository checks, an independent review and one correction attempt. Subscription usage is not a dollar charge; run budgets use the existing execution accounting. Change workflow settings as you learn what suits your project.
 
@@ -20,13 +20,13 @@ The coordinator opens immediately in a persistent chat view. During external set
 
 ## Delegation and release
 
-Tasks run in worker worktrees using Kanbots provider routing. Dependencies and worker limits queue dispatch. QA runs configured repository checks, then a separate reviewer at the exact implementation commit. A failed review can return to implementation within the correction limit. Results expose compact summaries, bounded logs, diffs, checks and change cursors.
+Tasks run in worker worktrees using KanBorg provider routing. Dependencies and worker limits queue dispatch. QA runs configured repository checks, then a separate reviewer at the exact implementation commit. A failed review can return to implementation within the correction limit. Results expose compact summaries, bounded logs, diffs, checks and change cursors.
 
-Human decisions and release approvals remain in Kanbots. Release preparation requires QA on the exact committed revision. Supported release actions are a local merge into a clean checked-out target, or a draft GitHub PR in a GitHub-backed project. Publishing, production deployment and app-store release are not included. New commits invalidate previous QA/release approval. Failed or uncertain release attempts are surfaced rather than automatically replayed.
+Human decisions and release approvals remain in KanBorg. Release preparation requires QA on the exact committed revision. Supported release actions are a local merge into a clean checked-out target, or a draft GitHub PR in a GitHub-backed project. Publishing, production deployment and app-store release are not included. New commits invalidate previous QA/release approval. Failed or uncertain release attempts are surfaced rather than automatically replayed.
 
 ## Connection and recovery
 
-Pairings are named, project-scoped and revocable. Configurations contain a client identifier, not provider credentials. Pairing credentials stay in protected local app storage; each connection exchanges them for short-lived sessions. This protects the bridge from unpaired clients, not from malicious software running as the same macOS user. The stable launcher is regenerated when Kanbots starts after an update; the harness does not need a separately installed Node runtime.
+Pairings are named, project-scoped and revocable. Configurations contain a client identifier, not provider credentials. Pairing credentials stay in protected local app storage; each connection exchanges them for short-lived sessions. This protects the bridge from unpaired clients, not from malicious software running as the same macOS user. The stable launcher is regenerated when KanBorg starts after an update; the harness does not need a separately installed Node runtime.
 
 MCP writes require the current session revision and an idempotency request ID. Retry the same ID after transport failure. Reconnecting reads the current local endpoint and durable summary. Ambiguous operations are not replayed. Long-running worker execution still depends on the Mac staying awake. Stop all work from the coordinator panel when needed.
 
@@ -37,3 +37,15 @@ The popup groups sources into shared routing tiers and marks the current preferr
 ## Validation boundary
 
 Automated checks cover coordinator schemas, pairing/reconnect/revocation, project scope, idempotency, QA/release approval and inventory reconciliation. UI layout was checked using a preview. Live provider inference, real merges/PRs and actual DeepSeek/Claude/ChatGPT desktop pairing are left for the owner acceptance run.
+
+## Change coordinator
+
+Use **Change coordinator** in the chat header. Choose **Return to built-in**, or choose a harness and **Copy prompt for new coordinator**. The prompt includes standard JSON MCP config, ChatGPT desktop/Codex-host TOML, and DSH fields; use only the format supported by that harness. Existing unrelated connections must be preserved. KanBorg does not silently install configuration into other applications.
+
+Pair the new harness before requesting handoff. Requesting handoff saves a checkpoint and pauses new dispatch. The outgoing coordinator sees the event through MCP polling and can submit `completeHandoff` with its summary. An idle internal coordinator receives a wrap-up prompt. When ready, the user switches control; existing workers continue. An unresponsive external harness cannot be forced to run by MCP: use **Copy wrap-up request** to wake its chat or explicitly **Switch using saved progress**. Cancelling resumes the previous controller. Returning to built-in starts a context-recovery turn. The incoming external coordinator must read `getWorkspaceSummary`; the UI distinguishes assigned control from that first check-in.
+
+Compatibility references: [ChatGPT local MCP configuration](https://learn.chatgpt.com/docs/extend/mcp?surface=cli), [Claude Desktop local MCP](https://support.claude.com/en/articles/10949351-getting-started-with-local-mcp-servers-on-claude-desktop). ChatGPT remote-only connector screens are a different transport; this release does not publish KanBorg to the internet. Actual ChatGPT and Claude Desktop pairing remains owner acceptance testing.
+
+## KanBorg rename compatibility
+
+New MCP connections identify as `kanborg` and use `KANBORG_COORDINATOR_CLIENT`. Existing `kanbots-local` server entries and `KANBOTS_COORDINATOR_CLIENT` remain supported. Both launcher filenames are refreshed when KanBorg starts. The application bundle ID and data directory are intentionally unchanged to retain encrypted keys and paired clients.

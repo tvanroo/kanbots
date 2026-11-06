@@ -1,5 +1,5 @@
-import { statusFromLabels, type Issue } from '@kanbots/core';
-import type { IssueRelation } from '@kanbots/local-store';
+import { statusFromLabels, type Issue } from '@kanborg/core';
+import type { IssueRelation } from '@kanborg/local-store';
 import { z } from 'zod';
 import type { IssueRelationPayload } from '../bridge.js';
 import { bootstrapWorkspace } from '../workspace-bootstrap.js';

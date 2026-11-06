@@ -1,18 +1,18 @@
-export class KanbotsError extends Error {
+export class KanBorgError extends Error {
   constructor(message: string) {
     super(message);
-    this.name = 'KanbotsError';
+    this.name = 'KanBorgError';
   }
 }
 
-export class KanbotsAuthError extends KanbotsError {
+export class KanBorgAuthError extends KanBorgError {
   constructor(message: string) {
     super(message);
-    this.name = 'KanbotsAuthError';
+    this.name = 'KanBorgAuthError';
   }
 }
 
-export class GitHubRequestError extends KanbotsError {
+export class GitHubRequestError extends KanBorgError {
   constructor(
     message: string,
     public readonly status: number,

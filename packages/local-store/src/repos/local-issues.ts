@@ -1,4 +1,4 @@
-import type { Comment, Issue, IssueState } from '@kanbots/core';
+import type { Comment, Issue, IssueState } from '@kanborg/core';
 import type { Db } from '../db.js';
 
 interface IssueRow {

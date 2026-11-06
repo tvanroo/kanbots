@@ -1,4 +1,4 @@
-import type { AgentRunStatus, CardStatus, CardSummary } from '@kanbots/cloud-client';
+import type { AgentRunStatus, CardStatus, CardSummary } from '@kanborg/cloud-client';
 import type { AgentKey, Issue, IssueActiveRun, IssueDetail, StatusKey } from './types.js';
 
 /**

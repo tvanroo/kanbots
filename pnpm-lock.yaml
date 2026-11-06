@@ -32,16 +32,16 @@ importers:
 
   packages/api:
     dependencies:
-      '@kanbots/core':
+      '@kanborg/core':
         specifier: workspace:*
         version: link:../core
-      '@kanbots/dispatcher':
+      '@kanborg/dispatcher':
         specifier: workspace:*
         version: link:../dispatcher
-      '@kanbots/llm':
+      '@kanborg/llm':
         specifier: workspace:*
         version: link:../llm
-      '@kanbots/local-store':
+      '@kanborg/local-store':
         specifier: workspace:*
         version: link:../local-store
       zod:
@@ -122,7 +122,7 @@ importers:
         specifier: ^6.1.8
         version: 6.1.8
     devDependencies:
-      '@kanbots/local-store':
+      '@kanborg/local-store':
         specifier: workspace:*
         version: link:../local-store
       '@types/node':
@@ -156,25 +156,25 @@ importers:
         specifier: ^3.24.1
         version: 3.25.76
     devDependencies:
-      '@kanbots/api':
+      '@kanborg/api':
         specifier: workspace:*
         version: link:../api
-      '@kanbots/cloud-client':
+      '@kanborg/cloud-client':
         specifier: workspace:*
         version: link:../cloud-client
-      '@kanbots/core':
+      '@kanborg/core':
         specifier: workspace:*
         version: link:../core
-      '@kanbots/dispatcher':
+      '@kanborg/dispatcher':
         specifier: workspace:*
         version: link:../dispatcher
-      '@kanbots/local-store':
+      '@kanborg/local-store':
         specifier: workspace:*
         version: link:../local-store
-      '@kanbots/mcp':
+      '@kanborg/mcp':
         specifier: workspace:*
         version: link:../mcp
-      '@kanbots/web':
+      '@kanborg/web':
         specifier: workspace:*
         version: link:../web
       '@types/better-sqlite3':
@@ -229,10 +229,10 @@ importers:
 
   packages/llm:
     dependencies:
-      '@kanbots/dispatcher':
+      '@kanborg/dispatcher':
         specifier: workspace:*
         version: link:../dispatcher
-      '@kanbots/local-store':
+      '@kanborg/local-store':
         specifier: workspace:*
         version: link:../local-store
     devDependencies:
@@ -248,7 +248,7 @@ importers:
 
   packages/local-store:
     dependencies:
-      '@kanbots/core':
+      '@kanborg/core':
         specifier: workspace:*
         version: link:../core
       better-sqlite3:
@@ -296,10 +296,10 @@ importers:
         specifier: ^5.0.13
         version: 5.0.13(@types/react@19.2.14)(react@19.2.5)
     devDependencies:
-      '@kanbots/api':
+      '@kanborg/api':
         specifier: workspace:*
         version: link:../api
-      '@kanbots/cloud-client':
+      '@kanborg/cloud-client':
         specifier: workspace:*
         version: link:../cloud-client
       '@types/react':

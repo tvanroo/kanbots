@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
-import type { AgentSupervisor } from '@kanbots/api';
-import type { AgentEvent, AgentRunStatus, Card } from '@kanbots/local-store';
-import type { AgentRunEventPayload, SubscriptionRegistry } from '@kanbots/api';
+import type { AgentSupervisor } from '@kanborg/api';
+import type { AgentEvent, AgentRunStatus, Card } from '@kanborg/local-store';
+import type { AgentRunEventPayload, SubscriptionRegistry } from '@kanborg/api';
 
 export interface ForwardEvent {
   (payload: AgentRunEventPayload, ownerId: number | undefined): void;

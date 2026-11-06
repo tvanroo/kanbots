@@ -1,4 +1,4 @@
-import type { Folder, Store, Workspace } from '@kanbots/local-store';
+import type { Folder, Store, Workspace } from '@kanborg/local-store';
 import type { Config } from './bridge.js';
 
 export interface WorkspaceBootstrapResult {
@@ -7,7 +7,7 @@ export interface WorkspaceBootstrapResult {
 }
 
 const DEFAULT_WORKSPACE_ID = 'default';
-const DEFAULT_WORKSPACE_NAME = 'kanbots workspace';
+const DEFAULT_WORKSPACE_NAME = 'KanBorg workspace';
 
 function folderIdFor(config: Config, repoPath: string): string {
   const slug =

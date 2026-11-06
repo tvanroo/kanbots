@@ -1,5 +1,5 @@
-import { SentryAuthError, SentryClient } from '@kanbots/core';
-import type { SentryEventDetail, SentryStackFrame } from '@kanbots/core';
+import { SentryAuthError, SentryClient } from '@kanborg/core';
+import type { SentryEventDetail, SentryStackFrame } from '@kanborg/core';
 import { z } from 'zod';
 import type {
   DecoratedIssue,
@@ -9,7 +9,7 @@ import type {
   SentrySyncResult,
   SentryTestConnectionResult,
 } from '../bridge.js';
-import type { SentrySuggestion } from '@kanbots/local-store';
+import type { SentrySuggestion } from '@kanborg/local-store';
 import { badRequest, parseArgs } from './errors.js';
 import { decorateIssue, lookupSentryMeta } from './issues.js';
 import type { HandlerDeps } from './types.js';

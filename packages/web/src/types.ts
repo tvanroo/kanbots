@@ -1,5 +1,5 @@
-// Web-side type aliases. The canonical types live in `@kanbots/api`
-// (re-exported from `@kanbots/local-store` and `@kanbots/core`); this
+// Web-side type aliases. The canonical types live in `@kanborg/api`
+// (re-exported from `@kanborg/local-store` and `@kanborg/core`); this
 // module re-exports them under the names the renderer was already
 // using and adds a few view-only types.
 
@@ -11,9 +11,9 @@ import type {
   PreviewState,
   PreviewStatePayload as ApiPreviewStatePayload,
   ThreadPayload,
-} from '@kanbots/api';
+} from '@kanborg/api';
 
-export type { IssueRelationPayload } from '@kanbots/api';
+export type { IssueRelationPayload } from '@kanborg/api';
 
 export type {
   AgentCheck,
@@ -97,9 +97,9 @@ export type {
   WorkspaceRepoStatus,
   WorkspaceScriptsBridgePayload,
   WorkspaceRunScriptResult,
-} from '@kanbots/api';
+} from '@kanborg/api';
 
-// User shape isn't in @kanbots/api directly — it's the inline type on
+// User shape isn't in @kanborg/api directly — it's the inline type on
 // `Comment.user` and `Issue.user`. Pull it off Comment for convenience.
 export type User = Comment['user'];
 

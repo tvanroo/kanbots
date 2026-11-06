@@ -18,8 +18,8 @@ import {
   type StartAgentRunOptions,
   type StreamEvent,
   type Worktree,
-} from '@kanbots/dispatcher';
-import type { AgentEvent, AgentRun, AgentRunStatus, Card, Store } from '@kanbots/local-store';
+} from '@kanborg/dispatcher';
+import type { AgentEvent, AgentRun, AgentRunStatus, Card, Store } from '@kanborg/local-store';
 import { BRIEFING_MARKER, renderSiblingBriefing } from './sibling-briefing.js';
 import {
   describeReapOutcome,
@@ -110,7 +110,7 @@ export interface StartRunInput {
   prompt: string;
   appendSystemPrompt?: string;
   model?: string;
-  provider?: import('@kanbots/dispatcher').AgentRunProvider;
+  provider?: import('@kanborg/dispatcher').AgentRunProvider;
   costBudgetUsd?: number | null;
   /** Persona id when dispatched via autopilot. Recorded on agent_runs for
    *  per-persona analytics. */
@@ -155,7 +155,7 @@ export interface StartChatInput {
   prompt: string;
   appendSystemPrompt?: string;
   model?: string;
-  provider?: import('@kanbots/dispatcher').AgentRunProvider;
+  provider?: import('@kanborg/dispatcher').AgentRunProvider;
   costBudgetUsd?: number | null;
   /**
    * Extra args appended to the underlying `claude` invocation. Used by the
@@ -332,8 +332,8 @@ export async function createSupervisor(
   // don't expose a picker (drag-to-inProgress, autopilot kickoff) honor the
   // user's choice. If neither is set, we keep claude-code as the safety net.
   function resolveProvider(
-    explicit: import('@kanbots/dispatcher').AgentRunProvider | undefined,
-  ): import('@kanbots/dispatcher').AgentRunProvider {
+    explicit: import('@kanborg/dispatcher').AgentRunProvider | undefined,
+  ): import('@kanborg/dispatcher').AgentRunProvider {
     if (explicit) return explicit;
     try {
       const def = (opts.providerConfig?.() ?? store).providerSettings.get().defaultProvider;
@@ -711,7 +711,7 @@ export async function createSupervisor(
       // Awaiting-input is non-terminal so we leave success_signal alone there;
       // promotion can later upgrade `completed_clean` → `promoted`, and a
       // failed check can downgrade it to `completed_with_failed_checks`.
-      const successSignal: import('@kanbots/local-store').SuccessSignal | null =
+      const successSignal: import('@kanborg/local-store').SuccessSignal | null =
         status === 'awaiting_input'
           ? null
           : entry.budgetExceeded
@@ -941,7 +941,7 @@ export async function createSupervisor(
       appendSystemPrompt: composed.prompt,
       // Resume always reuses the original provider; non-claude-code can't
       // produce a sessionId today, so this guard is implicit.
-      ...(existing.provider ? { provider: existing.provider as import('@kanbots/dispatcher').AgentRunProvider } : {}),
+      ...(existing.provider ? { provider: existing.provider as import('@kanborg/dispatcher').AgentRunProvider } : {}),
       ...(input.extraArgs !== undefined ? { extraArgs: input.extraArgs } : {}),
       ...(input.env !== undefined ? { env: input.env } : {}),
     });
@@ -1093,7 +1093,7 @@ export async function createSupervisor(
     applyAcpWorkspaceCommand();
     const handle = startAgent({
       cwd: existing.worktreePath,
-      ...(existing.provider ? {provider: existing.provider as import('@kanbots/dispatcher').AgentRunProvider} : {}),
+      ...(existing.provider ? {provider: existing.provider as import('@kanborg/dispatcher').AgentRunProvider} : {}),
       prompt: input.prompt,
       resumeFromSessionId: existing.sessionId,
       ...((input.costBudgetUsd ?? existing.costBudgetUsd) !== null && (input.costBudgetUsd ?? existing.costBudgetUsd) !== undefined ? { costBudgetUsd: Math.max(0, (input.costBudgetUsd ?? existing.costBudgetUsd)! - (existing.totalCostUsd ?? 0)) } : {}),

@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import type { ReviewComment, ReviewCommentSide } from '@kanbots/local-store';
+import type { ReviewComment, ReviewCommentSide } from '@kanborg/local-store';
 import type { ReviewCommentPayload } from '../bridge.js';
 import { badRequest, notFound, parseArgs } from './errors.js';
 import type { HandlerDeps } from './types.js';

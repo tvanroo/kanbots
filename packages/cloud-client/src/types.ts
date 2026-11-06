@@ -1,6 +1,6 @@
 /**
- * Response/request shapes for the Kanbots Cloud v1 API. These mirror
- * the cloud-side `@kanbots/shared/api-types` definitions but are
+ * Response/request shapes for the Kanbots Cloud (upstream) v1 API. These mirror
+ * the cloud-side `@kanborg/shared/api-types` definitions but are
  * intentionally duplicated here so the desktop app doesn't need to
  * pull in the cloud's zod runtime.
  */
@@ -186,7 +186,7 @@ export interface AttachmentListResponse {
   data: AttachmentSummary[];
 }
 
-// Mirror cloud `@kanbots/shared` AgentRunStatusEnum. Values were stale
+// Mirror cloud `@kanborg/shared` AgentRunStatusEnum. Values were stale
 // here ('awaiting_decision'/'completed'/'cancelled') — the server emits
 // the shared enum, so anything that branched on the old values would
 // silently fall through.

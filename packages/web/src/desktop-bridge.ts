@@ -1,4 +1,4 @@
-// The Window['kanbots'] type and the full KanbotsBridge interface are
+// The Window['kanbots'] type and the full KanBorgBridge interface are
 // declared in `./global.d.ts` (the bridge is a single object that mixes
 // lifecycle methods with the typed invoke/subscribe channels). This
 // module owns only the lifecycle data shapes and a small accessor.

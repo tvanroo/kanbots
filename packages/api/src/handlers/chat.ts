@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import type { AgentRunProvider } from '@kanbots/dispatcher';
+import type { AgentRunProvider } from '@kanborg/dispatcher';
 import type {
   AgentEvent,
   AgentRun,
@@ -8,7 +8,7 @@ import type {
   ChatSession,
   Message,
   ProviderId,
-} from '@kanbots/local-store';
+} from '@kanborg/local-store';
 import type {
   ChatPayload,
   ChatPostMessageResult,
@@ -215,7 +215,7 @@ function deriveChatTitle(body: string): string {
   return `${cleaned.slice(0, 57)}…`;
 }
 
-const SYSTEM_PROMPT_DEFAULT = `KANBOTS_CHAT_CONTEXT — this conversation is a general-purpose chat with the kanbots agent. It is NOT scoped to any single issue.
+const SYSTEM_PROMPT_DEFAULT = `KANBOTS_CHAT_CONTEXT — this conversation is a general-purpose chat with the KanBorg agent. It is NOT scoped to any single issue.
 
 You can use the kanban tools provided by the kanbots MCP server (createIssue, updateIssue, moveIssueStatus, archiveIssue, splitIssue, dispatchAgent, stopAgentRun, listIssues, getIssue, listAgentRuns, resolvePendingDecision) to act on the user's board, and the standard workspace tools (Bash, Read, Edit, Glob, Grep, Write) to inspect and edit code.
 

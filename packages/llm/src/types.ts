@@ -1,9 +1,9 @@
-import type { ProviderId } from '@kanbots/local-store';
+import type { ProviderId } from '@kanborg/local-store';
 import type {
   AgentRunHandle,
   StartAgentRunOptions,
   StreamEvent,
-} from '@kanbots/dispatcher';
+} from '@kanborg/dispatcher';
 
 export type { ProviderId };
 

@@ -6,7 +6,7 @@ import {
   type SubscriptionRegistry,
 } from '../../src/index.js';
 import { FakeIssueSource, makeStubSupervisor } from './fakes.js';
-import { openStoreInMemory, type Store } from '@kanbots/local-store';
+import { openStoreInMemory, type Store } from '@kanborg/local-store';
 
 export interface FakeRegistry extends SubscriptionRegistry {
   calls: Array<{ kind: 'register' | 'unregister'; args: unknown }>;

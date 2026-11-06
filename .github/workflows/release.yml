@@ -79,18 +79,18 @@ jobs:
 
       - name: Build (Linux)
         if: matrix.os == 'ubuntu-latest'
-        run: pnpm --filter @kanbots/desktop run release:linux
+        run: pnpm --filter @kanborg/desktop run release:linux
 
       - name: Build (macOS)
         if: matrix.os == 'macos-latest'
         env:
           # Skip notarization (unsigned builds).
           CSC_IDENTITY_AUTO_DISCOVERY: "false"
-        run: pnpm --filter @kanbots/desktop run release:mac
+        run: pnpm --filter @kanborg/desktop run release:mac
 
       - name: Build (Windows)
         if: matrix.os == 'windows-latest'
-        run: pnpm --filter @kanbots/desktop run release:win
+        run: pnpm --filter @kanborg/desktop run release:win
 
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4

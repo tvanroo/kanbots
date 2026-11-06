@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import type { RecentActivityKind, RecentActivityPayload } from '@kanbots/api';
+import type { RecentActivityKind, RecentActivityPayload } from '@kanborg/api';
 import { api } from '../../api.js';
 import { getBridge } from '../../desktop-bridge.js';
 import { ageString } from '../../labels.js';

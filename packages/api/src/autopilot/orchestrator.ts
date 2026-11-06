@@ -1,4 +1,4 @@
-import type { IssueSource } from '@kanbots/core';
+import type { IssueSource } from '@kanborg/core';
 import type {
   AgentRunStatus,
   AutopilotChildEntry,
@@ -8,7 +8,7 @@ import type {
   AutopilotPlanningSlot,
   AutopilotSession,
   Store,
-} from '@kanbots/local-store';
+} from '@kanborg/local-store';
 import type { AgentSupervisor } from '../agent-runs/supervisor.js';
 import type { PlannerEvent, SuggestFeatureFn } from '../bridge.js';
 import { runFeatureDevLoop } from './feature-dev.js';

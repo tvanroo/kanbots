@@ -60,7 +60,7 @@ export function WorkspacePicker({
 
   async function signOut(): Promise<void> {
     if (signingOut) return;
-    if (!window.confirm('Sign out of Kanbots Cloud on this device?')) return;
+    if (!window.confirm('Sign out of Kanbots Cloud (upstream) on this device?')) return;
     const bridge = getBridge();
     if (!bridge) return;
     setSigningOut(true);
@@ -118,7 +118,7 @@ export function WorkspacePicker({
         <div className="picker-cloud-footer">
           {cloudAuthed ? (
             <>
-              <span className="muted">Signed in to Kanbots Cloud.</span>{' '}
+              <span className="muted">Signed in to Kanbots Cloud (upstream).</span>{' '}
               {onBrowseCloud !== undefined ? (
                 <>
                   <button
@@ -148,7 +148,7 @@ export function WorkspacePicker({
                 className="picker-cloud-link"
                 onClick={() => setShowCloudModal(true)}
               >
-                Sign in to Kanbots Cloud
+                Sign in to Kanbots Cloud (upstream)
               </button>
             </>
           )}

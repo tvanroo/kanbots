@@ -1,17 +1,22 @@
 {
-  "name": "@kanbots/dispatcher",
+  "name": "@kanborg/dispatcher",
   "version": "0.1.0",
-  "description": "Agent runtime — spawns and supervises CLI agents (claude, codex), parses stream-json",
+  "description": "Agent runtime \u2014 spawns and supervises CLI agents (claude, codex), parses stream-json",
   "license": "MIT",
   "author": "Leonardo Cunha",
-  "homepage": "https://github.com/leodavinci1/kanbots#readme",
-  "bugs": "https://github.com/leodavinci1/kanbots/issues",
+  "homepage": "https://kanborg.ai",
+  "bugs": "https://github.com/tvanroo/kanbots/issues",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/leodavinci1/kanbots.git",
+    "url": "git+https://github.com/tvanroo/kanbots.git",
     "directory": "packages/dispatcher"
   },
-  "keywords": ["kanbots", "agent", "claude-code", "codex-cli"],
+  "keywords": [
+    "kanbots",
+    "agent",
+    "claude-code",
+    "codex-cli"
+  ],
   "publishConfig": {
     "access": "public"
   },
@@ -24,7 +29,10 @@
       "import": "./dist/index.js"
     }
   },
-  "files": ["dist", "assets"],
+  "files": [
+    "dist",
+    "assets"
+  ],
   "scripts": {
     "build": "tsup",
     "dev": "tsup --watch",

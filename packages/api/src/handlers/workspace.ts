@@ -12,7 +12,7 @@ import {
   type WorkspaceRepo,
   type WorkspaceScriptKind,
   type WorkspaceScripts,
-} from '@kanbots/local-store';
+} from '@kanborg/local-store';
 import type {
   Workspace,
   WorkspaceBudgets,
@@ -47,7 +47,7 @@ export interface AddFolderArgs {
 
 export async function getWorkspace(deps: HandlerDeps): Promise<Workspace> {
   if (!deps.config.repoPath) {
-    return { id: 'default', name: 'kanbots workspace', currentFolderId: 'unknown' };
+    return { id: 'default', name: 'KanBorg workspace', currentFolderId: 'unknown' };
   }
   const { workspace, currentFolder } = bootstrapWorkspace(
     deps.store,

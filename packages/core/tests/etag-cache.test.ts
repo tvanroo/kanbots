@@ -1,4 +1,4 @@
-import { openStoreInMemory, type Store } from '@kanbots/local-store';
+import { openStoreInMemory, type Store } from '@kanborg/local-store';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { GitHubClient } from '../src/github-client.js';
 import { FakeFetch } from './helpers/fake-fetch.js';

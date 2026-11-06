@@ -1,7 +1,7 @@
 import { EventEmitter } from 'node:events';
 import { Readable, Writable } from 'node:stream';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { openStoreInMemory, type Store, type AgentRun } from '@kanbots/local-store';
+import { openStoreInMemory, type Store, type AgentRun } from '@kanborg/local-store';
 import { createCurator, type CuratorOutcome, type CuratorSpawnFn } from '../src/curator/index.js';
 
 interface FakeChild extends EventEmitter {

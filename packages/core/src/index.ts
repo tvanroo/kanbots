@@ -1,4 +1,4 @@
-export const PACKAGE_NAME = '@kanbots/core';
+export const PACKAGE_NAME = '@kanborg/core';
 
 export { GitHubClient, type GitHubClientOptions } from './github-client.js';
 export {
@@ -19,7 +19,7 @@ export type {
 } from './sentry-types.js';
 export { resolveGitHubToken, TOKEN_FILE_PATH, type AuthDeps } from './auth.js';
 export type { IssueSource } from './issue-source.js';
-export { GitHubRequestError, KanbotsAuthError, KanbotsError } from './errors.js';
+export { GitHubRequestError, KanBorgAuthError, KanBorgError } from './errors.js';
 export {
   AGENT_LABELS,
   AGENT_PREFIX,

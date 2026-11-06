@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import type { CodexSubscriptionUsage } from '@kanbots/api';
+import type { CodexSubscriptionUsage } from '@kanborg/api';
 import { spawn } from 'node:child_process';
 
 export interface CodexDetails {

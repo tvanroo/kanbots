@@ -1,17 +1,22 @@
 {
-  "name": "@kanbots/llm",
+  "name": "@kanborg/llm",
   "version": "0.1.0",
-  "description": "Provider catalogue and CLI adapters for kanbots agents",
+  "description": "Provider catalogue and CLI adapters for KanBorg agents",
   "license": "MIT",
   "author": "Leonardo Cunha",
-  "homepage": "https://github.com/leodavinci1/kanbots#readme",
-  "bugs": "https://github.com/leodavinci1/kanbots/issues",
+  "homepage": "https://kanborg.ai",
+  "bugs": "https://github.com/tvanroo/kanbots/issues",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/leodavinci1/kanbots.git",
+    "url": "git+https://github.com/tvanroo/kanbots.git",
     "directory": "packages/llm"
   },
-  "keywords": ["kanbots", "llm", "claude-code", "codex-cli"],
+  "keywords": [
+    "kanbots",
+    "llm",
+    "claude-code",
+    "codex-cli"
+  ],
   "publishConfig": {
     "access": "public"
   },
@@ -24,7 +29,9 @@
       "import": "./dist/index.js"
     }
   },
-  "files": ["dist"],
+  "files": [
+    "dist"
+  ],
   "scripts": {
     "build": "tsup",
     "dev": "tsup --watch",
@@ -32,8 +39,8 @@
     "prepublishOnly": "pnpm build"
   },
   "dependencies": {
-    "@kanbots/dispatcher": "workspace:*",
-    "@kanbots/local-store": "workspace:*"
+    "@kanborg/dispatcher": "workspace:*",
+    "@kanborg/local-store": "workspace:*"
   },
   "devDependencies": {
     "@types/node": "^22.10.5",

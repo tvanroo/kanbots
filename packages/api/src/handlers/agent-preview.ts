@@ -1,5 +1,5 @@
-import { startPreview, type PreviewHandle } from '@kanbots/dispatcher';
-import { readWorkspaceConfig } from '@kanbots/local-store';
+import { startPreview, type PreviewHandle } from '@kanborg/dispatcher';
+import { readWorkspaceConfig } from '@kanborg/local-store';
 import { z } from 'zod';
 import type { PreviewStatePayload } from '../bridge.js';
 import { badRequest, notFound, parseArgs } from './errors.js';

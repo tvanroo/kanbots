@@ -3,9 +3,9 @@ import { Command } from 'commander';
 import pkg from '../package.json' with { type: 'json' };
 
 export const program = new Command();
-program.name('kanbots').version(pkg.version);
+program.name('kanborg').version(pkg.version);
 
-// The CLI runs locally without a Kanbots Cloud session. Cloud-dependent
+// The CLI runs locally without a Kanbots Cloud (upstream) session. Cloud-dependent
 // subcommands opt in by calling `requireCloudAuth()` from './auth.js' in
 // their own action handlers; local-only commands run with no auth gate.
 

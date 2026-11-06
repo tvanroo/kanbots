@@ -4,7 +4,7 @@ import { configureRoutingProviders, collectCapacity, invalidateCapacity } from '
 import { routingState,saveRouting } from './routing-state.js';
 import { manageCodexResets, notifyClaudeReset } from './subscription-resets.js';
 import { getFundingAccounts, saveFundingAccount } from './account-funding.js';
-import { readClaudeSubscriptionUsage } from '@kanbots/api';
+import { readClaudeSubscriptionUsage } from '@kanborg/api';
 import { getOpenAIReporting, updateOpenAIReporting } from './openai-reporting.js';
 import { getAnthropicReporting, getAnthropicReportingAccounts, updateAnthropicReporting } from './anthropic-reporting.js';
 import { getClaudeDetails } from './claude-auth.js';
@@ -37,18 +37,18 @@ import {
   type SentryRuntime,
   type SuggestFeatureFn,
   type ToolBridge,
-} from '@kanbots/api';
-import { GitHubClient, resolveGitHubToken, type IssueSource } from '@kanbots/core';
+} from '@kanborg/api';
+import { GitHubClient, resolveGitHubToken, type IssueSource } from '@kanborg/core';
 import {
   createComposer,
   createPrDescriptionDrafter,
   createSentryAnalyzer,
   createSuggester,
-} from '@kanbots/dispatcher';
+} from '@kanborg/dispatcher';
 import {
-  describeKanbotsDir,
+  describeKanBorgDir,
   ensureGitignoreEntry,
-  ensureKanbotsDir,
+  ensureKanBorgDir,
   findGitRoot,
   LocalIssueSource,
   openStore,
@@ -57,7 +57,7 @@ import {
   writeWorkspaceConfig,
   type Store,
   type WorkspaceConfig,
-} from '@kanbots/local-store';
+} from '@kanborg/local-store';
 import {
   cancelClaudeLogin,
   isClaudeAuthenticated,
@@ -163,7 +163,7 @@ import {
   type ProjectSummary,
   type UpdateCardRequest,
   type UserMe,
-} from '@kanbots/cloud-client';
+} from '@kanborg/cloud-client';
 import { watchDbFile, type DbWatcher } from './db-watcher.js';
 import {
   createSubscriptionRegistry,
@@ -195,7 +195,7 @@ import type {
   RecentCloudWorkspace,
   RecentWorkspace,
 } from './types.js';
-import type { AgentRun, AgentRunStatus } from '@kanbots/local-store';
+import type { AgentRun, AgentRunStatus } from '@kanborg/local-store';
 
 interface ActiveWorkspace {
   repoPath: string;
@@ -522,12 +522,12 @@ async function openWorkspaceInternal(repoPath: string): Promise<ActiveWorkspaceI
     );
   }
 
-  await ensureKanbotsDir(gitRoot);
+  await ensureKanBorgDir(gitRoot);
   let config = await ensureLocalWorkspace(gitRoot);
 
   await closeActiveWorkspace();
 
-  const kdir = describeKanbotsDir(gitRoot);
+  const kdir = describeKanBorgDir(gitRoot);
   const store = openStore({ path: kdir.dbPath });
 
   // Catch external db writes (other process, direct sqlite3 edits) — the
@@ -1096,7 +1096,7 @@ function registerDeviceChatIpc(): void {
 
 // Local-first launch: cloud sign-in is OPTIONAL. By default every IPC
 // channel works without a cloud session. Only operations that actually
-// hit the Kanbots Cloud backend (or open a cloud-only workspace) need a
+// hit the Kanbots Cloud (upstream) backend (or open a cloud-only workspace) need a
 // valid session — those opt in via CLOUD_REQUIRED_CHANNELS below.
 //
 // The sign-in flow itself, status probes, and prompt-dismiss must stay
@@ -1894,7 +1894,7 @@ function registerIpc(): void {
   ipcMain.handle('kanbots:pick-folder', async (): Promise<string | null> => {
     if (!mainWindow) return null;
     const result = await dialog.showOpenDialog(mainWindow, {
-      title: 'Open kanbots workspace',
+      title: 'Open KanBorg workspace',
       properties: ['openDirectory', 'createDirectory'],
     });
     if (result.canceled) return null;
@@ -2019,7 +2019,7 @@ async function createWindow(): Promise<void> {
   const win = new BrowserWindow({
     width: 1200,
     height: 800,
-    title: 'kanbots',
+    title: 'KanBorg',
     ...appIconOption(),
     frame: false,
     titleBarStyle: 'hidden',
@@ -2057,7 +2057,7 @@ async function createChatWindow(conversationId: number | null): Promise<BrowserW
   const win = new BrowserWindow({
     width: 880,
     height: 760,
-    title: 'kanbots chat',
+    title: 'KanBorg chat',
     ...appIconOption(),
     autoHideMenuBar: true,
     webPreferences: {
@@ -2115,13 +2115,13 @@ function closeAllChatWindows(): void {
 function resolveMcpServerEntry(): string | null {
   const bundled=join(__dirname,'mcp','server.js');
   if (existsSync(bundled)) return bundled;
-  // The MCP server ships from `@kanbots/mcp/server`. We resolve the entry
+  // The MCP server ships from `@kanborg/mcp/server`. We resolve the entry
   // through the standard module loader so it works in both dev (pnpm
   // symlinks → packages/mcp/dist/server.js) and a packaged Electron app
   // where node_modules sits beside the desktop bundle.
   try {
     const req = createRequire(__filename);
-    const entry = req.resolve('@kanbots/mcp/server');
+    const entry = req.resolve('@kanborg/mcp/server');
     return entry;
   } catch {
     return null;
@@ -2196,7 +2196,8 @@ function tomlString(s: string): string {
   return `"${s.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`;
 }
 
-// Keep the fork's settings independent of the upstream install and its build version.
+// Retain the original fork identity for macOS encrypted storage, settings and single-instance locking.
+// Product, window and installer names are KanBorg; this is deliberately not a data migration.
 app.setName('Kanbots Local');
 app.setPath(
   'userData',

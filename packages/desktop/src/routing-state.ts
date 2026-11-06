@@ -2,7 +2,7 @@ import { app } from 'electron';
 import { existsSync, readFileSync, writeFileSync, renameSync } from 'node:fs';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
-import type { RoutingState, RoutingConfig } from '@kanbots/api';
+import type { RoutingState, RoutingConfig } from '@kanborg/api';
 export type Charge = { id: string; pool: string; connectionId: string; at: string; usd: number; pending: boolean; input?: number; output?: number };
 type State = RoutingState & { charges: Charge[]; redemptions: Record<string, { attempt: string; checkedAt: number; outcome: string }> };
 const defaults: RoutingConfig = { enabled: true, maxRunUsd: 5, autoResets: true, claudeResetExpiresAt: null };

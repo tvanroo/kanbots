@@ -3,7 +3,7 @@ import { readFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
-import { KanbotsAuthError } from './errors.js';
+import { KanBorgAuthError } from './errors.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -27,7 +27,7 @@ export async function resolveGitHubToken(deps: AuthDeps = {}): Promise<string> {
   const fromFile = await readTokenFile();
   if (fromFile) return fromFile;
 
-  throw new KanbotsAuthError(
+  throw new KanBorgAuthError(
     [
       'No GitHub token found. Try one of:',
       '  - Run `gh auth login` (recommended)',

@@ -1,4 +1,4 @@
-import type { Store } from '@kanbots/local-store';
+import type { Store } from '@kanborg/local-store';
 
 const MAX_PROMPT_LEN = 200;
 const MAX_RECENT_FILES = 10;
@@ -16,7 +16,7 @@ export function renderSiblingBriefing(store: Store, currentRunId: number): strin
   lines.push('## Other agents currently running');
   lines.push('');
   lines.push(
-    'Other Kanbots agents are running concurrently in sibling worktrees. They cannot see your changes and you cannot see theirs until each opens a PR. Treat the list below as awareness, not as a lock.',
+    'Other KanBorg agents are running concurrently in sibling worktrees. They cannot see your changes and you cannot see theirs until each opens a PR. Treat the list below as awareness, not as a lock.',
   );
   lines.push('');
 

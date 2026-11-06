@@ -1,7 +1,7 @@
 import { promises as fs } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
-import type { ProviderId } from '@kanbots/local-store';
+import type { ProviderId } from '@kanborg/local-store';
 
 /**
  * Identifier of the agent CLI a discovery call is targeting. Aliased onto
@@ -282,7 +282,7 @@ const ACP_BUILTINS: readonly SlashCommand[] = [
 ];
 
 /**
- * Kanbots orchestration commands. These work the same regardless of which
+ * KanBorg orchestration commands. These work the same regardless of which
  * agent CLI is selected — the composer/dispatcher recognises them ahead of
  * the agent. They take priority over any same-named builtin so users get
  * a consistent kanbots-aware behaviour for `/review`.
@@ -314,13 +314,13 @@ const KANBOTS_COMMANDS: readonly SlashCommand[] = [
  *     `${home}/.claude/skills/<name>/SKILL.md`.
  *   - Codex: built-ins only — Codex has no user-commands surface yet.
  *
- * Kanbots orchestration commands (`/spec`, `/review`, `/split`) are always
+ * KanBorg orchestration commands (`/spec`, `/review`, `/split`) are always
  * appended; when one shares a name with an agent builtin, the kanbots entry
  * wins so the user sees kanbots-aware behaviour everywhere.
  *
  * Filesystem reads are tolerant — a missing directory contributes an empty
  * slice rather than throwing. Result ordering:
- *   1. Kanbots commands (in their declared order — most relevant to the
+ *   1. KanBorg commands (in their declared order — most relevant to the
  *      composer's flow).
  *   2. Agent builtins (in their declared order).
  *   3. User commands (alphabetical by name).

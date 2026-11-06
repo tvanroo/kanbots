@@ -3,9 +3,9 @@ import type {
   PlannerEvent,
   SuggestFeatureBacklogEntry,
   SuggestFeatureEntryStatus,
-} from '@kanbots/api';
-import type { CardSummary, CloudClient } from '@kanbots/cloud-client';
-import { createSuggester } from '@kanbots/dispatcher';
+} from '@kanborg/api';
+import type { CardSummary, CloudClient } from '@kanborg/cloud-client';
+import { createSuggester } from '@kanborg/dispatcher';
 import { CHANNEL_PREFIX } from './ipc/register.js';
 import { toIpcError } from './ipc/errors.js';
 import type { ActiveCloudWorkspaceInfo } from './types.js';

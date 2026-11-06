@@ -11,8 +11,8 @@ import {
   type ProvidersHandlerDeps,
   type ProvidersHandlers,
   type ProvidersRuntime,
-} from '@kanbots/api';
-import { openStore, type Store } from '@kanbots/local-store';
+} from '@kanborg/api';
+import { openStore, type Store } from '@kanborg/local-store';
 import { CHANNEL_PREFIX } from './ipc/register.js';
 import { toIpcError } from './ipc/errors.js';
 import { safeStorageAvailable } from './providers-key.js';

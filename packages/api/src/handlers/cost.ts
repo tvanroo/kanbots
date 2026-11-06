@@ -87,7 +87,7 @@ function toWindow(raw: unknown): CostUsageWindow | null {
 async function readCredential(): Promise<Credential | null> {
   const directory = process.env.CLAUDE_CONFIG_DIR || join(homedir(), '.claude');
   // macOS Claude Code uses Keychain. Never send the credential to the renderer
-  // or persist a duplicate in Kanbots. Custom config directories use their file.
+  // or persist a duplicate in KanBorg. Custom config directories use their file.
   if (process.platform === 'darwin' && directory === join(homedir(), '.claude')) {
     const raw = await new Promise<string | null>(resolve => execFile('/usr/bin/security', ['find-generic-password', '-s', 'Claude Code-credentials', '-w'], { timeout: 10000, maxBuffer: 1024 * 1024 }, (error, stdout) => resolve(error ? null : stdout)));
     const credential = parseCredential(raw);

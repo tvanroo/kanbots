@@ -10,7 +10,7 @@ export default defineConfig([
     outExtension: () => ({ js: '.cjs' }),
     platform: 'node',
     bundle: true,
-    noExternal: [/^@kanbots\//, /^@octokit\//, 'before-after-hook', 'universal-user-agent'],
+    noExternal: [/^@kanborg\//, /^@octokit\//, 'before-after-hook', 'universal-user-agent'],
     external: ['electron', 'better-sqlite3', 'bindings', 'file-uri-to-path'],
     clean: true,
     sourcemap: false,

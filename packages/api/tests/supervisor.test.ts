@@ -4,8 +4,8 @@ import type {
   RunSummary,
   StartAgentRunOptions,
   Worktree,
-} from '@kanbots/dispatcher';
-import { openStoreInMemory, type Store } from '@kanbots/local-store';
+} from '@kanborg/dispatcher';
+import { openStoreInMemory, type Store } from '@kanborg/local-store';
 import { EventEmitter } from 'node:events';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createSupervisor } from '../src/agent-runs/supervisor.js';

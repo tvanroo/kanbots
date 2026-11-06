@@ -1,5 +1,5 @@
-import { statusFromLabels } from '@kanbots/core';
-import type { Issue, StatusKey } from '@kanbots/core';
+import { statusFromLabels } from '@kanborg/core';
+import type { Issue, StatusKey } from '@kanborg/core';
 import type { SuggestFeatureBacklogEntry, SuggestFeatureEntryStatus } from './bridge.js';
 
 const OPEN_PER_STATUS_LIMIT = 25;

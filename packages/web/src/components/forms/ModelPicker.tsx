@@ -8,7 +8,7 @@ interface ModelEntry {
   label: string;
 }
 
-// Mirror @kanbots/llm catalogue. Keep in sync.
+// Mirror @kanborg/llm catalogue. Keep in sync.
 const MODELS: Record<ProviderId, ModelEntry[]> = {
   'claude-code': [
     { id: 'claude-opus-4-7', label: 'Claude Opus 4.7' },

@@ -2,7 +2,7 @@ import type {
   ChannelArgs,
   ChannelName,
   ChannelResult,
-  KanbotsBridge,
+  KanBorgBridge,
 } from '../global.js';
 
 type Handlers = {
@@ -15,13 +15,13 @@ interface FakeBridgeExtras {
   push(eventName: string, payload: unknown): void;
 }
 
-export type FakeBridge = KanbotsBridge & FakeBridgeExtras;
+export type FakeBridge = KanBorgBridge & FakeBridgeExtras;
 
 interface InstallOptions {
   handlers?: Handlers;
   // Optional partial lifecycle overrides; useful for tests that exercise
   // bootstrap-time flows without standing up the full main process.
-  lifecycle?: Partial<KanbotsBridge>;
+  lifecycle?: Partial<KanBorgBridge>;
 }
 
 /**
@@ -40,7 +40,7 @@ export function installFakeBridge(opts: InstallOptions = {}): FakeBridge {
   const listeners = new Map<string, Set<(payload: unknown) => void>>();
 
   const lifecycleDefaults: Pick<
-    KanbotsBridge,
+    KanBorgBridge,
     | 'bootstrap'
     | 'pickFolder'
     | 'openWorkspace'
@@ -276,7 +276,7 @@ export function installFakeBridge(opts: InstallOptions = {}): FakeBridge {
     // window stub so renderer code can read window.kanbots.
     (globalThis as { window?: Window }).window = globalThis as unknown as Window;
   }
-  (window as { kanbots?: KanbotsBridge }).kanbots = bridge;
+  (window as { kanbots?: KanBorgBridge }).kanbots = bridge;
 
   return bridge;
 }
@@ -286,5 +286,5 @@ export function installFakeBridge(opts: InstallOptions = {}): FakeBridge {
  */
 export function uninstallFakeBridge(): void {
   if (typeof window === 'undefined') return;
-  delete (window as { kanbots?: KanbotsBridge }).kanbots;
+  delete (window as { kanbots?: KanBorgBridge }).kanbots;
 }

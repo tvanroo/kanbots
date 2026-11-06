@@ -1,4 +1,4 @@
-import type { AutopilotConfig, AutopilotSession } from '@kanbots/local-store';
+import type { AutopilotConfig, AutopilotSession } from '@kanborg/local-store';
 import { z } from 'zod';
 import { badRequest, parseArgs } from './errors.js';
 import type { HandlerDeps } from './types.js';

@@ -1,5 +1,5 @@
-import { discoverSlashCommands, type SlashCommand } from '@kanbots/llm';
-import type { ProviderId } from '@kanbots/local-store';
+import { discoverSlashCommands, type SlashCommand } from '@kanborg/llm';
+import type { ProviderId } from '@kanborg/local-store';
 import { z } from 'zod';
 import type { SlashCommandPayload } from '../bridge.js';
 import { badRequest, parseArgs } from './errors.js';

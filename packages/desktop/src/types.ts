@@ -1,5 +1,5 @@
-import type { WorkspaceConfig } from '@kanbots/local-store';
-import type { ChannelArgs, ChannelName, ChannelResult } from '@kanbots/api';
+import type { WorkspaceConfig } from '@kanborg/local-store';
+import type { ChannelArgs, ChannelName, ChannelResult } from '@kanborg/api';
 import type {
   AgentRunListResponse,
   AgentRunSummary,
@@ -19,7 +19,7 @@ import type {
   ProjectSummary,
   UpdateCardRequest,
   UserMe,
-} from '@kanbots/cloud-client';
+} from '@kanborg/cloud-client';
 
 export interface ActiveWorkspaceInfo {
   repoPath: string;
@@ -28,7 +28,7 @@ export interface ActiveWorkspaceInfo {
 
 /**
  * Free-floating cloud workspace — no git repo on disk. The desktop
- * acts as a thick HTTP client over an org+project on Kanbots Cloud.
+ * acts as a thick HTTP client over an org+project on Kanbots Cloud (upstream).
  * Agent dispatch in this mode prompts for a local repo at run time
  * (or uses a pinned `localRepoPath` if the user bound one to the
  * project; see P4).
@@ -102,7 +102,7 @@ export type CloudLoginPollResult =
   | { status: 'error'; error: string }
   | { status: 'idle' };
 
-export interface KanbotsBridge {
+export interface KanBorgBridge {
   bootstrap(): Promise<BootstrapPayload>;
   pickFolder(): Promise<string | null>;
   openWorkspace(repoPath: string): Promise<{ ok: true } | { ok: false; error: string }>;
@@ -113,10 +113,10 @@ export interface KanbotsBridge {
   closeWindow(): Promise<void>;
   coordinatorState?: () => Promise<any>;
   coordinatorAction?: (action:string,args?:any) => Promise<any>;
-  routingState?(): Promise<import('@kanbots/api').RoutingState>;
-  saveRouting?(config: import('@kanbots/api').RoutingConfig): Promise<import('@kanbots/api').RoutingState>;
-  capacity?(): Promise<import('@kanbots/api').CapacitySnapshot>;
-  claudeSubscriptionUsage(): Promise<import('@kanbots/api').CostUsageResult>;
+  routingState?(): Promise<import('@kanborg/api').RoutingState>;
+  saveRouting?(config: import('@kanborg/api').RoutingConfig): Promise<import('@kanborg/api').RoutingState>;
+  capacity?(): Promise<import('@kanborg/api').CapacitySnapshot>;
+  claudeSubscriptionUsage(): Promise<import('@kanborg/api').CostUsageResult>;
   claudeAuthStatus(): Promise<{ authed: boolean }>;
   claudeLoginStart(): Promise<{ ok: true } | { ok: false; error: string }>;
   claudeLoginCancel(): Promise<void>;
@@ -327,6 +327,6 @@ export interface KanbotsBridge {
 
 declare global {
   interface Window {
-    kanbots?: KanbotsBridge;
+    kanbots?: KanBorgBridge;
   }
 }

@@ -1,4 +1,4 @@
-import type { Comment, Issue } from '@kanbots/core';
+import type { Comment, Issue } from '@kanborg/core';
 
 export function issueFixture(number: number, title: string, overrides: Partial<Issue> = {}): Issue {
   return {

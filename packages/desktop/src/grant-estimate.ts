@@ -1,4 +1,4 @@
-import type { ApiConnection, AnthropicReporting } from '@kanbots/api';
+import type { ApiConnection, AnthropicReporting } from '@kanborg/api';
 
 /** Plan useful grant-funded work to finish before this safety deadline.
  * This is not provider expiry and does not authorize paid fallback or filler work.

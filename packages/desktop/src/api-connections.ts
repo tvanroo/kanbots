@@ -1,7 +1,7 @@
 import { app, safeStorage } from 'electron';
 import { existsSync, readFileSync, writeFileSync, renameSync } from 'node:fs';
 import { join } from 'node:path';
-import type { ApiConnection, ApiConnectionInput } from '@kanbots/api';
+import type { ApiConnection, ApiConnectionInput } from '@kanborg/api';
 
 type StoredConnection = ApiConnection & { encryptedKey: string };
 const file = () => join(app.getPath('userData'), 'api-connections.json');

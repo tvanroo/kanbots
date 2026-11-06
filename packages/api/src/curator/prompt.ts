@@ -1,4 +1,4 @@
-import type { AgentEvent, Learning } from '@kanbots/local-store';
+import type { AgentEvent, Learning } from '@kanborg/local-store';
 
 /** Maximum chars of agent_events context handed to the curator. Holds ≈10k
  *  input tokens at 4 chars/token — generous enough to see plumbing while

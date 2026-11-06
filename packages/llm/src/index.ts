@@ -1,4 +1,4 @@
-export const PACKAGE_NAME = '@kanbots/llm';
+export const PACKAGE_NAME = '@kanborg/llm';
 
 export {
   MODELS,

@@ -1,12 +1,12 @@
 import { randomUUID } from 'node:crypto';
 
-import type { CloudClient } from '@kanbots/cloud-client';
+import type { CloudClient } from '@kanborg/cloud-client';
 import {
   createWorktree,
   startAgentRun,
   type AgentRunProvider,
   type StreamEvent,
-} from '@kanbots/dispatcher';
+} from '@kanborg/dispatcher';
 
 /**
  * Cloud-mode agent run dispatcher. Mirrors what the local supervisor does,

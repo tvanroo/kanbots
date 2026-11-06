@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import type { FundingAccount, FundingPool, ProvidersPayload } from '@kanbots/api';
+import type { FundingAccount, FundingPool, ProvidersPayload } from '@kanborg/api';
 import { api } from '../../api.js';
 import { zonedInput, zonedIso } from './connection-time.js';
 
@@ -57,7 +57,7 @@ function FundingCard({ account, payload, onChanged }: { account: FundingAccount;
     <div className="kb-api-card-head"><div className="kb-api-identity"><strong>API usage & budget</strong><span>{account.connectionNames.join(', ')}</span></div><span className="kb-api-status">Shared account</span></div>
     <p className="kb-provider-desc">Pay-as-you-go by default. Usage and budgets apply to this verified account’s {account.connectionNames.length} keys. Add grants only if this account has them.</p>
     <div className="kb-api-summary"><span>Organization spend this month: {reportedCost == null ? 'Not available' : usd(reportedCost)}</span><span>Tracking period: {periodLabel(periodStart)} – {periodLabel(periodEnd)}</span></div>
-    <p className="kb-provider-desc">Provider budget cap: not reported by this connection. A positive balance, request-rate limit, and spending cap are different controls. Reported spend covers this organization, including activity outside Kanbots.</p>
+    <p className="kb-provider-desc">Provider budget cap: not reported by this connection. A positive balance, request-rate limit, and spending cap are different controls. Reported spend covers this organization, including activity outside KanBorg.</p>
     <details className="kb-api-manual"><summary>Optional grants & credit balances</summary>
       <p className="kb-provider-desc">Account identity is provider-reported.{report?.connected ? ' Organization usage and costs are connected.' : ' Organization usage and costs need separate reporting access.'} No credit-ledger endpoint is available in the documented integrations used here for remaining paid balance, grant expiry, or renewal schedule. Only those missing details are entered below. Reported spend is not a credit balance.</p>
       <p className="kb-provider-desc">Subscription credit rules can suggest a schedule after you identify the benefit. They cannot confirm that it is activated or identify your billing date. <a href={ruleUrl} target="_blank" rel="noreferrer">Provider credit rules</a></p>

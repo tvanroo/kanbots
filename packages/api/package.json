@@ -1,17 +1,21 @@
 {
-  "name": "@kanbots/api",
+  "name": "@kanborg/api",
   "version": "0.1.0",
-  "description": "Pure handler library and agent supervisor for kanbots (no HTTP server)",
+  "description": "Pure handler library and agent supervisor for KanBorg (no HTTP server)",
   "license": "MIT",
   "author": "Leonardo Cunha",
-  "homepage": "https://github.com/leodavinci1/kanbots#readme",
-  "bugs": "https://github.com/leodavinci1/kanbots/issues",
+  "homepage": "https://kanborg.ai",
+  "bugs": "https://github.com/tvanroo/kanbots/issues",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/leodavinci1/kanbots.git",
+    "url": "git+https://github.com/tvanroo/kanbots.git",
     "directory": "packages/api"
   },
-  "keywords": ["kanbots", "handlers", "ipc"],
+  "keywords": [
+    "kanbots",
+    "handlers",
+    "ipc"
+  ],
   "publishConfig": {
     "access": "public"
   },
@@ -24,7 +28,9 @@
       "import": "./dist/index.js"
     }
   },
-  "files": ["dist"],
+  "files": [
+    "dist"
+  ],
   "scripts": {
     "build": "tsup",
     "dev": "tsup --watch",
@@ -34,10 +40,10 @@
     "prepublishOnly": "pnpm build"
   },
   "dependencies": {
-    "@kanbots/core": "workspace:*",
-    "@kanbots/dispatcher": "workspace:*",
-    "@kanbots/llm": "workspace:*",
-    "@kanbots/local-store": "workspace:*",
+    "@kanborg/core": "workspace:*",
+    "@kanborg/dispatcher": "workspace:*",
+    "@kanborg/llm": "workspace:*",
+    "@kanborg/local-store": "workspace:*",
     "zod": "^3.24.1"
   },
   "devDependencies": {

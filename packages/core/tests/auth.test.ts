@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { resolveGitHubToken } from '../src/auth.js';
-import { KanbotsAuthError } from '../src/errors.js';
+import { KanBorgAuthError } from '../src/errors.js';
 
 describe('resolveGitHubToken', () => {
   it('uses gh CLI first', async () => {
@@ -30,14 +30,14 @@ describe('resolveGitHubToken', () => {
     expect(token).toBe('file-token');
   });
 
-  it('throws KanbotsAuthError when nothing works', async () => {
+  it('throws KanBorgAuthError when nothing works', async () => {
     await expect(
       resolveGitHubToken({
         runGhCli: async () => null,
         readEnv: () => undefined,
         readTokenFile: async () => null,
       }),
-    ).rejects.toThrow(KanbotsAuthError);
+    ).rejects.toThrow(KanBorgAuthError);
   });
 
   it('treats empty strings as missing', async () => {
@@ -58,7 +58,7 @@ describe('resolveGitHubToken', () => {
       });
       throw new Error('should have thrown');
     } catch (err) {
-      expect(err).toBeInstanceOf(KanbotsAuthError);
+      expect(err).toBeInstanceOf(KanBorgAuthError);
       const msg = (err as Error).message;
       expect(msg).toContain('gh auth login');
       expect(msg).toContain('GITHUB_TOKEN');

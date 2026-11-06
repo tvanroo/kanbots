@@ -2,7 +2,7 @@ import { readFile } from 'node:fs/promises';
 import { homedir, platform } from 'node:os';
 import { join } from 'node:path';
 
-// The desktop writes its Kanbots Cloud session at the Electron `userData`
+// The desktop writes its Kanbots Cloud (upstream) session at the Electron `userData`
 // path for product name "kanbots". Mirror Electron's per-platform defaults
 // so the CLI can detect (but no longer require) a cloud session. The CLI
 // runs locally without a session; only cloud-specific subcommands opt in
@@ -62,7 +62,7 @@ export async function requireCloudAuth(): Promise<CloudSession> {
   const session = await getCloudSession();
   if (session === null) {
     process.stderr.write(
-      'kanbots: this command requires Kanbots Cloud.\n' +
+      'kanbots: this command requires Kanbots Cloud (upstream).\n' +
         '  Sign in via the desktop app or run `kanbots login` to enable cloud features.\n',
     );
     process.exit(2);

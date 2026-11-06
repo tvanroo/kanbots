@@ -33,7 +33,7 @@ import type {
   SentrySuggestionCategory,
   SentrySuggestionConfidence,
   SentrySuggestionVerdict,
-} from '@kanbots/local-store';
+} from '@kanborg/local-store';
 import type {
   AgentKey,
   Comment,
@@ -42,7 +42,7 @@ import type {
   PullRequest,
   StatusKey,
   UpdateIssuePatch,
-} from '@kanbots/core';
+} from '@kanborg/core';
 
 export type {
   AgentCheck,

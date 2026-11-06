@@ -6,7 +6,7 @@ import type {
   CostBreakdownItem,
   CostTimeSeriesPoint,
   PersonaModelRollupRow,
-} from '@kanbots/api';
+} from '@kanborg/api';
 
 export interface StatsProps {
   onClose?: () => void;

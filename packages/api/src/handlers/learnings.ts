@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import type { Learning, LearningTag } from '@kanbots/local-store';
+import type { Learning, LearningTag } from '@kanborg/local-store';
 import { badRequest, notFound, parseArgs } from './errors.js';
 import type { HandlerDeps } from './types.js';
 

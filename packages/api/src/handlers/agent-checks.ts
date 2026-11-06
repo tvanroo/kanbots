@@ -4,13 +4,13 @@ import {
   type CheckCommand,
   type CheckCommandOverrides,
   type CheckResult,
-} from '@kanbots/dispatcher';
+} from '@kanborg/dispatcher';
 import {
   readWorkspaceConfig,
   type AgentCheck,
   type CheckKind,
   type Store,
-} from '@kanbots/local-store';
+} from '@kanborg/local-store';
 import { z } from 'zod';
 import { badRequest, notFound, parseArgs } from './errors.js';
 import type { HandlerDeps } from './types.js';

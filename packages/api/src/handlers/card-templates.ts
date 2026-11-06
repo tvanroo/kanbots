@@ -1,4 +1,4 @@
-import type { CardTemplate } from '@kanbots/local-store';
+import type { CardTemplate } from '@kanborg/local-store';
 import { z } from 'zod';
 import type { CardTemplatePayload, DecoratedIssue } from '../bridge.js';
 import { bootstrapWorkspace } from '../workspace-bootstrap.js';

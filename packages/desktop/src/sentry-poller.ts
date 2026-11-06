@@ -1,6 +1,6 @@
-import { SentryAuthError, SentryClient, type IssueSource } from '@kanbots/core';
-import type { SentryIssueSummary } from '@kanbots/core';
-import type { SentryConfig, Store } from '@kanbots/local-store';
+import { SentryAuthError, SentryClient, type IssueSource } from '@kanborg/core';
+import type { SentryIssueSummary } from '@kanborg/core';
+import type { SentryConfig, Store } from '@kanborg/local-store';
 import { resolveSentryToken } from './sentry-token.js';
 
 const AUTH_FAILURE_THRESHOLD = 3;

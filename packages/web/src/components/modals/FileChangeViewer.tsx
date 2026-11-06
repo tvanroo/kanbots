@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState, type MouseEvent } from 'react';
-import type { AgentRunSummary } from '@kanbots/cloud-client';
+import type { AgentRunSummary } from '@kanborg/cloud-client';
 import { api, getCloudCtx } from '../../api.js';
 import { getBridge } from '../../desktop-bridge.js';
 import { InlineDiff, type InlineDiffMode } from '../run/InlineDiff.js';
@@ -171,7 +171,7 @@ function StartAgentOnFilePanel({
     return (
       <div className="kb-fcv-start kb-fcv-start-disabled">
         <span className="kb-fcv-hint">
-          Sign in to Kanbots Cloud to start an agent on this file from here.
+          Sign in to Kanbots Cloud (upstream) to start an agent on this file from here.
         </span>
       </div>
     );
@@ -254,7 +254,7 @@ interface DiffViewState {
 
 /**
  * `.kanbots/worktrees/issue-<n>-<r>` is the convention used by both
- * the local supervisor (`defaultWorktreePath` in @kanbots/dispatcher,
+ * the local supervisor (`defaultWorktreePath` in @kanborg/dispatcher,
  * numeric runId) and the cloud dispatcher (last-10-chars of the
  * KSUID, alphanumeric). The regex accepts both shapes; the caller
  * treats runId as opaque.

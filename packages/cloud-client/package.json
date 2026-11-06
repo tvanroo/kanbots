@@ -1,7 +1,7 @@
 {
-  "name": "@kanbots/cloud-client",
+  "name": "@kanborg/cloud-client",
   "version": "0.1.0",
-  "description": "Typed HTTP client for the Kanbots Cloud v1 API",
+  "description": "Typed HTTP client for the KanBorg Cloud v1 API",
   "license": "MIT",
   "author": "Leonardo Cunha",
   "type": "module",
@@ -13,7 +13,9 @@
       "import": "./dist/index.js"
     }
   },
-  "files": ["dist"],
+  "files": [
+    "dist"
+  ],
   "scripts": {
     "build": "tsup",
     "dev": "tsup --watch",
@@ -25,5 +27,6 @@
     "tsup": "^8.3.5",
     "typescript": "^5.7.3",
     "vitest": "^3.2.4"
-  }
+  },
+  "homepage": "https://kanborg.ai"
 }

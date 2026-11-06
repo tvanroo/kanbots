@@ -1,5 +1,5 @@
-import type { ApiConnection,CapacitySnapshot,CapacityRow } from '@kanbots/api';
-import { readClaudeSubscriptionUsage } from '@kanbots/api';
+import type { ApiConnection,CapacitySnapshot,CapacityRow } from '@kanborg/api';
+import { readClaudeSubscriptionUsage } from '@kanborg/api';
 import { listApiConnections } from './api-connections.js';
 import { getAnthropicReportingAccounts,updateAnthropicReporting } from './anthropic-reporting.js';
 import { getClaudeDetails } from './claude-auth.js';
@@ -76,7 +76,7 @@ async function load(hasWork:boolean){
     const spend=charged(pool,month.getTime());
     if(!displayed.has(pool)){
       displayed.add(pool);
-      rows.push({id:pool,label:`${row.provider==='anthropic'?'Anthropic':'OpenAI'} · ${row.name}`,kind:grant?'grant':'paygo',usedPercent:grant?(remaining!==null&&row.budget?Math.max(0,Math.min(100,(1-remaining/row.budget)*100)):null):(row.budget?Math.min(100,spend/row.budget*100):null),remaining:grant?remaining:null,spent:grant?null:spend,available,detail:!model?'Refresh models; a current tool-capable model with known pricing is required':grant?`${estimate?'Estimated':'Manually entered'} shared balance${Number.isFinite(useBy)?` · use by ${new Date(useBy).toLocaleString()}`:' · expiry unknown'} · ${row.afterGrant==='paygo'?'pay-go allowed afterward':'stop afterward'}`:`Kanbots spend this month${row.budget?` / $${row.budget} budget`:' · no monthly budget set'}`});
+      rows.push({id:pool,label:`${row.provider==='anthropic'?'Anthropic':'OpenAI'} · ${row.name}`,kind:grant?'grant':'paygo',usedPercent:grant?(remaining!==null&&row.budget?Math.max(0,Math.min(100,(1-remaining/row.budget)*100)):null):(row.budget?Math.min(100,spend/row.budget*100):null),remaining:grant?remaining:null,spent:grant?null:spend,available,detail:!model?'Refresh models; a current tool-capable model with known pricing is required':grant?`${estimate?'Estimated':'Manually entered'} shared balance${Number.isFinite(useBy)?` · use by ${new Date(useBy).toLocaleString()}`:' · expiry unknown'} · ${row.afterGrant==='paygo'?'pay-go allowed afterward':'stop afterward'}`:`KanBorg spend this month${row.budget?` / $${row.budget} budget`:' · no monthly budget set'}`});
     }
     if(available){
       const score=eligibleGrant?250+Math.max(0,100-(useBy-now)/3600000):10-(model!.input+model!.output)/100;

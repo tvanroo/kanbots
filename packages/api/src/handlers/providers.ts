@@ -1,6 +1,6 @@
 import { existsSync } from 'node:fs';
-import { validateProvider, type ProviderCredentials } from '@kanbots/llm';
-import type { ProviderId, Store } from '@kanbots/local-store';
+import { validateProvider, type ProviderCredentials } from '@kanborg/llm';
+import type { ProviderId, Store } from '@kanborg/local-store';
 import { z } from 'zod';
 import type {
   ProviderSaveInput,

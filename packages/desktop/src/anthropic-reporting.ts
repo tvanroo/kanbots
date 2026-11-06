@@ -6,7 +6,7 @@ import { app } from 'electron';
 import { execFile } from 'node:child_process';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import type { AnthropicReporting } from '@kanbots/api';
+import type { AnthropicReporting } from '@kanborg/api';
 const accountContext = new AsyncLocalStorage<string>();
 const accountSuffix = () => accountContext.getStore() ? '-' + createHash('sha256').update(accountContext.getStore()!).digest('hex').slice(0, 24) : '';
 const snapshotPath = () => join(app.getPath('userData'), `anthropic-reporting${accountSuffix()}.json`);

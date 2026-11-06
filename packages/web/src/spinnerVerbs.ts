@@ -1,5 +1,5 @@
 // Spinner verbs sourced verbatim from claude-code's
-// src/constants/spinnerVerbs.ts so the kanbots agent loader feels identical.
+// src/constants/spinnerVerbs.ts so the KanBorg agent loader feels identical.
 
 export const SPINNER_VERBS: readonly string[] = [
   'Accomplishing',

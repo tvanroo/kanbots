@@ -1,5 +1,5 @@
-import type { Issue } from '@kanbots/core';
-import type { AgentRun, AutopilotEffort } from '@kanbots/local-store';
+import type { Issue } from '@kanborg/core';
+import type { AgentRun, AutopilotEffort } from '@kanborg/local-store';
 import type { AgentSupervisor } from '../agent-runs/supervisor.js';
 import { buildTaskSystemPrompt } from '../handlers/issues.js';
 

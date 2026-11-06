@@ -3,7 +3,7 @@ import {
   startAgentRun as defaultStartAgentRun,
   type AgentRunHandle,
   type StartAgentRunOptions,
-} from '@kanbots/dispatcher';
+} from '@kanborg/dispatcher';
 import type {
   ChatRequest,
   ChatResponse,
