@@ -42,6 +42,7 @@ const connectionSchema = z.object({
   enabled: z.boolean(), priority: z.number().int().min(0).max(999),
   apiKey: z.string().trim().min(11).max(2000).optional(),
   funding: z.enum(['unknown', 'paid', 'grant', 'subscription-credit']),
+  confirmBalance: z.boolean().optional(),
   grantBillingDay: z.number().int().min(1).max(31).optional(),
   grantFirstStart: z.string().datetime().nullable().optional(),
   rollover: z.boolean().optional(), afterGrant: z.enum(['stop', 'paygo']).optional(),

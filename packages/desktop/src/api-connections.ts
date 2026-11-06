@@ -21,14 +21,14 @@ export async function saveApiConnection(input: ApiConnectionInput): Promise<void
   const rows = read();
   const previous = rows.find(row => row.id === input.id);
   if (previous && previous.provider !== input.provider) throw new Error('A connection cannot change provider.');
-  const { apiKey, ...metadata } = input;
+  const { apiKey, confirmBalance, ...metadata } = input;
   if (!previous && !apiKey) throw new Error('Paste an API key to create this connection.');
   if (apiKey && !safeStorage.isEncryptionAvailable()) throw new Error('Encrypted storage is unavailable. The API key was not saved.');
   const row: StoredConnection = {
     models: [], checkedAt: null, status: 'Not checked', reportedSpend: null, spendCheckedAt: null,
     billingStatus: 'Not reported. Budget and credit fields are user-entered.',
     encryptedKey: '', keyPreview: '', ...previous, ...metadata,
-    balanceUpdatedAt: !previous || previous.remaining !== metadata.remaining ? new Date().toISOString() : previous.balanceUpdatedAt ?? new Date(0).toISOString(),
+    balanceUpdatedAt: confirmBalance || !previous || previous.remaining !== metadata.remaining ? new Date().toISOString() : previous.balanceUpdatedAt ?? new Date(0).toISOString(),
     name: metadata.name.trim() || `${input.provider === 'openai' ? 'OpenAI' : 'Anthropic'} API`,
     expirationMode: metadata.expirationMode ?? (metadata.expiresAt ? 'date' : 'unknown'),
     expiresAt: metadata.expirationMode && metadata.expirationMode !== 'date' ? null : metadata.expiresAt,
@@ -56,18 +56,18 @@ export async function refreshApiConnection(id: string): Promise<void> {
     ? { Authorization: `Bearer ${key}` }
     : { 'x-api-key': key, 'anthropic-version': '2023-06-01' };
   const base = row.provider === 'openai' ? 'https://api.openai.com' : 'https://api.anthropic.com';
-  const result: Partial<StoredConnection> = { checkedAt: new Date().toISOString(), organizationId: null, workspaceId: null };
+  const result: Partial<StoredConnection> = { checkedAt: new Date().toISOString() };
   try {
     const models: ApiConnection['models'] = [];
     let after: string | undefined;
     do {
       const response = await fetch(`${base}/v1/models${after ? `?after_id=${encodeURIComponent(after)}` : ''}`, { headers, signal: AbortSignal.timeout(10000) });
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
-      if (row.provider === 'openai') result.organizationId = response.headers.get('openai-organization');
+      if (row.provider === 'openai') result.organizationId = response.headers.get('openai-organization') ?? row.organizationId ?? null;
       if (row.provider === 'anthropic') {
         // Only authenticated, provider-reported IDs may associate a key with reporting.
-        result.organizationId = response.headers.get('anthropic-organization-id');
-        result.workspaceId = response.headers.get('anthropic-workspace-id');
+        result.organizationId = response.headers.get('anthropic-organization-id') ?? row.organizationId ?? null;
+        result.workspaceId = response.headers.get('anthropic-workspace-id') ?? row.workspaceId ?? null;
       }
       const data = await response.json() as { data: Array<{ id: string; display_name?: string }>; has_more?: boolean; last_id?: string };
       for (const model of data.data) models.push({ id: model.id, label: model.display_name ?? model.id });

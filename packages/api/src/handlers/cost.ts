@@ -1,6 +1,7 @@
 import { execFile } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
+import { readFileSync, writeFileSync, renameSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import type { CostTodayResult, CostUsageResult, CostUsageWindow, CostBreakdownItem } from '../bridge.js';
@@ -26,7 +27,21 @@ export async function breakdown(deps: HandlerDeps): Promise<CostBreakdownItem[]>
 // do not turn a missing window or failed request into a full allowance.
 const USAGE_ENDPOINT = 'https://api.anthropic.com/api/oauth/usage';
 interface Credential { accessToken: string; expiresAt?: number }
-let cache: { identity: string; until: number; payload: CostUsageResult; lastGood?: CostUsageResult } | undefined;
+let cache: { identity: string; until: number; payload: CostUsageResult; lastGood?: CostUsageResult; failures?: number } | undefined;
+let snapshotPath: string | undefined;
+/** Persist quota metadata only; never persist the OAuth token. */
+export function configureClaudeUsageSnapshot(path: string): void {
+  snapshotPath = path;
+  try {
+    const saved = JSON.parse(readFileSync(path, 'utf8'));
+    if (typeof saved.identity === 'string' && Number.isFinite(saved.until) && saved.payload && ['oauth','unavailable','unauthorized'].includes(saved.payload.source)) cache = saved;
+  } catch { /* First launch or unreadable snapshot: fetch normally. */ }
+}
+function persistSnapshot(): void {
+  if (!snapshotPath || !cache) return;
+  try { writeFileSync(snapshotPath + '.tmp', JSON.stringify(cache), { mode: 0o600 }); renameSync(snapshotPath + '.tmp', snapshotPath); }
+  catch { /* Reporting must still work if snapshot storage is unavailable. */ }
+}
 let pending: { identity: string; promise: Promise<CostUsageResult> } | undefined;
 
 export async function usage(_deps: HandlerDeps): Promise<CostUsageResult> {
@@ -34,8 +49,8 @@ export async function usage(_deps: HandlerDeps): Promise<CostUsageResult> {
 }
 export async function readClaudeSubscriptionUsage(): Promise<CostUsageResult> {
   const credential = await readCredential();
-  const empty: CostUsageResult = { fiveHour: null, sevenDay: null, source: 'unavailable', message: 'Subscription usage is not available from the existing Claude Code sign-in.' };
-  if (!credential) { cache = undefined; return empty; }
+  const empty: CostUsageResult = { fiveHour: null, sevenDay: null, stale: false, source: 'unavailable', message: 'Subscription usage is not available from the existing Claude Code sign-in.' };
+  if (!credential) return empty;
   const identity = createHash('sha256').update(credential.accessToken).digest('hex');
   if (cache?.identity !== identity) cache = undefined;
   if (cache && cache.until > Date.now()) return cache.payload;
@@ -46,7 +61,9 @@ export async function readClaudeSubscriptionUsage(): Promise<CostUsageResult> {
 }
 async function loadUsage(credential: Credential, identity: string, empty: CostUsageResult): Promise<CostUsageResult> {
   const lastGood = cache?.identity === identity ? cache.lastGood : undefined;
-  let delay = 60000;
+  const failures = (cache?.identity === identity ? cache.failures ?? 0 : 0) + 1;
+  let delay = Math.min(15 * 60000, 60000 * 2 ** Math.min(failures - 1, 4));
+  let rateLimited = false;
   try {
     const response = await fetch(USAGE_ENDPOINT, {
       headers: { Authorization: `Bearer ${credential.accessToken}`, 'anthropic-beta': 'oauth-2025-04-20', accept: 'application/json' },
@@ -54,8 +71,10 @@ async function loadUsage(credential: Credential, identity: string, empty: CostUs
     });
     if (!response.ok) {
       if (response.status === 429) {
-        const retry = Number(response.headers.get('retry-after'));
-        if (Number.isFinite(retry) && retry > 0) delay = Math.max(delay, Math.min(retry * 1000, 3600000));
+        rateLimited = true;
+        const header = response.headers.get('retry-after');
+        const retry = header && /^\d+(\.\d+)?$/.test(header) ? Number(header) * 1000 : Date.parse(header ?? '') - Date.now();
+        if (Number.isFinite(retry) && retry > 0) delay = Math.max(delay, retry);
       }
       throw new Error(response.status === 401 ? 'unauthorized' : 'unavailable');
     }
@@ -67,13 +86,16 @@ async function loadUsage(credential: Credential, identity: string, empty: CostUs
       const window = toWindow(raw);
       if (window) windows.push({ ...window, id, label: id === 'five_hour' ? '5-hour quota' : id === 'seven_day' ? 'Weekly quota' : id.replaceAll('_', ' ') });
     }
+    if (!windows.length) throw new Error('unavailable');
     const payload: CostUsageResult = { fiveHour: toWindow(data.five_hour), sevenDay: toWindow(data.seven_day), windows, source: 'oauth', checkedAt: new Date().toISOString(), stale: false };
-    cache = { identity, until: Date.now() + delay, payload, lastGood: payload };
+    cache = { identity, until: Date.now() + 5 * 60000, payload, lastGood: payload, failures: 0 };
+    persistSnapshot();
     return payload;
   } catch (error) {
     const unauthorized = error instanceof Error && error.message === 'unauthorized';
-    const payload: CostUsageResult = { ...(lastGood ?? empty), source: unauthorized ? 'unauthorized' : 'unavailable', stale: Boolean(lastGood), message: unauthorized ? 'Claude Code needs to refresh its sign-in. Usage will be checked again automatically.' : 'Claude usage is temporarily unavailable. Retrying automatically; previous readings may be stale.' };
-    cache = { identity, until: Date.now() + delay, payload, ...(lastGood ? { lastGood } : {}) };
+    const payload: CostUsageResult = { ...(lastGood ?? empty), source: unauthorized ? 'unauthorized' : 'unavailable', stale: Boolean(lastGood), retryAt: new Date(Date.now() + delay).toISOString(), message: unauthorized ? 'Claude Code needs to refresh its sign-in. Usage will be checked again automatically.' : rateLimited ? 'Claude has paused usage checks (rate limit). Retrying automatically after its requested delay.' : 'Claude usage is temporarily unavailable. Retrying automatically; previous readings may be stale.' };
+    cache = { identity, until: Date.now() + delay, payload, failures, ...(lastGood ? { lastGood } : {}) };
+    persistSnapshot();
     return payload;
   }
 }

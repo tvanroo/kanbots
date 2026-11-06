@@ -6,7 +6,7 @@ import { configureRoutingProviders, collectCapacity, invalidateCapacity } from '
 import { routingState,saveRouting } from './routing-state.js';
 import { manageCodexResets, notifyClaudeReset } from './subscription-resets.js';
 import { getFundingAccounts, saveFundingAccount } from './account-funding.js';
-import { readClaudeSubscriptionUsage } from '@kanborg/api';
+import { readClaudeSubscriptionUsage, configureClaudeUsageSnapshot } from '@kanborg/api';
 import { getOpenAIReporting, updateOpenAIReporting } from './openai-reporting.js';
 import { getAnthropicReporting, getAnthropicReportingAccounts, updateAnthropicReporting } from './anthropic-reporting.js';
 import { getClaudeDetails } from './claude-auth.js';
@@ -1260,7 +1260,7 @@ function registerIpc(): void {
   ipcMain.handle('kanbots:routing-state', () => routingState());
   ipcMain.handle('kanbots:routing-save', (_event, config) => { const state=saveRouting(config); invalidateCapacity(); return state; });
   ipcMain.handle('kanbots:capacity', async () => (await collectCapacity()).snapshot);
-  setInterval(() => { notifyClaudeReset(); if(getAppStore().providers.get('codex-cli')?.enabled) void manageCodexResets(false).catch(()=>{}); }, 60000).unref();
+  setInterval(() => { notifyClaudeReset(); void collectCapacity().catch(()=>{}); if(getAppStore().providers.get('codex-cli')?.enabled) void manageCodexResets(false).catch(()=>{}); }, 60000).unref();
   ipcMain.handle('kanbots:claude-subscription-usage', () => readClaudeSubscriptionUsage());
   ipcMain.handle('kanbots:claude-auth-status', async (): Promise<{ authed: boolean }> => {
     return { authed: await isClaudeAuthenticated() };
@@ -2226,12 +2226,23 @@ if (process.platform === 'darwin') {
 const ownsLocalInstance = app.requestSingleInstanceLock();
 if (!ownsLocalInstance) app.quit();
 if (ownsLocalInstance) void app.whenReady().then(async () => {
+  configureClaudeUsageSnapshot(join(app.getPath('userData'), 'claude-usage-snapshot.json'));
   selfUpdater=new SelfUpdater();
   coordinators=new CoordinatorService();
   coordinators.setUpdater({status:()=>selfUpdater.status(),check:()=>selfUpdater.check(),request:(a,p)=>Promise.resolve(selfUpdater.enqueue(a,p)),pending:()=>selfUpdater.pending()});
   const coordinatorEntry=resolveMcpServerEntry();
   if(coordinatorEntry) await coordinators.start(coordinatorEntry);
-  Menu.setApplicationMenu(null);
+  if (process.platform === 'darwin') {
+    app.setAboutPanelOptions({ applicationName: 'KanBorg' });
+    Menu.setApplicationMenu(Menu.buildFromTemplate([
+      { label: 'KanBorg', submenu: [
+        { role: 'about', label: 'About KanBorg' }, { type: 'separator' },
+        { role: 'services' }, { type: 'separator' },
+        { role: 'hide', label: 'Hide KanBorg' }, { role: 'hideOthers' }, { role: 'unhide' },
+        { type: 'separator' }, { role: 'quit', label: 'Quit KanBorg' },
+      ] }, { role: 'fileMenu' }, { role: 'editMenu' }, { role: 'viewMenu' }, { role: 'windowMenu' },
+    ]));
+  } else Menu.setApplicationMenu(null);
   registerIpc();
   const recovery=selfUpdater.recovery();
   const restorePath=recovery?.repoPath??selfUpdater.workflowRecovery()?.repoPath??startupWorkspace(app.getPath('userData'));

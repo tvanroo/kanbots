@@ -283,7 +283,7 @@ export interface ApiConnection {
   billingStatus: string;
 }
 
-export type ApiConnectionInput = Omit<ApiConnection, 'balanceUpdatedAt' | 'organizationId' | 'workspaceId' | 'keyPreview' | 'models' | 'checkedAt' | 'status' | 'reportedSpend' | 'spendCheckedAt' | 'billingStatus'> & { apiKey?: string | undefined };
+export type ApiConnectionInput = Omit<ApiConnection, 'balanceUpdatedAt' | 'organizationId' | 'workspaceId' | 'keyPreview' | 'models' | 'checkedAt' | 'status' | 'reportedSpend' | 'spendCheckedAt' | 'billingStatus'> & { apiKey?: string | undefined; confirmBalance?: boolean | undefined };
 
 export interface AnthropicReporting {
   grantEstimates?: Array<{ connectionId: string; configKey: string; cycleStart: string; cycleEnd: string; useBy?: string; amount: number; spent: number | null; remaining: number | null; asOf: string | null; checkedAt: string; stale: boolean }>;
@@ -627,6 +627,7 @@ export interface CostUsageWindow {
 }
 
 export interface CostUsageResult {
+  retryAt?: string;
   checkedAt?: string;
   stale?: boolean;
   message?: string;
@@ -1554,6 +1555,7 @@ export interface RoutingState {
   lastReset: string | null;
 }
 export interface CapacityRow {
+  stale?: boolean;
   routingTier?: string; routingOrder?: number; preferredNow?: boolean; routingReason?: string;
   id: string; label: string; kind: 'subscription' | 'grant' | 'paygo' | 'unknown';
   usedPercent: number | null; remaining: number | null; spent: number | null;

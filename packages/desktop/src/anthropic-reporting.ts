@@ -176,7 +176,12 @@ async function refreshReports(): Promise<void> {
       return { amount: refreshedAt ? amount : null, refreshedAt };
     };
     const [usage, cost] = await Promise.all([readReport('usage'), readReport('cost')]);
-    const grantEstimates = await estimateGrants(listApiConnections().filter(row => row.organizationId === organization.id), get);
+    const previousEstimates = getAnthropicReporting().grantEstimates ?? [];
+    const estimates = await estimateGrants(listApiConnections().filter(row => row.organizationId === organization.id), get);
+    const grantEstimates = estimates.map(estimate => {
+      const previous = previousEstimates.find(e => e.connectionId === estimate.connectionId && e.configKey === estimate.configKey && e.cycleStart === estimate.cycleStart && e.cycleEnd === estimate.cycleEnd);
+      return estimate.remaining === null && previous?.remaining != null ? { ...previous, stale: true } : estimate;
+    });
     store({ grantEstimates, eligibility: 'supported', prerequisite: 'ready', connected: true, status: 'Usage and costs connected. Reports may lag by up to 24 hours; credits and balances are separate.', organizationId: organization.id, organizationName: organization.name, checkedAt: new Date().toISOString(), tokens: usage.amount, costUsd: cost.amount, usageAsOf: usage.refreshedAt, costAsOf: cost.refreshedAt });
   } catch (error) {
     const reason = error instanceof Error ? error.message : '';

@@ -84,6 +84,7 @@ test('routing excludes stopped and unknown grants, reclassifies allowed pay-go, 
  const base={id:'key',provider:'anthropic',name:'Test key',enabled:true,funding:'grant',remaining:100,budget:200,models:[{id:model.id}],renewal:'none',expiresAt:new Date(date+72*3600000).toISOString()};
  async function candidates(row){
   const {collectCapacity}=load('routing-capacity',{
+   './grant-capacity.js':load('grant-capacity',{'./grant-estimate.js':load('grant-estimate')}),
    '@kanborg/api':{readClaudeSubscriptionUsage:async()=>null},
    './api-connections.js':{listApiConnections:()=>[row]},
    './anthropic-reporting.js':{getAnthropicReportingAccounts:()=>[],updateAnthropicReporting:async()=>{}},
@@ -97,4 +98,34 @@ test('routing excludes stopped and unknown grants, reclassifies allowed pay-go, 
  assert.equal((await candidates({...base,remaining:0,afterGrant:'paygo'}))[0].funding,'paid');
  assert.equal((await candidates(base))[0].funding,'grant');
  assert.equal((await candidates({...base,expiresAt:new Date(date+5*3600000).toISOString(),afterGrant:'stop'})).length,0);
+});
+test('one provider outage does not hide other subscriptions or route stale Claude readings',async()=>{
+ for(const stale of [false,true]){
+  const service=load('routing-capacity',{
+   './grant-capacity.js':load('grant-capacity',{'./grant-estimate.js':load('grant-estimate')}),
+   '@kanborg/api':{readClaudeSubscriptionUsage:async()=>({source:stale?'unavailable':'oauth',stale,checkedAt:new Date().toISOString(),windows:[{pct:.3,label:'Weekly',resetsAt:null}]})},
+   './api-connections.js':{listApiConnections:()=>[]},
+   './anthropic-reporting.js':{getAnthropicReportingAccounts:()=>[],updateAnthropicReporting:async()=>{}},
+   './claude-auth.js':{getClaudeDetails:async()=>({authenticationLabel:'Claude subscription'})},
+   './subscription-resets.js':{manageCodexResets:async()=>{throw Error('provider offline');}},
+   './routing-state.js':{readRouting:()=>({config:{}}),routingState:()=>({}),charged:()=>0},
+   './routing-models.js':{modelCatalogue:async()=>({}),selectApiModel:()=>null},
+  });
+  service.configureRoutingProviders(()=>[{id:'claude-code',enabled:true},{id:'codex-cli',enabled:true}]);
+  const result=await service.collectCapacity();
+  assert.equal(result.snapshot.rows.find(r=>r.id==='claude-sub').usedPercent,30);
+  assert.equal(result.candidates.some(c=>c.id==='claude-sub'),!stale);
+ }
+});
+test('failed key refresh preserves verified account identity and explicit balance confirmation persists',async()=>{
+ const dir=fs.mkdtempSync('/private/tmp/kanborg-account-');const oldFetch=global.fetch;
+ try{
+  const api=load('api-connections',{electron:{app:{getPath:()=>dir},safeStorage:{decryptString:()=> 'synthetic-test-key'}}});
+  const row={id:'test',provider:'anthropic',name:'test',encryptedKey:'c3ludGhldGlj',remaining:200,organizationId:'org-a',workspaceId:'workspace-a',models:[{id:'model'}],balanceUpdatedAt:'1970-01-01T00:00:00.000Z'};
+  fs.writeFileSync(path.join(dir,'api-connections.json'),JSON.stringify([row]));
+  global.fetch=async()=>{throw Error('offline');};await api.refreshApiConnection('test');
+  assert.equal(api.listApiConnections()[0].organizationId,'org-a');assert.equal(api.listApiConnections()[0].workspaceId,'workspace-a');
+  await api.saveApiConnection({...api.listApiConnections()[0],confirmBalance:true});
+  const saved=api.listApiConnections()[0];assert.equal(saved.remaining,200);assert.ok(Date.parse(saved.balanceUpdatedAt)>0);assert.equal(saved.confirmBalance,undefined);
+ }finally{global.fetch=oldFetch;fs.rmSync(dir,{recursive:true,force:true});}
 });
