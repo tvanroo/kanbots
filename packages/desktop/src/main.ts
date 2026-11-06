@@ -1510,7 +1510,7 @@ if (ownsLocalInstance) void app.whenReady().then(async () => {
   selfUpdater=new SelfUpdater();
   coordinators=new CoordinatorService();
   coordinators.setWorkflowNotifier(()=>{for(const window of BrowserWindow.getAllWindows())window.webContents.send('workflow:changed',{});});
-  coordinators.setUpdater({status:()=>selfUpdater.status(),check:()=>selfUpdater.check(),request:(a,p)=>Promise.resolve(selfUpdater.enqueue(a,p)),pending:()=>selfUpdater.pending()});
+  coordinators.setUpdater({status:()=>selfUpdater.status(),check:()=>selfUpdater.check(),request:async(a,p)=>{const result=await selfUpdater.enqueue(a,p);if(a.action==='cancel')coordinators.endUpdateWindDown();else coordinators.beginUpdateWindDown();return result;},pending:()=>selfUpdater.pending()});
   const coordinatorEntry=resolveMcpServerEntry();
   if(coordinatorEntry) await coordinators.start(coordinatorEntry);
   if (process.platform === 'darwin') {
@@ -1541,8 +1541,9 @@ if (ownsLocalInstance) void app.whenReady().then(async () => {
     catch(e){console.error('[update] Workflow resume remains pending:',e instanceof Error?e.message:String(e));}
   }
   const updateTimer=setInterval(()=>void selfUpdater.installWhenIdle(async()=>{
+    if(selfUpdater.pending())coordinators.beginUpdateWindDown();
     if(!activeWorkspace||!coordinators.updateIdle()||activeWorkspace.repoPath!==selfUpdater.status().update?.repoPath)return false;
-    return !activeWorkspace.store.agentRuns.listActive().length&&!deviceChatStore?.agentRuns.listActive().length&&!activeWorkspace.autopilot.listActive().length;
+    return await coordinators.updateWorkersReady()&&!activeWorkspace.store.agentRuns.listActive().length&&!deviceChatStore?.agentRuns.listActive().length&&!activeWorkspace.autopilot.listActive().length;
   },async()=>{
     updateRestart=true;
     await coordinators.beforeClose();
