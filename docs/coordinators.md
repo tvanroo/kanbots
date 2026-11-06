@@ -49,3 +49,15 @@ Compatibility references: [ChatGPT local MCP configuration](https://learn.chatgp
 ## KanBorg rename compatibility
 
 New MCP connections identify as `kanborg` and use `KANBORG_COORDINATOR_CLIENT`. Existing `kanbots-local` server entries and `KANBOTS_COORDINATOR_CLIENT` remain supported. Both launcher filenames are refreshed when KanBorg starts. The application bundle ID and data directory are intentionally unchanged to retain encrypted keys and paired clients.
+
+### Handoff and reminders (1.2.12)
+
+Setup is generated for the named incoming harness. The outgoing summary is durable state, never the incoming standing prompt. Superseded harness assignments (including retired Cline coordination) are retired; evidence is retained. The session exposes coordination, release and pairing authority separately. Current behavior continues to give the assigned coordinator release authority within the owner's scope, with owner-only pairing.
+
+On initial connection/reconnect, read capabilities, workspace/session and pending requests. On scheduled ticks, use immediate `getChanges(cursor)`: it now includes controller/lease, handoff status, pending request IDs and cadence, so unchanged ticks require no full-state reads or long wait. A lost cursor requires reconciliation. Use `waitForChanges(20000)` only during an active turn.
+
+The session's `checkIn.prompt` is a fresh short reminder. Keep objective, evidence and next steps in the durable summary. Harnesses should update one workspace reminder to 5 minutes during running work, 15 minutes for an idle ongoing objective, and pause when no responsibility remains. One-minute checks require an explicit time-sensitive request. Supported event wakeups are preferred.
+
+Schedules belong to the harness. After actually configuring one, report `schedule: {id, status, cadenceMinutes, cursor}` through `updateCoordinationSession`. These are harness-reported receipts, not proof from KanBorg of an external scheduler's state. Handoffs leave previous active receipts marked `pause-required` until their owner confirms a pause. A former controller may report only its own recorded schedule as paused; it cannot change the objective or other state. Unknown legacy schedules still require harness inspection; KanBorg cannot discover or cancel arbitrary Cline/DSH/Codex schedules. Unrelated schedules must remain untouched.
+
+This change does not replace worker continuation internals or introduce a new cross-chat owner-approval store. The integration contract requests compact continuation assignments and reuse of existing decision IDs; those broader execution changes are separate from schedule handoff.
