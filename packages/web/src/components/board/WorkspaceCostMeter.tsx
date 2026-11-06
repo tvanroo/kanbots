@@ -23,12 +23,8 @@ export interface WorkspaceCostMeterProps {
 export function WorkspaceCostMeter({ totalUsd, onClick }: WorkspaceCostMeterProps) {
   const empty = totalUsd === null;
   const zero = totalUsd === 0;
-  const display = empty ? '—' : `$${(totalUsd as number).toFixed(2)}`;
-  const title = empty
-    ? 'Workspace cost today is still loading'
-    : zero
-      ? 'No agent runs have spent today yet'
-      : `Workspace agent spend since midnight: $${(totalUsd as number).toFixed(2)}`;
+  const display = 'Usage';
+  const title = 'Subscription quota and API funding';
   const className =
     `kb-cost-meter${empty ? ' is-empty' : zero ? ' is-zero' : ''}` +
     (onClick ? ' is-clickable' : '');
@@ -42,14 +38,14 @@ export function WorkspaceCostMeter({ totalUsd, onClick }: WorkspaceCostMeterProp
         aria-label={title}
       >
         <span className="kb-cost-meter-amount">{display}</span>
-        <span className="kb-cost-meter-suffix">today</span>
+        
       </button>
     );
   }
   return (
     <div className={className} title={title} aria-label={title}>
       <span className="kb-cost-meter-amount">{display}</span>
-      <span className="kb-cost-meter-suffix">today</span>
+      
     </div>
   );
 }

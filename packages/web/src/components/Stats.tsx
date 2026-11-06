@@ -1,5 +1,6 @@
 import type React from 'react';
 import { useEffect, useMemo, useState } from 'react';
+import { getBridge } from '../desktop-bridge.js';
 import { api } from '../api.js';
 import { Logo } from './Logo.js';
 import type {
@@ -13,6 +14,7 @@ export interface StatsProps {
 }
 
 interface StatsData {
+  capacity?: import('@kanborg/api').CapacitySnapshot | undefined;
   todayUsd: number;
   breakdown: CostBreakdownItem[];
   series: CostTimeSeriesPoint[];
@@ -57,14 +59,16 @@ export function Stats({ onClose }: StatsProps) {
     void (async () => {
       try {
         const since14d = new Date(Date.now() - 14 * 24 * 60 * 60 * 1000).toISOString();
-        const [today, breakdown, series, rollup] = await Promise.all([
+        const [today, breakdown, series, rollup, capacity] = await Promise.all([
           api.costToday(),
           api.costBreakdown(),
           api.costTimeSeries({ sinceTs: since14d }),
           api.costRollup(),
+          getBridge()?.capacity?.(),
         ]);
         if (cancelled) return;
         setData({
+          capacity,
           todayUsd: today.totalUsd,
           breakdown,
           series,
@@ -99,7 +103,7 @@ export function Stats({ onClose }: StatsProps) {
         <div className="kb-modal-head">
           <Logo size={11} withWordmark />
           <span style={{ color: 'var(--ink-4)' }}>·</span>
-          <h2>Stats &amp; cost</h2>
+          <h2>Usage &amp; funding</h2>
           <span className="grow" />
           <button
             type="button"
@@ -145,84 +149,21 @@ export function Stats({ onClose }: StatsProps) {
 // ---------------------------------------------------------------------------
 
 function StatsContent({ data }: { data: StatsData }): React.ReactElement {
-  const { todayUsd, breakdown, series, rollup } = data;
-
-  // Aggregates derived from the time series (last 14 days)
-  const last7d = useMemo(() => sumLastNDays(series, 7), [series]);
-  const last14d = useMemo(() => sumLastNDays(series, 14), [series]);
-  const allTimeUsd = useMemo(
-    () => breakdown.reduce((acc, item) => acc + item.totalUsd, 0),
-    [breakdown],
-  );
-  const totalRuns = useMemo(
-    () => rollup.reduce((acc, row) => acc + row.runs, 0),
-    [rollup],
-  );
-
-  if (allTimeUsd === 0 && breakdown.length === 0 && rollup.length === 0) {
-    return (
-      <div className="kb-stats-empty">
-        No cost data yet. Dispatch an agent and check back — every run reports its token usage and
-        accrues cost here.
-      </div>
-    );
-  }
-
-  return (
-    <>
-      {/* Top-line summary */}
-      <div className="kb-stats-summary">
-        <SummaryCard
-          label="Today"
-          value={fmtUsd(todayUsd)}
-          sub="since midnight"
-          accent
-        />
-        <SummaryCard label="Last 7 days" value={fmtUsd(last7d)} sub={fmtRunsHint(series, 7)} />
-        <SummaryCard label="Last 14 days" value={fmtUsd(last14d)} sub={fmtRunsHint(series, 14)} />
-        <SummaryCard
-          label="All time"
-          value={fmtUsd(allTimeUsd)}
-          sub={`${formatNumber(totalRuns)} run${totalRuns === 1 ? '' : 's'}`}
-        />
-      </div>
-
-      {/* 14-day spend bars */}
-      {series.length > 0 ? (
-        <section className="kb-stats-section">
-          <div className="kb-stats-section-head">
-            <span className="kb-stats-section-title">Spend over the last 14 days</span>
-            <span className="kb-stats-section-meta">
-              max {fmtUsd(maxValue(series))} on a single day
-            </span>
-          </div>
-          <SparkBars series={paddedSeries(series, 14)} />
-        </section>
-      ) : null}
-
-      {/* Workspace × provider breakdown */}
-      {breakdown.length > 0 ? (
-        <section className="kb-stats-section">
-          <div className="kb-stats-section-head">
-            <span className="kb-stats-section-title">By workspace × provider</span>
-            <span className="kb-stats-section-meta">{breakdown.length} pair{breakdown.length === 1 ? '' : 's'}</span>
-          </div>
-          <BreakdownRows items={breakdown} />
-        </section>
-      ) : null}
-
-      {/* Persona × model rollup */}
-      {rollup.length > 0 ? (
-        <section className="kb-stats-section">
-          <div className="kb-stats-section-head">
-            <span className="kb-stats-section-title">Top personas × models</span>
-            <span className="kb-stats-section-meta">{rollup.length} combination{rollup.length === 1 ? '' : 's'}</span>
-          </div>
-          <RollupTable rows={[...rollup].sort((a, b) => b.totalCostUsd - a.totalCostUsd).slice(0, 8)} />
-        </section>
-      ) : null}
-    </>
-  );
+ const charges=data.capacity?.routing.apiUsage??[];
+ const total=(funding:string)=>charges.filter(c=>!c.pending&&c.funding===funding).reduce((n,c)=>n+c.usd,0);
+ const unknown=total('unknown');
+ const subscriptions=data.capacity?.rows.filter(r=>r.kind==='subscription')??[];
+ return <>
+  <section className="kb-stats-section"><h3>Subscription usage</h3>
+  {subscriptions.length?subscriptions.map(r=><div className="kb-api-card" key={r.id}><strong>{r.label}</strong><p>{r.usedPercent===null?'Quota unavailable':`${Math.round(r.usedPercent)}% quota used`}</p><p className="kb-provider-desc">{r.detail}</p></div>):<p>Subscription quota is unavailable.</p>}
+  </section>
+  <section className="kb-stats-section"><h3>API usage through KanBorg</h3>
+  <div className="kb-stats-summary"><SummaryCard label="Pay-as-you-go" value={data.capacity?fmtUsd(total('paid')):'—'} sub="Recorded paid API usage"/><SummaryCard label="Grant consumption" value={data.capacity?fmtUsd(total('grant')):'—'} sub="Recorded API grant usage"/>{unknown>0?<SummaryCard label="Earlier API usage" value={fmtUsd(unknown)} sub="Funding source was not recorded"/>:null}</div>
+  <p className="kb-provider-desc">All recorded API usage on this Mac. Subscription price estimates are excluded. Provider invoices remain authoritative.</p>
+  {charges.some(c=>c.pending)?<p>Some API requests are pending; their final usage is not yet known.</p>:null}
+  </section>
+  {data.rollup.length?<section className="kb-stats-section"><h3>Runs by model</h3><RollupTable rows={[...data.rollup].sort((a,b)=>b.runs-a.runs).slice(0,8)}/></section>:null}
+ </>;
 }
 
 // ---------------------------------------------------------------------------
@@ -355,8 +296,8 @@ function RollupTable({ rows }: { rows: PersonaModelRollupRow[] }): React.ReactEl
           <th>Persona</th>
           <th>Model</th>
           <th className="num">Runs</th>
-          <th className="num">Total</th>
-          <th className="num">Avg / run</th>
+          
+          
           <th className="num">Success</th>
         </tr>
       </thead>
@@ -376,8 +317,8 @@ function RollupTable({ rows }: { rows: PersonaModelRollupRow[] }): React.ReactEl
                 ) : null}
               </td>
               <td className="num">{r.runs}</td>
-              <td className="num">{fmtUsd(r.totalCostUsd)}</td>
-              <td className="num">{r.runs === 0 ? '—' : fmtUsd(r.avgCostUsd)}</td>
+              
+              
               <td className="num">
                 <span className={`success-rate ${successCls}`}>
                   <span className="dot" />

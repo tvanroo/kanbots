@@ -90,7 +90,8 @@ export function startRoutedRun(opts:StartAgentRunOptions):AgentRunHandle{
             if(event.kind==='tool_use')hadTools=true;
             if(event.kind==='text')session.transcript.push({role:'assistant',text:event.text});
             if(event.kind==='tool_result')session.transcript.push({role:'user',text:`Completed tool ${event.toolUseId}: ${JSON.stringify(event.content)}`});
-            emit(event);
+            // Subscription CLI dollar values are price equivalents, not API charges.
+            emit(event.kind==='result'?{...event,totalCostUsd:null}:event);
           });
           child.on('error',()=>{});
           // Re-evaluate before a subscription can quietly become a paid-credit route.

@@ -1548,6 +1548,7 @@ export interface RoutingConfig {
   claudeResetExpiresAt: string | null;
 }
 export interface RoutingState {
+  apiUsage?: Array<{at:string;usd:number;pending:boolean;funding:'grant'|'paid'|'unknown'}>;
   config: RoutingConfig;
   lastDecision: string | null;
   lastReset: string | null;

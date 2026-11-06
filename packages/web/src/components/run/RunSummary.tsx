@@ -191,7 +191,7 @@ export function RunSummary({ run, layout = 'inspector', onRunChecks }: RunSummar
             </>
           }
         />
-        <Stat k="Cost" v={fmtCost(run.totalCostUsd, run.costBudgetUsd)} />
+        
       </div>
       <div className="kb-run-checks">
         <CheckPill kind="tsc" check={tsc} command={fmtCmd(commands?.typecheck)} />

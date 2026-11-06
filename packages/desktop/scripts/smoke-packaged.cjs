@@ -42,6 +42,13 @@ const net=require('node:net');
    if(!text.includes('Populate board from repository')||!text.includes('Connect external coordinator')||!text.includes('Or tell your coordinator what you need'))throw Error('Coordinator onboarding panel is missing');
    const screenshot=await call('Page.captureScreenshot',{format:'png'});const output=path.resolve('output/packaged-board-onboarding.png');fs.mkdirSync(path.dirname(output),{recursive:true});fs.writeFileSync(output,Buffer.from(screenshot.data,'base64'));
    console.log(JSON.stringify({emptyBoardPrompts:true,screenshot:output}));
+   await call('Runtime.evaluate',{expression:`document.querySelector('button.kb-cost-meter').click()`});
+   await new Promise(r=>setTimeout(r,1000));
+   const usageView=await call('Runtime.evaluate',{expression:`JSON.stringify({funding:document.body.innerText.includes('API usage through KanBorg'),quota:document.body.innerText.includes('Subscription usage'),oldSpend:document.body.innerText.includes('Spend over the last 14 days')})`,returnByValue:true});
+   const usage=JSON.parse(usageView.result.value);if(!usage.funding||!usage.quota||usage.oldSpend)throw Error('Usage screen mixes subscription estimates with API spend');
+   await call('Runtime.evaluate',{expression:`[...document.querySelectorAll('.kb-stats-modal button')].find(b=>b.textContent==='Close').click()`});
+   console.log(JSON.stringify({separateSubscriptionAndApiUsage:true}));
+
    await call('Runtime.evaluate',{expression:"window.dispatchEvent(new CustomEvent('kanbots:open-coordinator'))"});
    await new Promise(r=>setTimeout(r,700));
    await call('Runtime.evaluate',{expression:"window.dispatchEvent(new CustomEvent('kanbots:issues-refetch'))"});

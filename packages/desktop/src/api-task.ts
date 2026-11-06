@@ -36,7 +36,7 @@ export async function apiTurn(candidate:Candidate,opts:StartAgentRunOptions,tran
   if(inputBound>Math.min(64000,model.context-outputLimit))throw new RouteUnavailable('Task context exceeds this route’s bounded context.');
   const reservation=(inputBound*model.input+outputLimit*model.output)/1e6*1.25;
   if(reservation>runRemaining)throw new RouteUnavailable('Run API spending limit reached.');
-  const charge=reserveCharge(candidate.pool!,row.id,reservation,candidate.available!,candidate.since!);
+  const charge=reserveCharge(candidate.pool!,row.id,reservation,candidate.available!,candidate.since!,candidate.funding);
   if(!charge)throw new RouteUnavailable('This funding pool cannot cover the next request.');
   let response:Response;
   try{

@@ -170,7 +170,7 @@ export function BoardFilters({ stats, controls }: BoardFiltersProps) {
       <span className="kb-stats-line">
         {stats.issues} issue{stats.issues === 1 ? '' : 's'} · {stats.runs} active run
         {stats.runs === 1 ? '' : 's'} · {stats.awaiting} awaiting
-        {stats.costToday > 0 ? ` · $${stats.costToday.toFixed(2)} today` : ''}
+        
       </span>
     </div>
   );

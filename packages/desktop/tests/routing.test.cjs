@@ -65,7 +65,7 @@ test('router switches exhausted API grant to subscription and preserves routed s
  const api={id:'grant',kind:'api',provider:'claude-code',row:{name:'Grant'},model:{id:'claude-test'},funding:'grant',reason:'grant'};
  const sub={id:'sub',kind:'subscription',provider:'codex-cli',reason:'included'};
  let starts=0;
- const worker=()=>{starts++;const e=new EventEmitter();let resolve;const done=new Promise(r=>resolve=r);const h={pid:null,on:(n,f)=>{e.on(n,f);return h;},off:()=>h,stop:()=>{},done};setImmediate(()=>{e.emit('event',{kind:'session',sessionId:'native-session',model:'gpt-test'});e.emit('event',{kind:'text',text:'Done'});resolve({exitCode:0,result:{isError:false},killedByStop:false});});return h;};
+ const worker=()=>{starts++;const e=new EventEmitter();let resolve;const done=new Promise(r=>resolve=r);const h={pid:null,on:(n,f)=>{e.on(n,f);return h;},off:()=>h,stop:()=>{},done};setImmediate(()=>{e.emit('event',{kind:'session',sessionId:'native-session',model:'gpt-test'});e.emit('event',{kind:'text',text:'Done'});e.emit('event',{kind:'result',isError:false,totalCostUsd:2.86,tokenUsage:{input:100,output:20}});resolve({exitCode:0,result:{isError:false},killedByStop:false});});return h;};
  const {startRoutedRun}=load('automatic-routing',{
  electron:{app:{getPath:()=>dir}},'@kanborg/dispatcher':{startAgentRun:worker},
  './api-task.js':{RouteUnavailable,apiTurn:async()=>{throw new RouteUnavailable('grant empty');}},
@@ -73,7 +73,7 @@ test('router switches exhausted API grant to subscription and preserves routed s
  './routing-state.js':{readRouting:()=>({config:{enabled:true,maxRunUsd:5}}),recordDecision:()=>{}}
  });
  const h=startRoutedRun({cwd:dir,prompt:'Do a task',provider:'claude-code'});const events=[];h.on('event',e=>events.push(e));const result=await h.done;
- assert.equal(result.exitCode,0);assert.equal(starts,1);assert.ok(events.some(e=>e.kind==='text'&&e.text.includes('Switching payment')));
+ assert.equal(result.exitCode,0);assert.equal(starts,1);assert.ok(events.filter(e=>e.kind==='result').every(e=>e.totalCostUsd===null));assert.ok(events.some(e=>e.kind==='result'&&e.tokenUsage?.input===100));assert.ok(events.some(e=>e.kind==='text'&&e.text.includes('Switching payment')));
  assert.ok(events.filter(e=>e.kind==='session').every(e=>e.sessionId.startsWith('kanbots-auto-')));
  assert.equal(events.filter(e=>e.kind==='session').at(-1).provider,'codex-cli');
  }finally{fs.rmSync(dir,{recursive:true});}
