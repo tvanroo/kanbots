@@ -13,6 +13,7 @@ import { COORDINATOR_TOOLS,COORDINATOR_GUIDE,REPO_ONBOARDING_PROMPT,validateCoor
 import { collectCapacity } from './routing-capacity.js';
 const exec=promisify(execFile);
 const hash=(v:string)=>createHash('sha256').update(v).digest('hex');
+const pauseCheckins='Pause recurring check-ins for this KanBorg connection in your harness; leave unrelated schedules unchanged. Do not resume unless the user assigns control back. If unable, tell the user the exact schedule to pause.';
 const active=(s:string)=>['starting','running','awaiting_input'].includes(s);
 const redact=(s:string)=>s.replace(/\bsk-[A-Za-z0-9_-]{12,}/g,'[redacted]').replace(/Bearer\s+[A-Za-z0-9._-]+/gi,'Bearer [redacted]');
 const clip=(v:unknown,n=4000)=>redact(typeof v==='string'?v:JSON.stringify(v)??'').slice(0,n);
@@ -61,6 +62,12 @@ export class CoordinatorService{
       const client:Client={id,name,workspaceId:w.id,role,tokenHash:hash(token),status:'pending',code:randomBytes(3).toString('hex').toUpperCase()};
       mkdirSync(join(this.root,'coordinator-clients'),{recursive:true,mode:0o700});writeFileSync(join(this.root,'coordinator-clients',id+'.json'),JSON.stringify({token}),{mode:0o600});this.state.clients.push(client);this.save();return {code:client.code,...this.config(id)};
     }
+    if(action==='rename-client'){
+      const client=this.state.clients.find(c=>c.id===args.id&&c.workspaceId===w.id&&c.status!=='revoked');
+      if(!client)throw Error('Connection not found.');
+      const name=String(args.name??'').trim().slice(0,80);if(!name)throw Error('Enter a coordinator name.');
+      client.name=name;this.save();return this.ui();
+    }
     if(action==='config')return this.config(String(args.id));
     if(action==='approve-client'||action==='revoke-client'){
       const c=this.state.clients.find(c=>c.id===args.id&&c.workspaceId===w.id);if(!c)throw Error('Connection not found');c.status=action==='approve-client'?'approved':'revoked';if(c.status==='revoked'&&w.controller===c.id){w.mode='off';w.controller=null;w.epoch++;}this.event(w,action,{clientId:c.id});return this.ui();
@@ -94,7 +101,7 @@ export class CoordinatorService{
       const h=w.handoff;if(!h||h.state==='completed')throw Error('No handoff is waiting.');
       if(h.state!=='ready'&&!args.useSavedProgress)throw Error('Waiting for the current coordinator to wrap up.');
       const result=await this.uiAction('handoff',{mode:h.mode,clientId:h.to,summary:h.summary});
-      h.state='completed';this.event(w,'handoff-completed',{id:h.id,from:h.from,to:h.to,usedSavedProgress:!!args.useSavedProgress});
+      h.state='completed';this.event(w,'handoff-completed',{id:h.id,from:h.from,to:h.to,instruction:pauseCheckins,usedSavedProgress:!!args.useSavedProgress});
       if(h.mode==='internal')return this.uiAction('chat-send',{body:'You are now the coordinator. Read getWorkspaceSummary and the saved handoff first. Reconcile active workers and pending decisions; do not duplicate work. Briefly tell the user where things stand and the next action. Do not dispatch new development until the objective is clear.'});
       return result;
     }
@@ -135,7 +142,7 @@ export class CoordinatorService{
   config(id:string){const c=this.state.clients.find(c=>c.id===id);if(!c)throw Error('Connection not found');const spec={command:this.launcher,args:[],env:{KANBORG_COORDINATOR_CLIENT:id}};
     const config=JSON.stringify({mcpServers:{'kanborg':spec}},null,2),deepSeek=JSON.stringify({transport:'stdio',serverName:'kanborg',...spec},null,2);
     const toml=`[mcp_servers.kanborg]\ncommand = ${JSON.stringify(this.launcher)}\nargs = []\n[mcp_servers.kanborg.env]\nKANBORG_COORDINATOR_CLIENT = ${JSON.stringify(id)}`;
-    const prompt=`Help connect this harness to KanBorg as a coordinator. Use a local stdio MCP connection; preserve all unrelated server settings. If you can configure your MCP client with authorized tools, do so; otherwise give concise manual steps. Do not claim the connection works until getCapabilities succeeds. The user approves pairing in KanBorg. Until control is assigned to you, observe only. After handoff, call getWorkspaceSummary and getCoordinationSession, read the handoff summary, inspect active workers and decisions, and continue without duplicating work. Delegate implementation and QA to KanBorg. Maintain a compact summary. While actively coordinating, use waitForChanges with a 20-second timeout and getCoordinatorRequests when notified; acknowledge each request as received before acting, then completed when done. Also check requests on every new user turn and reconnect. If your harness supports a scheduled check-in, offer a 60-second idle cadence; do not claim such a schedule exists unless configured. An idle chat cannot be awakened by this MCP server alone. DeepSeek Harness recovery: after a KanBorg upgrade adds tools, a missing or ambiguous native tool schema rejection can mean the live tools and review snapshot disagree. Do not retry repeatedly or disable auto-review. Ask the user to quit and reopen DSH, then reopen this SAME conversation so scheduled check-ins retain their target. Verify the rejected tool once after restart. Until then, getWorkspaceSummary.requests is a read-only fallback; summary updates and comments do not acknowledge requests or complete handoffs. Leave requests pending until acknowledgement works. If handoff is requested, stop dispatching, call completeHandoff with the requested handoffId and a summary, then relinquish control. Never approve your own pairing or release. No provider API keys are needed.\n\nClaude Desktop and generic JSON MCP clients:\n${config}\n\nChatGPT desktop local/Codex-host MCP configuration (config.toml):\n${toml}\n\nDeepSeek Harness MCP client fields:\n${deepSeek}\n\nUse only the format your client supports. Remote-only ChatGPT connector screens cannot use this local command; do not expose a local port publicly to work around that.`;
+    const prompt=`Help connect this harness to KanBorg as a coordinator. Use a local stdio MCP connection; preserve all unrelated server settings. If you can configure your MCP client with authorized tools, do so; otherwise give concise manual steps. Do not claim the connection works until getCapabilities succeeds. The user approves pairing in KanBorg. Until control is assigned to you, observe only. After handoff, call getWorkspaceSummary and getCoordinationSession, read the handoff summary, inspect active workers and decisions, and continue without duplicating work. Delegate implementation and QA to KanBorg. Maintain a compact summary. While actively coordinating, use waitForChanges with a 20-second timeout and getCoordinatorRequests when notified; acknowledge each request as received before acting, then completed when done. Also check requests on every new user turn and reconnect. If your harness supports a scheduled check-in, offer a 60-second idle cadence; do not claim such a schedule exists unless configured. An idle chat cannot be awakened by this MCP server alone. DeepSeek Harness recovery: after a KanBorg upgrade adds tools, a missing or ambiguous native tool schema rejection can mean the live tools and review snapshot disagree. Do not retry repeatedly or disable auto-review. Ask the user to quit and reopen DSH, then reopen this SAME conversation so scheduled check-ins retain their target. Verify the rejected tool once after restart. Until then, getWorkspaceSummary.requests is a read-only fallback; summary updates and comments do not acknowledge requests or complete handoffs. Leave requests pending until acknowledgement works. If handoff is requested, stop dispatching, call completeHandoff with the requested handoffId and a summary, then relinquish control and pause this connection's recurring check-in schedule. Also pause it if a check-in shows control has moved elsewhere. Leave unrelated schedules unchanged; if your harness cannot pause its schedule, tell the user. Never approve your own pairing or release. No provider API keys are needed.\n\nClaude Desktop and generic JSON MCP clients:\n${config}\n\nChatGPT desktop local/Codex-host MCP configuration (config.toml):\n${toml}\n\nDeepSeek Harness MCP client fields:\n${deepSeek}\n\nUse only the format your client supports. Remote-only ChatGPT connector screens cannot use this local command; do not expose a local port publicly to work around that.`;
     return {id:c.id,config,deepSeek,toml,prompt};
   }
   async start(entry:string){
@@ -179,7 +186,7 @@ export class CoordinatorService{
     const isWrite=(COORDINATOR_TOOLS.find(t=>t.name===name)!.inputSchema.required as string[]).includes('requestId');
     if(w.handoff?.state==='completed'&&w.handoff.to===actor&&name==='getWorkspaceSummary'){w.handoff.receivedBy=actor;this.save();}
     if(w.controller===actor&&w.mode!=='off'){w.leaseUntil=Date.now()+30*60000;this.save();}
-    if(!isWrite){const result=await this.read(w,name,args);return result;}
+    if(!isWrite){const result=await this.read(w,name,args);if(['getWorkspaceSummary','getCoordinationSession'].includes(name)&&w.handoff?.from===actor&&w.handoff.state!=='requested')return {...result,coordinatorInstruction:pauseCheckins};return result;}
     if(w.handoff&&w.handoff.state!=='completed'&&!['updateCoordinationSession','completeHandoff'].includes(name))throw Error('Handoff requested. Stop new work and call completeHandoff with a current summary.');
     this.assertControl(w,actor);
     const key=actor+':'+args.requestId;const digest=hash(JSON.stringify({name,args}));const existing=w.receipts[key];
@@ -212,7 +219,7 @@ export class CoordinatorService{
     const h=this.h();
     switch(name){
       case 'acknowledgeCoordinatorRequest':{const r=w.requests?.find(r=>r.id===a.id);if(!r)throw Error('Request not found.');if(r.state!=='completed'){r.state=a.state;r.receivedBy=w.controller!;}return r;}
-      case 'completeHandoff':{const h=w.handoff;if(!h||h.id!==a.handoffId||h.from!==w.controller||h.state==='completed')throw Error('Handoff is no longer current.');h.summary=a.summary;w.summary=a.summary;h.state='ready';return h;}
+      case 'completeHandoff':{const h=w.handoff;if(!h||h.id!==a.handoffId||h.from!==w.controller||h.state==='completed')throw Error('Handoff is no longer current.');h.summary=a.summary;w.summary=a.summary;h.state='ready';return {...h,coordinatorInstruction:pauseCheckins};}
       case 'prepareExternalCoordinator':{if(w.mode!=='internal')throw Error('Prepare external harness setup from the built-in coordinator.');const client=this.state.clients.find(c=>c.workspaceId===w.id&&c.name===a.name&&c.status!=='revoked');const setup=client?{code:client.code,...this.config(client.id)}:await this.uiAction('add-client',{name:a.name});return {...setup,humanApprovalRequired:true,nextAction:'Show the setup request to the user. They connect their harness, approve pairing in KanBorg, then choose Use coordinator. Do not hand off automatically.'};}
       case 'updateCoordinationSession':if(a.objective!==undefined)w.objective=a.objective;if(a.summary!==undefined)w.summary=a.summary;return this.session(w);
       case 'completeOnboarding':for(const r of w.requests??[])if(r.kind==='discovery')r.state='completed';w.onboardedAt=new Date().toISOString();w.summary=a.summary;return this.session(w);

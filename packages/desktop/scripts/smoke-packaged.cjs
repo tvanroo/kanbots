@@ -56,10 +56,11 @@ const net=require('node:net');
    const setupImage=await call('Page.captureScreenshot',{format:'png'});fs.writeFileSync(path.resolve('output/packaged-coordinator-setup.png'),Buffer.from(setupImage.data,'base64'));console.log(JSON.stringify({clearSetupNextAction:true}));
    await call('Runtime.evaluate',{expression:`[...document.querySelectorAll('button')].find(b=>b.textContent==='Change coordinator').click()`});
    await new Promise(r=>setTimeout(r,200));
+   await call('Page.bringToFront',{});
    await call('Runtime.evaluate',{expression:`[...document.querySelectorAll('button')].find(b=>b.textContent==='Copy prompt for new coordinator').click()`});
    await new Promise(r=>setTimeout(r,1000));
-   const copiedView=await call('Runtime.evaluate',{expression:`JSON.stringify({notice:document.body.innerText.includes('Copied to clipboard. Paste this request into DeepSeek Harness'),chooser:[...document.querySelectorAll('button')].some(b=>b.textContent==='Copied — copy again')})`,returnByValue:true});
-   const copied=JSON.parse(copiedView.result.value);if(!copied.notice||!copied.chooser)throw Error('Clipboard confirmation or coordinator chooser missing');
+   const copiedView=await call('Runtime.evaluate',{expression:`JSON.stringify({notice:document.body.innerText.includes('Copied to clipboard. Paste this request into Codex'),chooser:[...document.querySelectorAll('button')].some(b=>b.textContent==='Copied — copy again')})`,returnByValue:true});
+   const copied=JSON.parse(copiedView.result.value);if(!copied.notice||!copied.chooser){console.log((await call('Runtime.evaluate',{expression:'document.body.innerText',returnByValue:true})).result.value);throw Error('Clipboard confirmation or coordinator chooser missing');}
    await call('Runtime.evaluate',{expression:`Object.defineProperty(navigator.clipboard,'writeText',{configurable:true,value:async()=>{throw new Error('Test clipboard failure')}});[...document.querySelectorAll('button')].find(b=>b.textContent==='Copied — copy again').click()`});
    await new Promise(r=>setTimeout(r,700));
    const failedView=await call('Runtime.evaluate',{expression:`JSON.stringify({error:document.body.innerText.includes('Could not copy to your clipboard.'),falseSuccess:!!document.querySelector('.kb-coordinator-copy-notice')})`,returnByValue:true});
