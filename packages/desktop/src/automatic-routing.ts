@@ -40,8 +40,9 @@ export function startRoutedRun(opts:StartAgentRunOptions):AgentRunHandle{
         if(route.id!==lastRoute){
           lastRoute=route.id;
           const message=`Routing: ${route.kind==='subscription'?(route.provider==='claude-code'?'Claude subscription':'ChatGPT subscription'):`${route.row!.name} · ${route.funding==='grant'?'API grant':'pay-as-you-go'} · ${route.model!.id}`} — ${route.reason}.`;
-          recordDecision(message);emit({kind:'text',text:message+'\n'});
+          recordDecision(message);
           emit({kind:'session',sessionId:id,model:route.model?.id??null,provider:route.provider});
+          emit({kind:'text',text:message+'\n'});
         }
         if(route.kind==='api'){
           delete session.native;

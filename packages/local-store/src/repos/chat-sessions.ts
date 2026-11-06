@@ -206,6 +206,11 @@ export class ChatSessionsRepo {
       .run(now, now, id);
   }
 
+  setAgent(id: ChatSessionId, provider: ProviderId, model: string | null): void {
+    this.db.prepare('UPDATE chat_sessions SET agent_provider = ?, agent_model = ?, updated_at = ? WHERE id = ?')
+      .run(provider, model, new Date().toISOString(), id);
+  }
+
   remove(id: ChatSessionId): void {
     const session = this.findById(id);
     if (!session) return;

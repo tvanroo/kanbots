@@ -691,7 +691,7 @@ function MessageRow({
     );
   }
   const isUser = message.role === 'user';
-  const label = isUser ? 'you' : 'claude';
+  const label = isUser ? 'you' : 'assistant';
   return (
     <div className={`kb-chat-msg ${isUser ? 'kb-chat-msg-user' : 'kb-chat-msg-agent'}`}>
       <div className="kb-chat-msg-meta">
@@ -789,10 +789,14 @@ function DecisionInline({
 function EventRow({ event }: { event: AgentEvent }) {
   if (event.type === 'text') {
     const text = (event.payload as { text?: string }).text ?? '';
+    const provider = (event.payload as { provider?: string }).provider;
+    const label = text.startsWith('Routing:') || text.startsWith('Switching payment source') ? 'KanBorg'
+      : provider === 'codex-cli' ? 'ChatGPT · Codex' : provider === 'claude-code' ? 'Claude'
+      : provider === 'openai' ? 'OpenAI' : provider === 'anthropic' ? 'Anthropic' : 'assistant';
     return (
       <div className="kb-chat-msg kb-chat-msg-agent">
         <div className="kb-chat-msg-meta">
-          <b className="kb-chat-msg-author">claude</b>
+          <b className="kb-chat-msg-author">{label}</b>
           <span className="kb-chat-msg-time"> · {ageString(event.createdAt)} ago</span>
         </div>
         <div className="kb-chat-msg-body">{text}</div>

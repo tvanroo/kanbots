@@ -600,6 +600,9 @@ export async function createSupervisor(
         return;
       }
       if (streamEvent.kind === 'session') {
+        if (run.chatSessionId && streamEvent.provider) {
+          store.chatSessions.setAgent(run.chatSessionId, streamEvent.provider, streamEvent.model);
+        }
         store.agentRuns.update(run.id, {
           sessionId: streamEvent.sessionId,
           ...(streamEvent.provider ? {provider:streamEvent.provider} : {}),
@@ -1220,7 +1223,7 @@ function persistEvent(store: Store, runId: number, ev: StreamEvent): AgentEvent 
       return store.events.append({
         agentRunId: runId,
         type: 'text',
-        payload: { text: ev.text },
+        payload: { text: ev.text, provider: store.agentRuns.findById(runId)?.provider ?? null },
       });
     case 'tool_use':
       return store.events.append({

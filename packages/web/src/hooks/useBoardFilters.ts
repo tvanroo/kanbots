@@ -36,7 +36,7 @@ export interface BoardFilterAPI {
 
 const PRIORITY_ORDER: Priority[] = ['p0', 'p1', 'p2', 'p3'];
 
-export function useBoardFilters(issues: Issue[]): BoardFilterAPI {
+export function useBoardFilters(issues: Issue[], alwaysIncludeBacklog = false): BoardFilterAPI {
   const [filters, setFilters] = useState<BoardFilters>(EMPTY_FILTERS);
   const includeBacklog = usePrefsStore((s) => s.board.includeBacklog);
   const setBoardIncludeBacklog = usePrefsStore((s) => s.setBoardIncludeBacklog);
@@ -62,7 +62,7 @@ export function useBoardFilters(issues: Issue[]): BoardFilterAPI {
 
   const filtered = useMemo<Issue[]>(() => {
     return issues.filter((i) => {
-      if (!includeBacklog && i.status === 'backlog') return false;
+      if (!alwaysIncludeBacklog && !includeBacklog && i.status === 'backlog') return false;
       if (filters.hasAgent && (i.agent === null || i.agent === 'idle')) return false;
       if (filters.priorities.size > 0) {
         const p = priorityFromLabels(i.labels);
@@ -75,7 +75,7 @@ export function useBoardFilters(issues: Issue[]): BoardFilterAPI {
       }
       return true;
     });
-  }, [issues, filters, includeBacklog]);
+  }, [issues, filters, includeBacklog, alwaysIncludeBacklog]);
 
   function toggleHasAgent(): void {
     setFilters((f) => ({ ...f, hasAgent: !f.hasAgent }));

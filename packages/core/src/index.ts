@@ -47,3 +47,4 @@ export type {
   UpdateIssuePatch,
   User,
 } from './types.js';
+export type { WorkflowActor, WorkflowTaskType, WorkflowCheck, WorkflowStage, WorkflowTransition, WorkflowConfig, WorkflowCard, WorkflowState } from './workflow.js';

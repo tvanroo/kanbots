@@ -2229,6 +2229,7 @@ if (ownsLocalInstance) void app.whenReady().then(async () => {
   configureClaudeUsageSnapshot(join(app.getPath('userData'), 'claude-usage-snapshot.json'));
   selfUpdater=new SelfUpdater();
   coordinators=new CoordinatorService();
+  coordinators.setWorkflowNotifier(()=>{for(const window of BrowserWindow.getAllWindows())window.webContents.send('workflow:changed',{});});
   coordinators.setUpdater({status:()=>selfUpdater.status(),check:()=>selfUpdater.check(),request:(a,p)=>Promise.resolve(selfUpdater.enqueue(a,p)),pending:()=>selfUpdater.pending()});
   const coordinatorEntry=resolveMcpServerEntry();
   if(coordinatorEntry) await coordinators.start(coordinatorEntry);

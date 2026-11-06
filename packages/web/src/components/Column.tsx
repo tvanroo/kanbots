@@ -4,7 +4,7 @@ import type { Issue, StatusKey } from '../types.js';
 import { Card, type CardSelectModifiers } from './Card.js';
 import type { RunLiveMap } from '../hooks/useBoardAgentStreams.js';
 
-export function columnDropId(key: StatusKey | null): string {
+export function columnDropId(key: string | null): string {
   return `col:${key ?? 'inbox'}`;
 }
 
@@ -41,7 +41,10 @@ export type SuggestActivity =
   | { kind: 'thought'; text: string };
 
 export interface ColumnProps {
-  columnKey: StatusKey | null;
+  columnKey: string | null;
+  purpose?: string;
+  workflowCards?: Record<string,any>;
+  onWorkflowCard?: (number:number)=>void;
   status: 'inbox' | StatusKey;
   label: string;
   issues: Issue[];
@@ -60,6 +63,7 @@ export interface ColumnProps {
 
 export function Column({
   columnKey,
+  purpose,workflowCards,onWorkflowCard,
   status,
   label,
   issues,
@@ -87,7 +91,7 @@ export function Column({
             className="kb-col-add"
             title="Add issue"
             aria-label={`Add issue to ${label}`}
-            onClick={() => onAdd(columnKey)}
+            onClick={() => onAdd(columnKey as StatusKey | null)}
           >
             {plusIcon}
           </button>
@@ -107,6 +111,7 @@ export function Column({
           </button>
         ) : null}
       </div>
+      {purpose?<p className="wf-stage-purpose">{purpose}</p>:null}
       <div className="kb-col-list">
         {suggesting ? (
           <SuggestingSkeletonCard
@@ -126,15 +131,14 @@ export function Column({
                   }
                 : null;
             return (
-              <Card
-                key={issue.number}
+              <div key={issue.number}><Card
                 issue={issue}
                 selected={selectedNumber === issue.number}
                 multiSelected={multiSelected?.has(issue.number) ?? false}
                 liveTool={live}
                 onSelect={onSelect ?? (() => undefined)}
                 onOpen={onOpen ?? (() => undefined)}
-              />
+              />{workflowCards?.[issue.number]?<button className="wf-card-context" onClick={()=>onWorkflowCard?.(issue.number)}>{workflowCards[issue.number].waiting?`Waiting: ${workflowCards[issue.number].waiting.reason} · ${workflowCards[issue.number].waiting.owner}`:`Next: ${workflowCards[issue.number].owner}`}<br/>{workflowCards[issue.number].waiting?.trigger??workflowCards[issue.number].nextAction}</button>:null}</div>
             );
           })
         )}

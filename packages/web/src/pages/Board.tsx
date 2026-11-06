@@ -1,3 +1,6 @@
+import { useWorkflow } from '../hooks/useWorkflow.js';
+import { WorkflowEditor } from '../components/modals/WorkflowEditor.js';
+import { getBridge } from '../desktop-bridge.js';
 import {
   DndContext,
   DragOverlay,
@@ -123,7 +126,10 @@ export function Board({ onOpenDetail, onOpenCreate, onOpenPalette, onOpenStats }
   const { data: costUsage, refetch: refetchCostUsage } = useFetch('cost:usage', () =>
     api.costUsage(),
   );
-  const filterApi = useBoardFilters(issues);
+  const workflow=useWorkflow(config?.repo);
+  const [workflowEditor,setWorkflowEditor]=useState<number|null>(null);
+  const workflowIssues:Issue[]=workflow?workflow.issues.map((i:Issue)=>{const card=workflow.cards[i.number];const stage=workflow.config.stages.find((s:any)=>s.id===card?.stageId);return stage?{...i,status:stage.category,state:stage.category==='done'?'closed':'open'}:i;}):issues;
+  const filterApi = useBoardFilters(workflowIssues, !!workflow);
   const { focusedRepoId } = useFocusedRepo();
   const sortMode = usePrefsStore((s) => s.board.sortMode);
   const setSortMode = usePrefsStore((s) => s.setBoardSortMode);
@@ -267,6 +273,7 @@ export function Board({ onOpenDetail, onOpenCreate, onOpenPalette, onOpenStats }
 
   const orderedNumbers = useMemo<number[]>(() => {
     const out: number[] = [];
+    if(workflow) return workflow.config.stages.flatMap((s:any)=>filterApi.filtered.filter(i=>workflow.cards[i.number]?.stageId===s.id).map(i=>i.number));
     for (const issue of grouped.untagged) out.push(issue.number);
     if (filterApi.includeBacklog) {
       for (const issue of grouped.byKey.backlog) out.push(issue.number);
@@ -276,7 +283,7 @@ export function Board({ onOpenDetail, onOpenCreate, onOpenPalette, onOpenStats }
     for (const issue of grouped.byKey.review) out.push(issue.number);
     for (const issue of grouped.byKey.done) out.push(issue.number);
     return out;
-  }, [grouped, filterApi.includeBacklog]);
+  }, [grouped, filterApi.includeBacklog, filterApi.filtered, workflow]);
 
   const currentViewState = useMemo(
     () => ({
@@ -340,6 +347,10 @@ export function Board({ onOpenDetail, onOpenCreate, onOpenPalette, onOpenStats }
     const issueNumber = issueNumberFromDragId(active.id);
     if (issueNumber === null) return;
 
+    if(workflow&&String(over.id).startsWith('col:')){
+      const to=String(over.id).slice(4);if(workflow.cards[issueNumber]?.stageId===to)return;
+      try{await getBridge()?.coordinatorAction?.('workflow:card',{number:issueNumber,to,reason:'Moved on board',evidence:'User-directed stage move'});setMoveError(null);}catch(e){setMoveError(String(e));setWorkflowEditor(issueNumber);}return;
+    }
     const targetStatus = statusFromDropId(over.id);
     if (targetStatus === undefined) return;
 
@@ -481,6 +492,7 @@ export function Board({ onOpenDetail, onOpenCreate, onOpenPalette, onOpenStats }
         targets.map(async (n) => {
           const issue = before.find((i) => i.number === n);
           if (!issue) return null;
+          if(workflow){const stage=workflow.config.stages.find((s:any)=>s.id===status)??workflow.config.stages.find((s:any)=>s.category===(status??'backlog'));if(!stage)throw Error('Choose a stage in Card decisions.');return getBridge()?.coordinatorAction?.('workflow:card',{number:n,to:stage.id,reason:'Bulk board move',evidence:'User-directed stage move'});}
           const nextLabels = withStatus(issue.labels, status);
           return api.updateIssue(n, { labels: nextLabels });
         }),
@@ -653,15 +665,18 @@ export function Board({ onOpenDetail, onOpenCreate, onOpenPalette, onOpenStats }
         fiveHour={costUsage?.fiveHour ?? null}
         sevenDay={costUsage?.sevenDay ?? null}
       />
+      {workflow?<div className="kb-coordinator-strip"><button className="kb-btn ghost" onClick={()=>setWorkflowEditor(0)}>Workflow · {workflow.config.name}</button><span className="kb-provider-desc">Version {workflow.version}</span></div>:null}
+      {workflowEditor!==null?<WorkflowEditor onClose={()=>setWorkflowEditor(null)} {...(workflowEditor?{cardNumber:workflowEditor}:{})}/>:null}
       <BoardErrorBanner message={moveError} onDismiss={() => setMoveError(null)} />
       <div className="kb-board" onClick={handleBoardBackgroundClick}>
-        {COLUMNS.filter((col) => filterApi.includeBacklog || col.key !== 'backlog').map((col) => (
+        {(workflow?workflow.config.stages.map((s:any)=>({key:s.id,label:s.name,status:s.category,purpose:s.purpose})):COLUMNS.filter((col) => filterApi.includeBacklog || col.key !== 'backlog')).map((col:any) => (
           <Column
             key={String(col.key)}
             columnKey={col.key}
             status={col.status}
             label={col.label}
-            issues={col.key === null ? grouped.untagged : grouped.byKey[col.key]}
+            issues={workflow?sortIssues(list.filter(i=>workflow.cards[i.number]?.stageId===col.key),sortMode):col.key === null ? grouped.untagged : grouped.byKey[col.key as StatusKey]}
+            {...(workflow?{purpose:col.purpose,workflowCards:workflow.cards,onWorkflowCard:setWorkflowEditor}:{})}
             selectedNumber={selectedNumber}
             multiSelected={cardSelection.selected}
             liveByRun={liveByRun}
