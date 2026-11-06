@@ -67,6 +67,7 @@ test('router switches exhausted API grant to subscription and preserves routed s
  let starts=0;
  const worker=()=>{starts++;const e=new EventEmitter();let resolve;const done=new Promise(r=>resolve=r);const h={pid:null,on:(n,f)=>{e.on(n,f);return h;},off:()=>h,stop:()=>{},done};setImmediate(()=>{e.emit('event',{kind:'session',sessionId:'native-session',model:'gpt-test'});e.emit('event',{kind:'text',text:'Done'});e.emit('event',{kind:'result',isError:false,totalCostUsd:2.86,tokenUsage:{input:100,output:20}});resolve({exitCode:0,result:{isError:false},killedByStop:false});});return h;};
  const {startRoutedRun}=load('automatic-routing',{
+ './routing-recovery.js':load('routing-recovery'),
  electron:{app:{getPath:()=>dir}},'@kanborg/dispatcher':{startAgentRun:worker},
  './api-task.js':{RouteUnavailable,apiTurn:async()=>{throw new RouteUnavailable('grant empty');}},
  './routing-capacity.js':{collectCapacity:async()=>({candidates:[api,sub]}),invalidateCapacity:()=>{}},

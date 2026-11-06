@@ -8,6 +8,7 @@ import { startAgentRun,type StartAgentRunOptions,type AgentRunHandle,type RunSum
 import { apiTurn,RouteUnavailable,type TranscriptEntry } from './api-task.js';
 import { collectCapacity,invalidateCapacity,type Candidate } from './routing-capacity.js';
 import { readRouting,recordDecision } from './routing-state.js';
+import { subscriptionFailure } from './routing-recovery.js';
 type Session={cwd:string;transcript:TranscriptEntry[];native?:{provider:'claude-code'|'codex-cli';id:string}};
 const sessions=()=>join(app.getPath('userData'),'routed-sessions');
 function saveSession(id:string,data:Session){mkdirSync(sessions(),{recursive:true,mode:0o700});const path=join(sessions(),id+'.json');writeFileSync(path+'.tmp',JSON.stringify(data),{mode:0o600});renameSync(path+'.tmp',path);}
@@ -30,7 +31,7 @@ export function startRoutedRun(opts:StartAgentRunOptions):AgentRunHandle{
         if(session.cwd!==opts.cwd)throw Error('Session workspace changed; start a new task.');
       }
       session.transcript.push({role:'user',text:opts.prompt});saveSession(id,session);
-      const blocked=new Set<string>();let lastRoute='';
+      const blocked=new Set<string>();const recovered=new Set<string>();let lastRoute='';
       const maxUsd=Math.min(readRouting().config.maxRunUsd,opts.costBudgetUsd??Infinity);
       for(let step=0;step<80;step++){
         abort.signal.throwIfAborted();
@@ -81,7 +82,7 @@ export function startRoutedRun(opts:StartAgentRunOptions):AgentRunHandle{
             ...(same&&session.native?{resumeFromSessionId:session.native.id}:{}),
             ...(opts.env?{env:opts.env}:{}),...(extraArgs?{extraArgs}:{}),
           });
-          let limited=false;let hadTools=false;
+          let limited=false;let hadTools=false;let hadOutput=false;let launchError='';
           child.on('event',event=>{
             if(event.kind==='session'){
               session.native={provider:route.provider,id:event.sessionId};saveSession(id,session);
@@ -89,12 +90,13 @@ export function startRoutedRun(opts:StartAgentRunOptions):AgentRunHandle{
             }
             if(event.kind==='rate_limit'){limited=true;return;}
             if(event.kind==='tool_use')hadTools=true;
+            if(event.kind==='text'&&event.text.trim())hadOutput=true;
             if(event.kind==='text')session.transcript.push({role:'assistant',text:event.text});
             if(event.kind==='tool_result')session.transcript.push({role:'user',text:`Completed tool ${event.toolUseId}: ${JSON.stringify(event.content)}`});
             // Subscription CLI dollar values are price equivalents, not API charges.
             emit(event.kind==='result'?{...event,totalCostUsd:null}:event);
           });
-          child.on('error',()=>{});
+          child.on('error',error=>{launchError=error instanceof Error?error.message:String(error);});
           // Re-evaluate before a subscription can quietly become a paid-credit route.
           const monitor=setInterval(()=>void collectCapacity(false,true).then(({candidates})=>{
             if(!candidates.some(c=>c.id===route.id)){limited=true;child?.stop();}
@@ -104,7 +106,25 @@ export function startRoutedRun(opts:StartAgentRunOptions):AgentRunHandle{
             if(hadTools)session.transcript.push({role:'user',text:'The previous subscription stopped for capacity. Continue from recorded completed tool results; inspect current files before making further changes.'});
             continue;
           }
-          if(summary.result?.isError||summary.exitCode!==0)throw Error('Subscription task did not complete. Review its output and resume when ready.');
+          if(summary.result?.isError||summary.exitCode!==0){
+            const problem=subscriptionFailure([launchError,summary.stderr,summary.result?.text??''].join('\n'));
+            const providerName=route.provider==='codex-cli'?'ChatGPT / Codex':'Claude';
+            // Only restart automatically when the failure is known and no useful
+            // output or tool execution has happened. Never replay ambiguous work.
+            if(!abort.signal.aborted&&!summary.killedByStop&&!hadTools&&!hadOutput&&problem.recoverable){
+              if(same&&problem.kind==='session'&&!recovered.has(route.id)){
+                recovered.add(route.id);delete session.native;saveSession(id,session);
+                emit({kind:'text',text:`KanBorg recovery: ${providerName} could not resume its saved session. Starting a fresh session with this conversation's saved context.\n`});continue;
+              }
+              if(problem.kind==='transient'&&!recovered.has(route.id)){
+                recovered.add(route.id);
+                emit({kind:'text',text:`KanBorg recovery: ${providerName} could not connect. Retrying once before choosing another available source.\n`});continue;
+              }
+              blocked.add(route.id);delete session.native;saveSession(id,session);
+              emit({kind:'text',text:`KanBorg recovery: ${providerName}: ${problem.message} Checking another allowed source; your message is preserved.\n`});continue;
+            }
+            throw Error(`${providerName}: ${problem.message} ${hadTools?'Work may already have changed files; saved progress is preserved and was not replayed.':'Your conversation is saved; retry after resolving the provider issue.'}`);
+          }
           return;
         }
       }

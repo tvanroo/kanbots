@@ -790,7 +790,7 @@ function EventRow({ event }: { event: AgentEvent }) {
   if (event.type === 'text') {
     const text = (event.payload as { text?: string }).text ?? '';
     const provider = (event.payload as { provider?: string }).provider;
-    const label = text.startsWith('Routing:') || text.startsWith('Switching payment source') ? 'KanBorg'
+    const label = text.startsWith('Routing:') || text.startsWith('KanBorg recovery:') || text.startsWith('Switching payment source') ? 'KanBorg'
       : provider === 'codex-cli' ? 'ChatGPT · Codex' : provider === 'claude-code' ? 'Claude'
       : provider === 'openai' ? 'OpenAI' : provider === 'anthropic' ? 'Anthropic' : 'assistant';
     return (
