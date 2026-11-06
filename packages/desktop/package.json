@@ -1,6 +1,6 @@
 {
   "name": "@kanborg/desktop",
-  "version": "1.2.22",
+  "version": "1.2.23",
   "private": true,
   "description": "KanBorg desktop app (Electron)",
   "main": "./dist/main.cjs",
@@ -128,7 +128,8 @@
       "shortcutName": "KanBorg"
     },
     "npmRebuild": false,
-    "nodeGypRebuild": false
+    "nodeGypRebuild": false,
+    "afterPack": "scripts/sign-local-mac.cjs"
   },
   "homepage": "https://kanborg.ai"
 }
