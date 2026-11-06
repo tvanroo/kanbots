@@ -40,7 +40,7 @@ const DEFAULT_DECISION_PROMPT = `When you need a decision from the user before c
 }
 \`\`\`
 
-After emitting the block, end your turn (do not continue working). The user will pick an option and you will resume with their choice provided as the next user message.`;
+After emitting the block, end your turn (do not continue working). The question is saved in Questions for you. Include the full context and implications in the question, not a reference to earlier conversation. The user may choose an option, give a free-text answer, or request an explanation. An explanation request is not a decision: explain and wait without taking a choice.`;
 
 export type ContainmentMode = 'off' | 'warn' | 'pause';
 

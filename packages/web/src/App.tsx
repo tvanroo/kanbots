@@ -1,3 +1,4 @@
+import { QuestionsQueue } from './components/QuestionsQueue.js';
 import { useEffect, useMemo, useState } from 'react';
 import { useFetch } from './hooks/useFetch.js';
 import { useRoute, navigate } from './hooks/useRoute.js';
@@ -224,6 +225,7 @@ function ShellHost({
 
   return (
     <>
+      <QuestionsQueue />
       <Window
         workspaceName="KanBorg workspace"
         folderName={describeFolder(config)}

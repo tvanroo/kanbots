@@ -1040,3 +1040,27 @@ h2 {
 .kb-coordinator-copy-notice { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:12px 16px; border:1px solid var(--accent-line); border-radius:12px; background:var(--accent-soft); color:var(--ink); flex-shrink:0; }
 
 .kb-coordinator-current{display:flex;justify-content:space-between;align-items:center;gap:20px;padding:16px 0;border-bottom:1px solid var(--hairline);flex-shrink:0}.kb-coordinator-current small,.kb-coordinator-current>span{color:var(--ink-3);font-size:12px}.kb-coordinator-current h3{font-size:20px;margin:5px 0}.kb-coordinator-current p,.kb-coordinator-discovery p{font-size:13px;color:var(--ink-2);margin:6px 0;line-height:1.5}.kb-coordinator-discovery{display:flex;justify-content:space-between;align-items:center;gap:16px;padding:14px 0;flex-shrink:0}.kb-coordinator-details{padding:10px 0;flex-shrink:0}.kb-coordinator-details>summary{cursor:pointer;color:var(--ink-2);font-size:12px}.kb-coordinator-details[open]{max-height:250px;overflow:auto}.kb-coordinator-body.is-conversation{overflow:auto}.kb-coordinator-conversation:not([hidden]){height:auto;flex:1;min-height:200px}.kb-coordinator-change{background:var(--bg-2)}.kb-coordinator-current>span{white-space:nowrap}@media(max-width:600px){.kb-coordinator-current,.kb-coordinator-discovery{align-items:flex-start;flex-direction:column}}
+/* Coordinator conversation: transcript owns the space; operations live in settings. */
+.kb-coordinators{width:min(1160px,96vw);height:92vh;max-height:92vh}
+.kb-coordinator-body.is-conversation{flex:1;min-height:0;overflow:hidden;padding:0;gap:0}
+.kb-coordinator-body.is-conversation>[hidden]{display:none}
+.kb-coordinator-conversation:not([hidden]){flex:1;min-height:0;height:100%}
+.kb-coordinator-chat-status{display:flex;align-items:center;gap:12px;padding:12px 24px;border-bottom:1px solid var(--hairline);flex-shrink:0}
+.kb-coordinator-chat-status>span{color:var(--ink-3);flex:1}
+.kb-coordinator-transcript{padding:28px max(24px,calc((100% - 820px)/2));gap:24px;overscroll-behavior:contain}
+.kb-coordinator-bubble{flex-shrink:0;max-width:92%;padding:16px 20px}
+.kb-coordinator-bubble.assistant{background:transparent;border-left:2px solid var(--accent-line);border-radius:0;max-width:100%}
+.kb-coordinator-bubble.user{background:var(--bg-2);border:1px solid var(--hairline);max-width:80%}
+.kb-coordinator-composer{flex-shrink:0;padding:16px 24px;background:var(--bg-1);border-top:1px solid var(--hairline)}
+.kb-coordinator-composer form{display:flex;flex-direction:column;gap:10px}
+.kb-coordinator-send-actions{display:flex;justify-content:flex-end;gap:8px}
+.kb-coordinator-input{min-height:92px;max-height:190px;resize:vertical;font-size:14px}
+.kb-coordinator-outbox{max-height:160px;overflow:auto;border-left:2px solid var(--accent);padding:8px 14px;margin-bottom:12px;background:var(--bg-2)}
+.kb-coordinator-outbox p{white-space:pre-wrap;margin:6px 0;color:var(--ink-2)}
+.kb-coordinator-outbox>div+div{border-top:1px solid var(--hairline);padding-top:10px}
+.kb-coordinator-body:not(.is-conversation){flex:1;min-height:0;overflow:auto}
+.kb-coordinator-progress{font-size:12px;color:var(--ink-3);flex-shrink:0}
+@media(max-width:650px){.kb-coordinators{width:98vw;height:96vh;max-height:96vh}.kb-coordinator-transcript{padding:16px}.kb-coordinator-chat-status{padding:10px 16px;flex-wrap:wrap}.kb-coordinator-composer{padding:12px 16px}.kb-coordinators .kb-modal-head{flex-wrap:wrap}}
+.kb-questions-launch{position:fixed;right:130px;bottom:22px;z-index:1500;background:var(--bg-2);border:1px solid var(--accent-line)}
+.kb-questions-panel{position:fixed;right:24px;bottom:76px;width:min(520px,calc(100vw - 32px));max-height:78vh;overflow:auto;z-index:1600;background:var(--bg-1);border:1px solid var(--hairline);border-radius:16px;padding:20px;box-shadow:0 16px 64px #0008}
+.kb-questions-panel header{display:flex;align-items:center;justify-content:space-between}.kb-questions-panel article{padding:18px 0;border-top:1px solid var(--hairline)}.kb-questions-panel h4{font-size:15px;line-height:1.5;margin:10px 0}.kb-questions-panel p,.kb-questions-panel small{color:var(--ink-2);line-height:1.5}.kb-questions-panel form{display:grid;gap:8px;margin-top:12px}.kb-questions-panel form button{justify-self:end}
