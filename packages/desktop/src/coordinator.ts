@@ -201,7 +201,7 @@ Never approve your own pairing. No provider API keys are needed.\n\nClaude Deskt
   async call(actor:string,scope:string,name:string,raw:unknown):Promise<any>{
     if(this.closing)throw Error('Workspace is closing; reconnect after opening it.');
     const args=validateCoordinatorArgs(name,raw);
-    if(name==='getCapabilities')return {version:'1.2.13',authority:'active-coordinator',guide:COORDINATOR_GUIDE,scope,tools:COORDINATOR_TOOLS.map(t=>t.name),releaseActions:['merge','draft-pr'],hosted:false};
+    if(name==='getCapabilities')return {version:'1.2.14',authority:'active-coordinator',guide:COORDINATOR_GUIDE,scope,tools:COORDINATOR_TOOLS.map(t=>t.name),releaseActions:['merge','draft-pr'],hosted:false};
     if(name==='listWorkspaces')return this.state.workspaces.filter(w=>w.id===scope).map(w=>({workspaceId:w.id,name:basename(w.path),open:this.context?.repoPath===w.path}));
     if(args.workspaceId!==scope)throw Error('This connection is not permitted for that workspace');const w=this.resolve(scope);
     if(name==='renewCoordinator'){if(w.controller!==actor||w.mode==='off')throw Error('Control belongs elsewhere');w.leaseUntil=Date.now()+30*60000;this.save();return this.session(w);}

@@ -1,3 +1,4 @@
+import { rememberWorkspace, startupWorkspace } from './workspace-resume.js';
 import { SelfUpdater } from './self-update.js';
 import { CoordinatorService } from './coordinator.js';
 import { startRoutedRun as startRoutedRunUnchecked } from './automatic-routing.js';
@@ -326,6 +327,7 @@ async function recordRecent(repoPath: string, displayName: string): Promise<void
     lastOpenedAt: new Date().toISOString(),
   });
   await writeRecents(filtered.slice(0, RECENTS_LIMIT));
+  rememberWorkspace(app.getPath('userData'),repoPath);
 }
 
 async function pruneMissingRecents(): Promise<RecentWorkspace[]> {
@@ -979,6 +981,7 @@ async function openCloudWorkspaceInternal(
     localRepoPath: binding?.localRepoPath ?? null,
   };
   activeCloudWorkspace = info;
+  rememberWorkspace(app.getPath('userData'),null);
   await recordCloudRecent({
     orgSlug,
     orgDisplayName: org.display_name,
@@ -1919,6 +1922,7 @@ function registerIpc(): void {
   );
 
   ipcMain.handle('kanbots:close-workspace', async (): Promise<void> => {
+    rememberWorkspace(app.getPath('userData'),null);
     await closeActiveWorkspace();
     if (mainWindow) mainWindow.webContents.reloadIgnoringCache();
   });
@@ -2229,16 +2233,16 @@ if (ownsLocalInstance) void app.whenReady().then(async () => {
   if(coordinatorEntry) await coordinators.start(coordinatorEntry);
   Menu.setApplicationMenu(null);
   registerIpc();
-  await createWindow();
   const recovery=selfUpdater.recovery();
-  if(recovery){
-    try{
-      await openWorkspaceInternal(recovery.repoPath);
-      await mainWindow!.loadFile(join(__dirname, 'web', 'index.html'));
-      selfUpdater.complete();
-      await coordinators.resumeAfterUpdate(app.getVersion());
-    }catch(e){selfUpdater.failRecovery(e instanceof Error?e.message:'Workspace recovery failed');}
+  const restorePath=recovery?.repoPath??startupWorkspace(app.getPath('userData'));
+  let restored=false;
+  if(restorePath){
+    try{await openWorkspaceInternal(restorePath);restored=true;}
+    catch(e){if(recovery)selfUpdater.failRecovery(e instanceof Error?e.message:'Workspace recovery failed');console.error('[startup] Could not restore project:',e instanceof Error?e.message:String(e));}
   }
+  // Load the board only after restoration, avoiding a flash of the project picker.
+  await createWindow();
+  if(recovery&&restored){selfUpdater.complete();await coordinators.resumeAfterUpdate(app.getVersion()).catch(e=>console.error('[update] Coordinator needs attention:',e.message));}
   const updateTimer=setInterval(()=>void selfUpdater.installWhenIdle(async()=>{
     if(!activeWorkspace||!coordinators.updateIdle()||activeWorkspace.repoPath!==selfUpdater.status().update?.repoPath)return false;
     return !activeWorkspace.store.agentRuns.listActive().length&&!deviceChatStore?.agentRuns.listActive().length&&!activeCloudRuns.size&&!activeWorkspace.autopilot.listActive().length;
