@@ -1,3 +1,4 @@
+import { readFileSync, writeFileSync, renameSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import type { CodexSubscriptionUsage } from '@kanborg/api';
 import { spawn } from 'node:child_process';
@@ -13,6 +14,17 @@ export interface CodexDetails {
   catalogueError?: string;
 }
 
+let snapshotPath: string | undefined;
+let lastUsage: { identity: string; usage: CodexSubscriptionUsage } | undefined;
+export function configureCodexUsageSnapshot(path: string) {
+  snapshotPath = path;
+  try { const saved = JSON.parse(readFileSync(path, 'utf8')); if (typeof saved.identity === 'string' && Array.isArray(saved.usage?.windows) && saved.usage?.checkedAt) lastUsage = saved; } catch { /* First run. */ }
+}
+function saveUsage(identity: string, usage: CodexSubscriptionUsage) {
+  lastUsage = { identity, usage };
+  if (snapshotPath) try { writeFileSync(snapshotPath + '.tmp', JSON.stringify(lastUsage), { mode: 0o600 }); renameSync(snapshotPath + '.tmp', snapshotPath); } catch { /* Keep in-memory snapshot. */ }
+}
+
 // Use the same CLI and account as task execution. Never forward account details,
 // raw protocol errors, or credential material to the renderer.
 export async function getCodexDetails(redemption?: { accountIdentity: string; creditId: string; idempotencyKey: string }): Promise<CodexDetails> {
@@ -20,7 +32,9 @@ export async function getCodexDetails(redemption?: { accountIdentity: string; cr
   let sequence = 0;
   let buffer = '';
   const pending = new Map<number, { resolve: (value: any) => void; reject: (error: Error) => void }>();
+  let unavailable = false;
   const fail = () => {
+    unavailable = true;
     for (const request of pending.values()) request.reject(new Error('Codex unavailable'));
     pending.clear();
   };
@@ -45,6 +59,7 @@ export async function getCodexDetails(redemption?: { accountIdentity: string; cr
   });
   const timer = setTimeout(() => { fail(); child.kill(); }, 15000);
   const call = (method: string, params: unknown): Promise<any> => new Promise((resolve, reject) => {
+    if (unavailable) { reject(new Error('Codex unavailable')); return; }
     const id = ++sequence;
     pending.set(id, { resolve, reject });
     child.stdin.write(JSON.stringify({ id, method, params }) + '\n');
@@ -65,7 +80,9 @@ export async function getCodexDetails(redemption?: { accountIdentity: string; cr
       ? 'ChatGPT subscription'
       : account?.type === 'apiKey' ? 'OpenAI API billing'
       : account ? 'Other Codex authentication' : 'Signed out of Codex';
+    try {
     let cursor: string | null = null;
+    const cursors = new Set<string>();
     do {
       const page = await call('model/list', { cursor, includeHidden: false });
       for (const model of page.data) {
@@ -74,7 +91,10 @@ export async function getCodexDetails(redemption?: { accountIdentity: string; cr
         }
       }
       cursor = page.nextCursor ?? null;
+      if (cursor && cursors.has(cursor)) throw new Error('Repeated catalogue page');
+      if (cursor) cursors.add(cursor);
     } while (cursor);
+    } catch { details.catalogueError = 'Model catalogue unavailable; usage is checked separately.'; }
     if (account?.type === 'chatgpt') {
       try {
         const usage = await call('account/rateLimits/read', {});
@@ -95,6 +115,7 @@ export async function getCodexDetails(redemption?: { accountIdentity: string; cr
           credits: Array.isArray(reset.credits) ? reset.credits.filter((c: any)=>typeof c.id==='string' && c.status==='available' && c.resetType==='codexRateLimits' && (c.expiresAt===null || (typeof c.expiresAt==='number' && Number.isFinite(c.expiresAt)))).map((c: any)=>({id:c.id,expiresAt:c.expiresAt,status:c.status,resetType:c.resetType})) : [],
         } : undefined;
         details.subscriptionUsage = { ...(resetCredits ? {resetCredits} : {}), checkedAt: new Date().toISOString(), ordinaryUsageAllowed: typeof usage.ordinaryUsageAllowed === 'boolean' ? usage.ordinaryUsageAllowed : null, windows, credits };
+        if (details.accountIdentity && windows.length) saveUsage(details.accountIdentity, details.subscriptionUsage);
       } catch { details.subscriptionUsageError = 'Subscription usage could not be read from Codex. Try Refresh again.'; }
     }
   } catch {
@@ -103,6 +124,10 @@ export async function getCodexDetails(redemption?: { accountIdentity: string; cr
     clearTimeout(timer);
     child.stdin.end();
     child.kill();
+  }
+  if (!details.subscriptionUsage && details.accountIdentity && lastUsage?.identity === details.accountIdentity) {
+    details.subscriptionUsage = lastUsage.usage;
+    details.subscriptionUsageError = 'Last reported usage; retrying automatically. Figures may have changed.';
   }
   return details;
 }

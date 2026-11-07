@@ -27,7 +27,7 @@ export async function breakdown(deps: HandlerDeps): Promise<CostBreakdownItem[]>
 // do not turn a missing window or failed request into a full allowance.
 const USAGE_ENDPOINT = 'https://api.anthropic.com/api/oauth/usage';
 interface Credential { accessToken: string; expiresAt?: number }
-let cache: { identity: string; until: number; payload: CostUsageResult; lastGood?: CostUsageResult; failures?: number } | undefined;
+let cache: { identity: string; until: number; payload: CostUsageResult; lastGood?: CostUsageResult; failures?: number; rateLimitUntil?: number } | undefined;
 let snapshotPath: string | undefined;
 /** Persist quota metadata only; never persist the OAuth token. */
 export function configureClaudeUsageSnapshot(path: string): void {
@@ -52,7 +52,9 @@ export async function readClaudeSubscriptionUsage(): Promise<CostUsageResult> {
   const empty: CostUsageResult = { fiveHour: null, sevenDay: null, stale: false, source: 'unavailable', message: 'Subscription usage is not available from the existing Claude Code sign-in.' };
   if (!credential) return empty;
   const identity = createHash('sha256').update(credential.accessToken).digest('hex');
-  if (cache?.identity !== identity) cache = undefined;
+  // A token change must not bypass a provider cooldown or expose another account's quota.
+  const cooldown = cache?.rateLimitUntil;
+  if (cache?.identity !== identity) cache = cooldown && cooldown > Date.now() ? { identity, until: cooldown, rateLimitUntil: cooldown, payload: { ...empty, retryAt: new Date(cooldown).toISOString(), message: 'Claude usage checks are cooling down after a rate limit. Checking again automatically.' } } : undefined;
   if (cache && cache.until > Date.now()) return cache.payload;
   if (pending?.identity === identity) return pending.promise;
   const promise = loadUsage(credential, identity, empty);
@@ -65,6 +67,8 @@ async function loadUsage(credential: Credential, identity: string, empty: CostUs
   let delay = Math.min(15 * 60000, 60000 * 2 ** Math.min(failures - 1, 4));
   let rateLimited = false;
   try {
+    // Never hammer the usage service with an access token known to be expired.
+    if (credential.expiresAt && credential.expiresAt <= Date.now()) throw new Error('unauthorized');
     const response = await fetch(USAGE_ENDPOINT, {
       headers: { Authorization: `Bearer ${credential.accessToken}`, 'anthropic-beta': 'oauth-2025-04-20', accept: 'application/json' },
       signal: AbortSignal.timeout(10000),
@@ -93,8 +97,8 @@ async function loadUsage(credential: Credential, identity: string, empty: CostUs
     return payload;
   } catch (error) {
     const unauthorized = error instanceof Error && error.message === 'unauthorized';
-    const payload: CostUsageResult = { ...(lastGood ?? empty), source: unauthorized ? 'unauthorized' : 'unavailable', stale: Boolean(lastGood), retryAt: new Date(Date.now() + delay).toISOString(), message: unauthorized ? 'Claude Code needs to refresh its sign-in. Usage will be checked again automatically.' : rateLimited ? 'Claude has paused usage checks (rate limit). Retrying automatically after its requested delay.' : 'Claude usage is temporarily unavailable. Retrying automatically; previous readings may be stale.' };
-    cache = { identity, until: Date.now() + delay, payload, failures, ...(lastGood ? { lastGood } : {}) };
+    const payload: CostUsageResult = { ...(lastGood ?? empty), source: unauthorized ? 'unauthorized' : 'unavailable', stale: Boolean(lastGood), retryAt: new Date(Date.now() + delay).toISOString(), message: unauthorized ? 'Claude sign-in has expired. Reconnect Claude in provider settings; saved quota is retained until a fresh reading is available.' : rateLimited ? 'Claude has paused usage checks (rate limit). Retrying automatically after its requested delay.' : 'Claude usage is temporarily unavailable. Retrying automatically; previous readings may be stale.' };
+    cache = { identity, until: Date.now() + delay, payload, failures, ...(rateLimited ? { rateLimitUntil: Date.now() + delay } : {}), ...(lastGood ? { lastGood } : {}) };
     persistSnapshot();
     return payload;
   }
@@ -123,4 +127,10 @@ function parseCredential(raw: string | null): Credential | null {
     const oauth = JSON.parse(raw ?? '{}').claudeAiOauth;
     return typeof oauth?.accessToken === 'string' && oauth.accessToken.length > 0 ? { accessToken: oauth.accessToken, expiresAt: oauth.expiresAt } : null;
   } catch { return null; }
+}
+
+/** Metadata only; used to avoid treating expired credentials as a successful login. */
+export async function claudeSignInNeedsRefresh(): Promise<boolean> {
+  const credential = await readCredential();
+  return !credential || Boolean(credential.expiresAt && credential.expiresAt <= Date.now()) || (cache?.identity === createHash('sha256').update(credential.accessToken).digest('hex') && cache?.payload.source === 'unauthorized');
 }

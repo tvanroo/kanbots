@@ -28,7 +28,7 @@ export async function saveApiConnection(input: ApiConnectionInput): Promise<void
     models: [], checkedAt: null, status: 'Not checked', reportedSpend: null, spendCheckedAt: null,
     billingStatus: 'Not reported. Budget and credit fields are user-entered.',
     encryptedKey: '', keyPreview: '', ...previous, ...metadata,
-    balanceUpdatedAt: confirmBalance || !previous || previous.remaining !== metadata.remaining ? new Date().toISOString() : previous.balanceUpdatedAt ?? new Date(0).toISOString(),
+    ...(confirmBalance || !previous || previous.remaining !== metadata.remaining ? { balanceUpdatedAt: new Date().toISOString() } : {}),
     name: metadata.name.trim() || `${input.provider === 'openai' ? 'OpenAI' : 'Anthropic'} API`,
     expirationMode: metadata.expirationMode ?? (metadata.expiresAt ? 'date' : 'unknown'),
     expiresAt: metadata.expirationMode && metadata.expirationMode !== 'date' ? null : metadata.expiresAt,

@@ -183,7 +183,7 @@ export type {
   WorkspaceScriptsBridgePayload,
 } from './bridge.js';
 
-export { readClaudeSubscriptionUsage, configureClaudeUsageSnapshot } from './handlers/cost.js';
+export { readClaudeSubscriptionUsage, configureClaudeUsageSnapshot, claudeSignInNeedsRefresh } from './handlers/cost.js';
 
 export type { CostUsageResult, CostUsageWindow } from './bridge.js';
 

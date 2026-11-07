@@ -1,3 +1,4 @@
+import { configureCodexUsageSnapshot } from './codex-catalogue.js';
 import { rememberWorkspace, startupWorkspace } from './workspace-resume.js';
 import { SelfUpdater, startupSwitch } from './self-update.js';
 import { CoordinatorService } from './coordinator.js';
@@ -1507,6 +1508,7 @@ const ownsLocalInstance = app.requestSingleInstanceLock();
 if (!ownsLocalInstance) app.quit();
 if (ownsLocalInstance) void app.whenReady().then(async () => {
   configureClaudeUsageSnapshot(join(app.getPath('userData'), 'claude-usage-snapshot.json'));
+  configureCodexUsageSnapshot(join(app.getPath('userData'), 'codex-usage-snapshot.json'));
   selfUpdater=new SelfUpdater();
   coordinators=new CoordinatorService();
   coordinators.setWorkflowNotifier(()=>{for(const window of BrowserWindow.getAllWindows())window.webContents.send('workflow:changed',{});});

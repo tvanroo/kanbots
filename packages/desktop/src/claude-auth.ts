@@ -1,3 +1,4 @@
+import { claudeSignInNeedsRefresh } from '@kanborg/api';
 import { execFile, spawn, type ChildProcess } from 'node:child_process';
 
 let login: ChildProcess | undefined;
@@ -15,11 +16,11 @@ export function getClaudeDetails(): Promise<{ hasKey: boolean; authenticationLab
   });
 }
 export async function isClaudeAuthenticated(): Promise<boolean> {
-  return (await getClaudeDetails()).hasKey;
+  return (await getClaudeDetails()).hasKey && !await claudeSignInNeedsRefresh();
 }
 
 export async function startClaudeLogin(installIfMissing = false): Promise<{ ok: true } | { ok: false; error: string }> {
-  if (await isClaudeAuthenticated()) return { ok: true };
+  if (await isClaudeAuthenticated() && !await claudeSignInNeedsRefresh()) return { ok: true };
   cancelClaudeLogin();
   if (!(await getClaudeDetails()).cliAvailable) {
     if (!installIfMissing || process.platform !== 'darwin') return { ok: false, error: 'Install Claude Code to connect your subscription.' };

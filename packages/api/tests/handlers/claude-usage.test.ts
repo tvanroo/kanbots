@@ -2,14 +2,14 @@ import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest';
-const fixture = vi.hoisted(() => ({ token: 'synthetic-a', keychain: vi.fn(), file: vi.fn() }));
+const fixture = vi.hoisted(() => ({ token: 'synthetic-a', expiresAt: undefined as number | undefined, keychain: vi.fn(), file: vi.fn() }));
 vi.mock('node:child_process', () => ({ execFile: (...args: unknown[]) => {
   fixture.keychain();
-  (args[3] as (error: null, value: string) => void)(null, JSON.stringify({ claudeAiOauth: { accessToken: fixture.token } }));
+  (args[3] as (error: null, value: string) => void)(null, JSON.stringify({ claudeAiOauth: { accessToken: fixture.token, expiresAt: fixture.expiresAt } }));
 } }));
-vi.mock('node:fs/promises', () => ({ readFile: async () => { fixture.file(); return JSON.stringify({ claudeAiOauth: { accessToken: fixture.token } }); } }));
+vi.mock('node:fs/promises', () => ({ readFile: async () => { fixture.file(); return JSON.stringify({ claudeAiOauth: { accessToken: fixture.token, expiresAt: fixture.expiresAt } }); } }));
 
-beforeEach(() => { vi.resetModules(); vi.clearAllMocks(); vi.stubEnv('CLAUDE_CONFIG_DIR', ''); fixture.token = 'synthetic-a'; });
+beforeEach(() => { vi.resetModules(); vi.clearAllMocks(); vi.stubEnv('CLAUDE_CONFIG_DIR', ''); fixture.token = 'synthetic-a'; fixture.expiresAt = undefined; });
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); vi.unstubAllEnvs(); });
 const response = () => new Response(JSON.stringify({ five_hour: null, seven_day: { utilization: 88, resets_at: '2026-11-06T16:00:00Z' } }));
 describe('Claude subscription usage', () => {
@@ -67,4 +67,24 @@ it('an empty response cannot replace a previous valid quota with unknown values'
   vi.stubGlobal('fetch',vi.fn().mockResolvedValueOnce(response()).mockResolvedValue(new Response('{}')));
   const api=await import('../../src/handlers/cost.js'); await api.readClaudeSubscriptionUsage(); now+=301000;
   const result=await api.readClaudeSubscriptionUsage(); expect(result.sevenDay?.pct).toBe(.88); expect(result.stale).toBe(true);
+});
+
+it('expired credentials require recovery without sending doomed usage requests', async () => {
+  fixture.expiresAt=Date.now()-1000;
+  const fetch=vi.fn(); vi.stubGlobal('fetch',fetch);
+  const api=await import('../../src/handlers/cost.js');
+  const result=await api.readClaudeSubscriptionUsage();
+  expect(result.source).toBe('unauthorized'); expect(fetch).not.toHaveBeenCalled();
+  expect(await api.claudeSignInNeedsRefresh()).toBe(true);
+  fixture.token='renewed'; fixture.expiresAt=Date.now()+3600000;
+  fetch.mockResolvedValue(response());
+  expect((await api.readClaudeSubscriptionUsage()).source).toBe('oauth');
+  expect(await api.claudeSignInNeedsRefresh()).toBe(false);
+});
+it('credential changes cannot bypass a provider rate-limit cooldown', async () => {
+  const fetch=vi.fn().mockResolvedValue(new Response('{}',{status:429,headers:{'retry-after':'3600'}}));vi.stubGlobal('fetch',fetch);
+  const api=await import('../../src/handlers/cost.js');
+  await api.readClaudeSubscriptionUsage(); fixture.token='rotated';
+  const result=await api.readClaudeSubscriptionUsage();
+  expect(fetch).toHaveBeenCalledTimes(1);expect(result.retryAt).toBeDefined();expect(result.sevenDay).toBeNull();
 });

@@ -4,7 +4,7 @@ import { createHash } from 'node:crypto';
 import { listApiConnections } from './api-connections.js';
 import { app } from 'electron';
 import { execFile } from 'node:child_process';
-import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync, renameSync } from 'node:fs';
 import { join } from 'node:path';
 import type { AnthropicReporting } from '@kanborg/api';
 const accountContext = new AsyncLocalStorage<string>();
@@ -49,7 +49,7 @@ export function getAnthropicReporting(): AnthropicReporting {
   }
   catch { return { connected: false, status: 'Refresh usage and cost access.' }; }
 }
-function store(value: AnthropicReporting) { writeFileSync(snapshotPath(), JSON.stringify(value), { mode: 0o600 }); }
+function store(value: AnthropicReporting) { const path = snapshotPath(); writeFileSync(path + '.tmp', JSON.stringify(value), { mode: 0o600 }); renameSync(path + '.tmp', path); }
 function ant(args: string[], timeout: number): Promise<string> {
   const env: NodeJS.ProcessEnv = { ...process.env, ANTHROPIC_CONFIG_DIR: join(app.getPath('userData'), 'anthropic-reporting-auth') };
   for (const key of Object.keys(env)) if (key.startsWith('ANTHROPIC_')) delete env[key];
@@ -106,6 +106,8 @@ export async function updateAnthropicReporting(action: 'connect' | 'refresh', ap
 }
 async function updateReporting(action: 'connect' | 'refresh', approveInstall = false, switchAccount = false): Promise<void> {
   const state = operations();
+  const report = getAnthropicReporting();
+  if (action === 'refresh' && report.retryAt && Date.parse(report.retryAt) > Date.now()) return;
   // Refresh remains available while the browser login process is still waiting.
   if (action === 'connect') {
     if (!switchAccount && getAnthropicReporting().eligibility === 'denied') { await updateReporting('refresh'); return; }
@@ -137,13 +139,23 @@ async function updateReporting(action: 'connect' | 'refresh', approveInstall = f
 }
 async function refreshReports(): Promise<void> {
   let authenticated = false;
+  let retryAt = Date.now() + 15 * 60000;
+  let limited = false;
+  const attemptedAt = new Date().toISOString();
   try {
     // The official CLI owns OAuth storage and refresh. Token stays in main-process memory.
     const token = await credentials();
     if (!token || /\s/.test(token)) throw new Error('authorization-failed');
     const headers = { Authorization: `Bearer ${token}`, 'anthropic-version': '2026-10-21', 'anthropic-beta': 'analytics-usage-cost-2026-08-24' };
     const get = async (path: string) => {
+      if (limited) throw new Error('report-unavailable');
       const response = await fetch(`https://api.anthropic.com${path}`, { headers, signal: AbortSignal.timeout(15000) });
+      if (response.status === 429) {
+        limited = true;
+        const value = response.headers.get('retry-after') ?? '';
+        const delay = /^\d+(\.\d+)?$/.test(value) ? Number(value) * 1000 : Date.parse(value) - Date.now();
+        if (Number.isFinite(delay) && delay > 0) retryAt = Math.max(retryAt, Date.now() + delay);
+      }
       if (!response.ok) throw new Error(response.status === 401 ? 'authorization-failed' : response.status === 403 ? 'permission-denied' : 'report-unavailable');
       return response.json() as Promise<any>;
     };
@@ -159,6 +171,7 @@ async function refreshReports(): Promise<void> {
     const start = new Date(); start.setUTCDate(1); start.setUTCHours(0, 0, 0, 0);
     const readReport = async (kind: 'usage' | 'cost') => {
       let page: string | undefined;
+      const seen = new Set<string>();
       let amount = 0;
       let refreshedAt: string | null = null;
       do {
@@ -172,23 +185,29 @@ async function refreshReports(): Promise<void> {
           amount += kind === 'cost' ? value / 100 : value;
         }
         page = report.has_more ? report.next_page : undefined;
+        if (report.has_more && (!page || seen.has(page))) throw new Error('report-unavailable');
+        if (page) seen.add(page);
       } while (page);
       return { amount: refreshedAt ? amount : null, refreshedAt };
     };
-    const [usage, cost] = await Promise.all([readReport('usage'), readReport('cost')]);
+    const [usageResult, costResult] = await Promise.allSettled([readReport('usage'), readReport('cost')]);
+    const previousReport = getAnthropicReporting();
+    const usage = usageResult.status === 'fulfilled' ? usageResult.value : { amount: previousReport.tokens ?? null, refreshedAt: previousReport.usageAsOf ?? null };
+    const cost = costResult.status === 'fulfilled' ? costResult.value : { amount: previousReport.costUsd ?? null, refreshedAt: previousReport.costAsOf ?? null };
+    const complete = usageResult.status === 'fulfilled' && costResult.status === 'fulfilled';
     const previousEstimates = getAnthropicReporting().grantEstimates ?? [];
     const estimates = await estimateGrants(listApiConnections().filter(row => row.organizationId === organization.id), get);
     const grantEstimates = estimates.map(estimate => {
       const previous = previousEstimates.find(e => e.connectionId === estimate.connectionId && e.configKey === estimate.configKey && e.cycleStart === estimate.cycleStart && e.cycleEnd === estimate.cycleEnd);
       return estimate.remaining === null && previous?.remaining != null ? { ...previous, stale: true } : estimate;
     });
-    store({ grantEstimates, eligibility: 'supported', prerequisite: 'ready', connected: true, status: 'Usage and costs connected. Reports may lag by up to 24 hours; credits and balances are separate.', organizationId: organization.id, organizationName: organization.name, checkedAt: new Date().toISOString(), tokens: usage.amount, costUsd: cost.amount, usageAsOf: usage.refreshedAt, costAsOf: cost.refreshedAt });
+    store({ attemptedAt, retryAt: new Date(retryAt).toISOString(), grantEstimates, eligibility: 'supported', prerequisite: 'ready', connected: true, status: complete ? 'Usage and costs connected. Reports may lag; grant balances are estimates.' : 'Organization connected. Some reports are temporarily unavailable; retained readings show their original dates. Retrying automatically.', organizationId: organization.id, organizationName: organization.name, checkedAt: new Date().toISOString(), tokens: usage.amount, costUsd: cost.amount, usageAsOf: usage.refreshedAt, costAsOf: cost.refreshedAt });
   } catch (error) {
     const reason = error instanceof Error ? error.message : '';
-    store({ ...getAnthropicReporting(), grantEstimates: getAnthropicReporting().grantEstimates?.map(estimate => ({ ...estimate, stale: true })) ?? [], eligibility: reason === 'permission-denied' ? 'denied' : reason === 'authorization-failed' ? 'unknown' : getAnthropicReporting().eligibility ?? 'unknown', prerequisite: reason === 'missing-cli' ? 'missing' : 'ready', connected: authenticated && reason !== 'authorization-failed', status: reason === 'missing-cli'
+    store({ ...getAnthropicReporting(), attemptedAt, retryAt: new Date(retryAt).toISOString(), grantEstimates: getAnthropicReporting().grantEstimates?.map(estimate => ({ ...estimate, stale: true })) ?? [], eligibility: reason === 'permission-denied' ? 'denied' : reason === 'authorization-failed' ? 'unknown' : getAnthropicReporting().eligibility ?? 'unknown', prerequisite: reason === 'missing-cli' ? 'missing' : 'ready', connected: authenticated && reason !== 'authorization-failed', status: reason === 'missing-cli'
       ? 'Install the official Anthropic ant CLI, then check connection.'
       : reason === 'authorization-failed' ? 'No active organization authorization found. Connect usage & costs to sign in.'
-      : reason === 'permission-denied' ? 'Organization reporting is not available with this account’s current access. Personal Pro/Max subscriptions do not include this API; Console organizations require admin reporting permissions. Your subscription can still be used.'
+      : reason === 'permission-denied' ? 'Organization reporting permission was denied. Connect an admin credential for the Console organization that owns this API key. Subscription quota uses a separate connection.'
       : authenticated ? 'Organization authorized, but reports are currently unavailable. Check connection to retry. Previous readings are stale.'
       : 'Could not check organization access. Check your connection and retry before signing in again.' });
   }

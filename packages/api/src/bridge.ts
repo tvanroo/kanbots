@@ -286,6 +286,8 @@ export interface ApiConnection {
 export type ApiConnectionInput = Omit<ApiConnection, 'balanceUpdatedAt' | 'organizationId' | 'workspaceId' | 'keyPreview' | 'models' | 'checkedAt' | 'status' | 'reportedSpend' | 'spendCheckedAt' | 'billingStatus'> & { apiKey?: string | undefined; confirmBalance?: boolean | undefined };
 
 export interface AnthropicReporting {
+  attemptedAt?: string;
+  retryAt?: string;
   grantEstimates?: Array<{ connectionId: string; configKey: string; cycleStart: string; cycleEnd: string; useBy?: string; amount: number; spent: number | null; remaining: number | null; asOf: string | null; checkedAt: string; stale: boolean }>;
 
   organizationMismatch?: boolean;
@@ -1555,6 +1557,7 @@ export interface RoutingState {
   lastReset: string | null;
 }
 export interface CapacityRow {
+  needsAttention?: boolean;
   stale?: boolean;
   routingTier?: string; routingOrder?: number; preferredNow?: boolean; routingReason?: string;
   id: string; label: string; kind: 'subscription' | 'grant' | 'paygo' | 'unknown';

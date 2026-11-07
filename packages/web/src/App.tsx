@@ -110,6 +110,7 @@ function ShellHost({
   const [archiveOpen, setArchiveOpen] = useState(false);
   const [statsOpen, setStatsOpen] = useState(false);
   const [providersSettingsOpen, setProvidersSettingsOpen] = useState(false);
+  useEffect(() => { const open = () => setProvidersSettingsOpen(true); window.addEventListener('kanborg:open-providers', open); return () => window.removeEventListener('kanborg:open-providers', open); }, []);
   const [houseRulesOpen, setHouseRulesOpen] = useState(false);
   const [scriptsOpen, setScriptsOpen] = useState<
     null | { autoRun?: 'setup' | 'cleanup' }
