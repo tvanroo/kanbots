@@ -1,5 +1,17 @@
 # Existing-chat integration (KanBorg 1.2.24)
 
+## CLI adapter integration (unreleased branch)
+
+The desktop now registers `codex-cli-queue-v1` on macOS when the verified ChatGPT-bundled CLI at `/Applications/ChatGPT.app/Contents/Resources/codex-cli/bin/codex` exposes queue/thread/message/resume support. Other installations and remote hosts remain unsupported. Registration does not approve a binding, transfer control or send a message. The owner must approve an exact local-host/existing-chat binding in Activity & settings.
+
+The adapter sends compact allowlisted event references using `execFile` and the documented `codex queue --thread <UUID> --message <text> --resume` interface. No new chat, server, private pipe, user command or endpoint is used. Executable-path process inspection establishes local desktop transport availability; it does not establish receiver readiness or receipt.
+
+A matching queued-message receipt establishes transport acceptance even when resume reports an error. An uncertain result remains unknown; reconciliation never blindly replays it. Stored receipts preserve acceptance but are not live receipt queries. The CLI has no verified caller idempotency-key or status-query option. MCP received/acted acknowledgement remains required. Revocation during preflight prevents spawn, and slow preflight cannot start a child after the queue timeout window.
+
+Evidence: one direct CLI probe previously woke the same idle Codex desktop chat despite a no-daemon resume warning. The integrated branch passes desktop typechecking and 97 desktop tests, including 15 adapter/queue-seam checks. This is not yet a production KanBorg-to-MCP acknowledgement, live handoff or iPhone acceptance result. No live app was restarted or workspace ownership changed by this branch.
+
+Acceptance setup: use a separate test workspace/profile with an owner-approved connection and exact existing plugin chat `01a1b2b3-b96c-7f32-b9aa-77e33d69648d`; keep CardBox untouched. Verify app/runtime compatibility and receiver schemas before an actual event. Test accepted → received → acted, incoming reconciliation and outgoing authority loss, restart/uncertain-send recovery, then continue the same chat from ChatGPT iOS Codex/Remote.
+
 ## Implemented interface
 
 The local stdio MCP remains the control channel. `proposeHostBinding` accepts an exact host ID, existing chat ID and adapter ID for the authenticated approved client. The owner approves or revokes it in Activity & settings. Approval is disabled if the adapter is not registered. Binding never transfers control or creates a chat. No arbitrary endpoint, command or private host pipe is accepted.

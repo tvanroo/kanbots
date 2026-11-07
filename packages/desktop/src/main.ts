@@ -2,6 +2,7 @@ import { configureCodexUsageSnapshot } from './codex-catalogue.js';
 import { rememberWorkspace, startupWorkspace } from './workspace-resume.js';
 import { SelfUpdater, startupSwitch } from './self-update.js';
 import { CoordinatorService } from './coordinator.js';
+import { registerMacCodexCliAdapter } from './register-codex-cli.js';
 import { startRoutedRun as startRoutedRunUnchecked } from './automatic-routing.js';
 import { configureRoutingProviders, collectCapacity, invalidateCapacity } from './routing-capacity.js';
 import { routingState,saveRouting } from './routing-state.js';
@@ -1511,6 +1512,7 @@ if (ownsLocalInstance) void app.whenReady().then(async () => {
   configureCodexUsageSnapshot(join(app.getPath('userData'), 'codex-usage-snapshot.json'));
   selfUpdater=new SelfUpdater();
   coordinators=new CoordinatorService();
+  await registerMacCodexCliAdapter(adapter => coordinators.registerHostAdapter(adapter));
   coordinators.setWorkflowNotifier(()=>{for(const window of BrowserWindow.getAllWindows())window.webContents.send('workflow:changed',{});});
   coordinators.setUpdater({status:()=>selfUpdater.status(),check:()=>selfUpdater.check(),request:async(a,p)=>{const result=await selfUpdater.enqueue(a,p);if(a.action==='cancel')coordinators.endUpdateWindDown();else coordinators.beginUpdateWindDown();return result;},pending:()=>selfUpdater.pending()});
   const coordinatorEntry=resolveMcpServerEntry();
