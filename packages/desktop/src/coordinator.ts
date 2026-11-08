@@ -38,6 +38,7 @@ export class CoordinatorService{
   private updater?:{status:()=>any;check:()=>Promise<any>;request:(args:any,repoPath:string)=>Promise<any>;pending:()=>boolean};
   beginUpdateWindDown(){if(!this.context)return;const w=this.current();if(!w.updateDrain){w.updateDrain={priorStatus:w.autopilot?.status??'off',at:new Date().toISOString()};if(w.autopilot)w.autopilot.status='paused';this.event(w,'update-wind-down',{});}}
   endUpdateWindDown(){if(!this.context)return;const w=this.current();if(w.updateDrain){if(w.autopilot)w.autopilot.status=w.updateDrain.priorStatus;delete w.updateDrain;this.event(w,'update-wind-down-ended',{});}}
+  private reconcileUpdateWindDown(){if(this.updater&&!this.updater.pending()&&['cancelled','failed','completed'].includes(this.updater.status()?.update?.phase))this.endUpdateWindDown();}
   async updateWorkersReady(){if(!this.context)return false;const w=this.current();this.session(w);this.save();for(const j of w.jobs){if(active(this.run(j.runId).status)||(j.reviewRunId&&active(this.run(j.reviewRunId).status)))return false;if(j.state==='checks'){const checks=await this.h()['agent-runs:checks:list']({runId:j.runId});if(checks.some(c=>j.checkIds?.includes(c.id)&&!['pass','fail'].includes(c.status)))return false;}}return true;}
   updateIdle(){return !this.polling&&!this.inFlight.size;}
   allowRequests(){this.closing=false;}
@@ -296,7 +297,7 @@ Never approve your own pairing. No provider API keys are needed.\n\nClaude Deskt
   async call(actor:string,scope:string,name:string,raw:unknown):Promise<any>{
     if(this.closing)throw Error('Workspace is closing; reconnect after opening it.');
     const args=validateCoordinatorArgs(name,raw);
-    if(name==='getCapabilities')return {version:'1.2.27',authority:'active-coordinator',guide:COORDINATOR_GUIDE,scope,tools:COORDINATOR_TOOLS.map(t=>t.name),releaseActions:['merge','draft-pr'],hosted:false};
+    if(name==='getCapabilities')return {version:'1.2.28',authority:'active-coordinator',guide:COORDINATOR_GUIDE,scope,tools:COORDINATOR_TOOLS.map(t=>t.name),releaseActions:['merge','draft-pr'],hosted:false};
     if(name==='listWorkspaces')return this.state.workspaces.filter(w=>w.id===scope).map(w=>({workspaceId:w.id,name:basename(w.path),open:this.context?.repoPath===w.path}));
     if(args.workspaceId!==scope)throw Error('This connection is not permitted for that workspace');const w=this.resolve(scope);
     if(name==='getControlCoverage')return {board:'listIssues/getIssue/createIssue/updateIssue/upsertWorkItem/addComment',workflows:'getWorkflow/previewWorkflowChange/applyWorkflowChange/undoWorkflowChange',workers:'dispatchTask/followUpRun/stopRun/manageAutopilot',decisions:'listDecisions/answerDecision; free-text user answers remain in app',evidence:'getRunResult/readRunLog/getDiffSummary/runQA',releases:'prepareRelease/getReleaseStatus/executeRelease subject to current authority',updates:'getApplicationUpdate/updateApplication after owner request',workspaces:'listWorkspaces; opening/selecting a different project remains owner UI only',pairing:'prepareExternalCoordinator for built-in; approval/revocation remain owner UI only',providers:'getCapacity read-only; credentials and provider configuration remain owner UI only',uiSettings:'UI only; no arbitrary UI automation proxy',existingChat:'proposeHostBinding/getOutboundEvents/acknowledgeWake/confirmHandoffReconciled; actual wake requires a supported installed adapter'};
@@ -388,6 +389,7 @@ Never approve your own pairing. No provider API keys are needed.\n\nClaude Deskt
     }
   }
   private async manageAutopilot(w:Workspace,a:any){
+    this.reconcileUpdateWindDown();
     if(a.action==='start'){
       if(!a.personas?.length)throw Error('Choose at least one perspective.');
       if(w.autopilot?.status==='active')throw Error('An autopilot assignment is already active. Update or pause it through your coordinator.');
@@ -487,7 +489,7 @@ Never approve your own pairing. No provider API keys are needed.\n\nClaude Deskt
     try{const result=await this.uiAction('chat-send',{body:`The user requested a coordinator change. Stop new assignments. Save a compact handoff of the objective, completed work, active workers, pending decisions and next actions. Call completeHandoff with handoffId ${h.id}. Do not merely describe the handoff: save it through the tool. Keep your reply concise.`});if(result?.dispatchError)throw Error(result.dispatchError);h.delivery='sent';h.deliveryRunId=result?.activeRun?.id??result?.latestRun?.id;this.event(w,'handoff-wrap-up-delivered',{id:h.id});}
     catch(e){h.delivery='failed';h.deliveryError=clip(e instanceof Error?e.message:'Could not deliver wrap-up');this.event(w,'handoff-wrap-up-failed',{id:h.id});}
   }
-  async tick(){if(this.polling||this.closing||this.inFlight.size||!this.context||this.updater?.pending())return;this.polling=true;try{const w=this.current();await this.deliverHandoff(w);await deliverWake(this.outbound(w),this.adapters,()=>this.save(),e=>this.wakeValid(w,e));if((this.context.store as any).cards?.listAllPending)await this.uiAction('questions-list');
+  async tick(){this.reconcileUpdateWindDown();if(this.polling||this.closing||this.inFlight.size||!this.context||this.updater?.pending())return;this.polling=true;try{const w=this.current();await this.deliverHandoff(w);await deliverWake(this.outbound(w),this.adapters,()=>this.save(),e=>this.wakeValid(w,e));if((this.context.store as any).cards?.listAllPending)await this.uiAction('questions-list');
     if(w.mode==='internal'&&w.conversationId&&(!w.handoff||w.handoff.state==='completed')){
       const message=w.chatOutbox?.find(m=>m.state==='queued');
       if(message){const chat=await this.h()['chat:get']({conversationId:w.conversationId});if(!chat.activeRun){message.state='sending';this.save();try{const result=await this.uiAction('chat-send',{body:(message.steer?'Steering update from the user. Follow this direction using existing work and evidence; do not duplicate worker assignments.\n\n':'')+message.body});if(result?.dispatchError)throw Error(result.dispatchError);message.state='sent';this.event(w,'chat-message-sent',{id:message.id});}catch(e){message.state='failed';message.error=clip(e instanceof Error?e.message:'Delivery failed');this.event(w,'chat-message-failed',{id:message.id,error:message.error});}return;}}

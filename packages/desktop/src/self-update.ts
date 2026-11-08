@@ -112,7 +112,13 @@ export class SelfUpdater {
     if(this.busy)throw Error('An update operation is already in progress.');
     if(a.action==='cancel'){
       if(this.record?.phase==='installing')throw Error('Installation has started. Wait for restart.');
-      if(this.record?.phase==='waiting'){this.record.phase='cancelled';this.save();await rm(this.record.stage,{recursive:true,force:true});}
+      if(this.record?.phase==='waiting'){
+        const cancelled=this.record;cancelled.phase='cancelled';this.save();
+        // Cancellation is authoritative even if Finder/indexing holds staged
+        // files open. Cleanup must never strand the coordinator in wind-down.
+        try{await rm(cancelled.stage,{recursive:true,force:true,maxRetries:3,retryDelay:200});}
+        catch{if(this.record===cancelled){cancelled.error='Update cancelled. Some staged installer files could not be cleaned up; existing work can resume.';this.save();}}
+      }
       return this.status();
     }
     if(process.platform!=='darwin'||!app.isPackaged)throw Error('Self-update is available in the installed macOS app.');
@@ -156,6 +162,8 @@ export class SelfUpdater {
   }
   async installWhenIdle(isIdle:()=>Promise<boolean>,checkpoint:()=>Promise<void>){
     if(this.busy||this.record?.phase!=='waiting'||!await isIdle())return;
+    // Cancellation can complete while the readiness check is awaiting workers.
+    if(this.busy||this.record?.phase!=='waiting')return;
     this.busy=true;
     try{
       await checkpoint();

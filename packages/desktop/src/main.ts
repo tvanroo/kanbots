@@ -1514,7 +1514,7 @@ if (ownsLocalInstance) void app.whenReady().then(async () => {
   coordinators=new CoordinatorService();
   await registerMacCodexCliAdapter(adapter => coordinators.registerHostAdapter(adapter));
   coordinators.setWorkflowNotifier(()=>{for(const window of BrowserWindow.getAllWindows())window.webContents.send('workflow:changed',{});});
-  coordinators.setUpdater({status:()=>selfUpdater.status(),check:()=>selfUpdater.check(),request:async(a,p)=>{const result=await selfUpdater.enqueue(a,p);if(a.action==='cancel')coordinators.endUpdateWindDown();else coordinators.beginUpdateWindDown();return result;},pending:()=>selfUpdater.pending()});
+  coordinators.setUpdater({status:()=>selfUpdater.status(),check:()=>selfUpdater.check(),request:async(a,p)=>{try{const result=await selfUpdater.enqueue(a,p);if(a.action!=='cancel')coordinators.beginUpdateWindDown();return result;}finally{if(!selfUpdater.pending()&&['cancelled','failed','completed'].includes(selfUpdater.status().update?.phase??''))coordinators.endUpdateWindDown();}},pending:()=>selfUpdater.pending()});
   const coordinatorEntry=resolveMcpServerEntry();
   if(coordinatorEntry) await coordinators.start(coordinatorEntry);
   if (process.platform === 'darwin') {
