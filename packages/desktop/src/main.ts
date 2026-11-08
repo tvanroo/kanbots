@@ -1,7 +1,7 @@
 import { configureCodexUsageSnapshot } from './codex-catalogue.js';
 import { rememberWorkspace, startupWorkspace } from './workspace-resume.js';
 import { SelfUpdater, startupSwitch } from './self-update.js';
-import { CoordinatorService } from './coordinator.js';
+import { blocksUpdate, CoordinatorService } from './coordinator.js';
 import { registerMacCodexCliAdapter } from './register-codex-cli.js';
 import { startRoutedRun as startRoutedRunUnchecked } from './automatic-routing.js';
 import { configureRoutingProviders, collectCapacity, invalidateCapacity } from './routing-capacity.js';
@@ -1548,11 +1548,11 @@ if (ownsLocalInstance) void app.whenReady().then(async () => {
   const updateTimer=setInterval(()=>void selfUpdater.installWhenIdle(async()=>{
     if(selfUpdater.pending())coordinators.beginUpdateWindDown();
     if(!activeWorkspace||!coordinators.updateIdle()||activeWorkspace.repoPath!==selfUpdater.status().update?.repoPath)return false;
-    return await coordinators.updateWorkersReady()&&!activeWorkspace.store.agentRuns.listActive().length&&!deviceChatStore?.agentRuns.listActive().length&&!activeWorkspace.autopilot.listActive().length;
+    return await coordinators.updateWorkersReady()&&!activeWorkspace.store.agentRuns.listActive().some(blocksUpdate)&&!deviceChatStore?.agentRuns.listActive().some(blocksUpdate)&&!activeWorkspace.autopilot.listActive().length;
   },async()=>{
     updateRestart=true;
     await coordinators.beforeClose();
-    if(activeWorkspace?.store.agentRuns.listActive().length||deviceChatStore?.agentRuns.listActive().length)throw Error('A new run started before restart. Let it finish and request the update again.');
+    if(activeWorkspace?.store.agentRuns.listActive().some(blocksUpdate)||deviceChatStore?.agentRuns.listActive().some(blocksUpdate))throw Error('A new run started before restart. Let it finish and request the update again.');
     await closeActiveWorkspace();
     deviceChatStore?.close();deviceChatStore=null;
     closeProvidersStoreForShutdown();

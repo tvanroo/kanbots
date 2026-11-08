@@ -18,6 +18,7 @@ import { collectCapacity } from './routing-capacity.js';
 const exec=promisify(execFile);
 const hash=(v:string)=>createHash('sha256').update(v).digest('hex');
 const pauseCheckins='Pause recurring check-ins for this KanBorg connection in your harness; leave unrelated schedules unchanged. Do not resume unless the user assigns control back. If unable, tell the user the exact schedule to pause.';
+export const blocksUpdate=(run:{status:string;pid?:number|null})=>['starting','running'].includes(run.status)||(run.status==='awaiting_input'&&run.pid!=null);
 const active=(s:string)=>['starting','running','awaiting_input'].includes(s);
 const redact=(s:string)=>s.replace(/\bsk-[A-Za-z0-9_-]{12,}/g,'[redacted]').replace(/Bearer\s+[A-Za-z0-9._-]+/gi,'Bearer [redacted]');
 const clip=(v:unknown,n=4000)=>redact(typeof v==='string'?v:JSON.stringify(v)??'').slice(0,n);
@@ -30,25 +31,46 @@ type CoordinatorRequest={id:string;kind:'discovery'|'resume-workflows'|'workflow
 type ScheduleReceipt={id?:string;status:'active'|'paused'|'unsupported';cadenceMinutes?:number;cursor?:number;confirmedAt:string};
 type ChatDraft={id:string;body:string;steer:boolean;state:'queued'|'sending'|'sent'|'failed';createdAt:string;error?:string};
 type UserQuestion={id:number;runId:number;threadId:number;question:string;options:Array<{value:string;label:string}>;state:string;reply?:string;responseRunId?:number;explanationAfter?:number};
-type Workspace={outbound?:Outbound;questions?:UserQuestion[];chatOutbox?:ChatDraft[];updateDrain?:{priorStatus:string;at:string};expediting?:boolean;autopilot?:{status:string;personas:Array<{id:string;name:string;prompt:string}>;effort:string;parallelism:number;objective:string;updatedAt:string;legacyWork:unknown[]};workflow?:WorkflowState;workflowSignals?:Record<string,string>;schedules?:Record<string,ScheduleReceipt>;requests?:CoordinatorRequest[];handoff?:Handoff;queue?:Array<{autopilot?:boolean;id:string;number:number;budgetUsd:number;qa:boolean;maxReworks:number;readOnly:boolean}>;onboardedAt?:string;inventory?:Record<string,{number:number;kind:string;evidence:string;verifiedAt:string;sourceHash?:string}>;id:string;path:string;revision:number;mode:'internal'|'external'|'off';controller:string|null;leaseUntil:number;epoch:number;conversationId?:number;objective:string;summary:string;parallelism:number;qaDefault:boolean;maxReworks:number;budgetUsd:number;dependencies:Record<string,number[]>;jobs:Job[];releases:Release[];decisions:Array<{id:string;cardId:number;value:string;question?:string;label?:string;state:string}>;events:Array<{cursor:number;at:string;type:string;data:unknown}>;nextCursor:number;snapshot?:string;receipts:Record<string,{digest:string;state:string;result?:unknown;error?:string}>};
+type Workspace={outbound?:Outbound;questions?:UserQuestion[];chatOutbox?:ChatDraft[];updateDrain?:{priorStatus:string;at:string;requestId?:string};expediting?:boolean;autopilot?:{status:string;personas:Array<{id:string;name:string;prompt:string}>;effort:string;parallelism:number;objective:string;updatedAt:string;legacyWork:unknown[]};workflow?:WorkflowState;workflowSignals?:Record<string,string>;schedules?:Record<string,ScheduleReceipt>;requests?:CoordinatorRequest[];handoff?:Handoff;queue?:Array<{autopilot?:boolean;id:string;number:number;budgetUsd:number;qa:boolean;maxReworks:number;readOnly:boolean}>;onboardedAt?:string;inventory?:Record<string,{number:number;kind:string;evidence:string;verifiedAt:string;sourceHash?:string}>;id:string;path:string;revision:number;mode:'internal'|'external'|'off';controller:string|null;leaseUntil:number;epoch:number;conversationId?:number;objective:string;summary:string;parallelism:number;qaDefault:boolean;maxReworks:number;budgetUsd:number;dependencies:Record<string,number[]>;jobs:Job[];releases:Release[];decisions:Array<{id:string;cardId:number;value:string;question?:string;label?:string;state:string}>;events:Array<{cursor:number;at:string;type:string;data:unknown}>;nextCursor:number;snapshot?:string;receipts:Record<string,{digest:string;state:string;result?:unknown;error?:string}>};
 type Registry={templates?:Record<string,{id:string;name:string;version:number;config:WorkflowConfig;updatedAt:string;actor:string}>;clients:Client[];workspaces:Workspace[]};
 export class CoordinatorService{
   private workflowNotifier?:()=>void;
   setWorkflowNotifier(fn:()=>void){this.workflowNotifier=fn;}
   private updater?:{status:()=>any;check:()=>Promise<any>;request:(args:any,repoPath:string)=>Promise<any>;pending:()=>boolean};
-  beginUpdateWindDown(){if(!this.context)return;const w=this.current();if(!w.updateDrain){w.updateDrain={priorStatus:w.autopilot?.status??'off',at:new Date().toISOString()};if(w.autopilot)w.autopilot.status='paused';this.event(w,'update-wind-down',{});}}
-  endUpdateWindDown(){if(!this.context)return;const w=this.current();if(w.updateDrain){if(w.autopilot)w.autopilot.status=w.updateDrain.priorStatus;delete w.updateDrain;this.event(w,'update-wind-down-ended',{});}}
+  beginUpdateWindDown(){
+    // Persist the pause and notice for every saved workspace before attempting delivery.
+    for(const w of this.state.workspaces){if(w.updateDrain)continue;
+      const id=`update-wind-down:${randomUUID()}`;
+      w.updateDrain={priorStatus:w.autopilot?.status??'off',at:new Date().toISOString(),requestId:id};
+      if(w.autopilot)w.autopilot.status='paused';
+      if(w.mode!=='off'){
+        w.requests??=[];w.requests.push({id,kind:'workflow-action',state:'queued',createdAt:new Date().toISOString(),prompt:'KanBorg is preparing an application update. Stop discovery, new assignments and replacement work across this workspace. Let existing workers finish their bounded step; preserve checkpoints, pending questions and exact review/release evidence. Do not answer owner decisions merely to unblock restart. Acknowledge this notice, save a compact coordination summary, and wait for the post-update resume request. Keep your existing check-in mechanism; do not create another schedule.'});
+      }
+      w.revision++;this.event(w,'update-wind-down',{});
+      if(w.mode!=='off')this.event(w,'coordinator-request',{requestId:id,kind:'workflow-action'});
+    }
+  }
+  endUpdateWindDown(){for(const w of this.state.workspaces){if(!w.updateDrain)continue;
+    if(w.autopilot)w.autopilot.status=w.updateDrain.priorStatus;
+    const request=w.requests?.find(r=>r.id===w.updateDrain?.requestId);
+    // Supersede an obsolete pause instruction so it cannot arrive after recovery.
+    if(request)request.state='completed';
+    delete w.updateDrain;w.revision++;this.event(w,'update-wind-down-ended',{});
+  }}
+  updateCoordination(){return this.state.workspaces.filter(w=>w.updateDrain).map(w=>({workspaceId:w.id,name:basename(w.path),coordinator:this.state.clients.find(c=>c.id===w.controller)?.name??(w.mode==='internal'?'KanBorg chat':'Paused'),notification:w.mode==='off'?'not-needed':w.requests?.find(r=>r.id===w.updateDrain?.requestId)?.state??'queued',open:w.path===this.context?.repoPath}));}
   private reconcileUpdateWindDown(){if(this.updater&&!this.updater.pending()&&['cancelled','failed','completed'].includes(this.updater.status()?.update?.phase))this.endUpdateWindDown();}
-  async updateWorkersReady(){if(!this.context)return false;const w=this.current();this.session(w);this.save();for(const j of w.jobs){if(active(this.run(j.runId).status)||(j.reviewRunId&&active(this.run(j.reviewRunId).status)))return false;if(j.state==='checks'){const checks=await this.h()['agent-runs:checks:list']({runId:j.runId});if(checks.some(c=>j.checkIds?.includes(c.id)&&!['pass','fail'].includes(c.status)))return false;}}return true;}
+  async updateWorkersReady(){if(!this.context)return false;const w=this.current();this.session(w);this.save();for(const j of w.jobs){if(blocksUpdate(this.run(j.runId))||(j.reviewRunId&&blocksUpdate(this.run(j.reviewRunId))))return false;if(j.state==='checks'){const checks=await this.h()['agent-runs:checks:list']({runId:j.runId});if(checks.some(c=>j.checkIds?.includes(c.id)&&!['pass','fail'].includes(c.status)))return false;}}return true;}
   updateIdle(){return !this.polling&&!this.inFlight.size;}
   allowRequests(){this.closing=false;}
   setUpdater(updater:NonNullable<CoordinatorService['updater']>){this.updater=updater;}
   async resumeAfterUpdate(version:string,updateId=version){
-    const w=this.current();this.closing=false;this.endUpdateWindDown();
+    this.closing=false;this.endUpdateWindDown();
+    let resumed:CoordinatorRequest|undefined;
+    for(const w of this.state.workspaces){
     // One durable kick per update. A restart between saving it and advancing the
     // pipelines must not create a second coordinator turn or duplicate workers.
     const id=`update-resume:${updateId}`;w.requests??=[];
-    if(w.mode==='off'){if(!w.events.some(e=>e.type==='application-updated'&&(e.data as any)?.requestId===id))this.event(w,'application-updated',{version,requestId:id,instruction:'Coordination remains paused.'});return {queued:false,reason:'Coordination is paused'};}
+    if(w.mode==='off'){if(!w.events.some(e=>e.type==='application-updated'&&(e.data as any)?.requestId===id))this.event(w,'application-updated',{version,requestId:id,instruction:'Coordination remains paused.'});continue;}
     let request=w.requests.find(r=>r.id===id);
     if(!request){
       request={id,kind:'resume-workflows',state:'queued',createdAt:new Date().toISOString(),prompt:`KanBorg ${version} has restarted after an update. Resume the current owner-authorized objective now, not just a status report. Read current coordination state, pending decisions and compact worker results. Preserve running assignments and completed evidence. Advance ready dependencies and dispatch the next authorized implementation or QA through KanBorg. Read saved worker checkpoints and remaining validation. Resume checkpointed existing runs through followUpRun only when Autopilot is On or the owner explicitly authorizes manual continuation; never redispatch the same task. Resume interrupted work from its compact handoff; investigate failed work before deciding how to continue. Do not repeat completed tests, restart intentionally paused work, answer owner-reserved decisions, or approve a release merely because the app restarted. Acknowledge this request as received before acting and completed after the eligible work is running or its real blocker is recorded. If no work remains, record that explicitly.`};
@@ -58,7 +80,9 @@ export class CoordinatorService{
     }
     // Advance existing pipelines and queued assignments immediately. External
     // coordinators pick up the durable request on their next connection/check-in.
-    await this.tick();return request;
+    resumed=request;
+    }
+    await this.tick();return resumed??{queued:false,reason:'Coordination is paused'};
   }
 
   private restoredAutopilot = new Set<string>();
@@ -95,7 +119,7 @@ export class CoordinatorService{
   async beforeClose(){if(this.context){this.session(this.current());this.save();}this.closing=true;while(this.polling||this.inFlight.size)await new Promise(r=>setTimeout(r,50));}
   hasController(){return !!this.context&&this.current().mode!=='off';}
   private current(){if(!this.context)throw Error('Open a project in KanBorg first.');return this.state.workspaces.find(w=>w.path===this.context!.repoPath)!;}
-  private resolve(id:string){const w=this.current();if(w.id!==id)throw Error('Workspace is not open. Open the selected project in KanBorg.');return w;}
+  private resolve(id:string){const w=this.state.workspaces.find(w=>w.id===id);if(!w)throw Error('Workspace not found.');return w;}
   private h(){if(!this.context)throw Error('Workspace unavailable');return this.context.handlers;}
   private run(id:number){const r=this.context!.store.agentRuns.findById(id);if(!r)throw Error('Run not found in this workspace');return r;}
   private async git(cwd:string,args:string[]){return (await exec('git',args,{cwd,timeout:30000,maxBuffer:2e6})).stdout.trim();}
@@ -111,7 +135,7 @@ export class CoordinatorService{
       ...(!compact?{instruction:'Replace this workspace reminder on takeover. Pause superseded harness reminders; do not claim completion without confirmation. No continuing responsibility means pause.'}:{})};
   }
   private session(w:Workspace){const workers=w.jobs.filter(j=>j.autopilot||w.updateDrain).flatMap(j=>[j.runId,...(j.reviewRunId?[j.reviewRunId]:[])].map(runId=>{const controlId=runId===j.runId?j.controlId:j.reviewControlId;const report=controlId?readCheckpoint(this.root,controlId):null;if(report)j.checkpoint=report;return {runId,number:j.number,active:active(this.run(runId).status),state:j.state==='interrupted'?'interrupted—recovery needed':report?.state??(active(this.run(runId).status)?w.expediting?(controlId?'requested':'waiting for worker to finish (legacy run)'):'finishing':'finished'),checkpoint:report??j.checkpoint};}));const remaining=w.jobs.filter(j=>j.autopilot&&(active(this.run(j.runId).status)||(j.reviewRunId&&active(this.run(j.reviewRunId).status)))).length;return {epoch:w.epoch,outbound:{adapterIds:[...this.adapters.keys()],bindings:this.outbound(w).bindings,events:this.outbound(w).events.slice(-50),supported:this.adapters.size>0},chatOutbox:w.chatOutbox??[],autopilot:w.autopilot?{...w.autopilot,workers,expediting:!!w.expediting,remaining,label:w.autopilot.status==='active'?'On':remaining?`Winding down · ${remaining} tasks remaining`:'Off'}:null,workflowVersion:w.workflow?.version??1,workflowContract:w.workflow?.config??newWorkflow().config,workspaceId:w.id,revision:w.revision,mode:w.mode,controller:w.controller,leaseUntil:w.leaseUntil,objective:w.objective,summary:w.summary,authority:{coordination:'assigned-controller',release:w.workflow?.config.releaseOwner==='user'?'owner decision required; tool authorization remains enforced':'assigned-controller within owner-authorized scope',pairing:'owner-only'},checkIn:this.checkinPolicy(w),parallelism:w.parallelism,qaDefault:w.qaDefault,budgetUsd:w.budgetUsd,maxReworks:w.maxReworks,conversationId:w.conversationId,onboardedAt:w.onboardedAt,handoff:w.handoff,requests:(w.requests??[]).filter(r=>r.state!=='completed')};}
-  ui(){return {workspace:this.context?this.session(this.current()):null,workspaces:this.state.workspaces.map(w=>({id:w.id,name:basename(w.path),open:w.path===this.context?.repoPath})),clients:this.state.clients.map(({tokenHash,...c})=>c),jobs:this.context?this.current().jobs:[],queue:this.context?this.current().queue??[]:[],releases:this.context?this.current().releases:[],decisions:this.context?this.current().decisions:[],guide:COORDINATOR_GUIDE,applicationUpdate:this.updater?.status()??null};}
+  ui(){return {workspace:this.context?this.session(this.current()):null,workspaces:this.state.workspaces.map(w=>({id:w.id,name:basename(w.path),open:w.path===this.context?.repoPath})),clients:this.state.clients.map(({tokenHash,...c})=>c),jobs:this.context?this.current().jobs:[],queue:this.context?this.current().queue??[]:[],releases:this.context?this.current().releases:[],decisions:this.context?this.current().decisions:[],guide:COORDINATOR_GUIDE,applicationUpdate:this.updater?{...this.updater.status(),coordination:this.updateCoordination()}:null};}
   async uiAction(action:string,args:any={}):Promise<any>{
     const w=this.current();
     if(action==='approve-binding'||action==='revoke-binding'){
@@ -122,7 +146,7 @@ export class CoordinatorService{
     if(action==='stop-wind-down-worker'){const j=w.jobs.find(j=>j.runId===args.runId||j.reviewRunId===args.runId);if(!j)throw Error('Worker not found');j.state='interrupted';j.error='Interrupted—recovery needed';this.event(w,'worker-interrupted',{runId:args.runId});await this.context!.supervisor.stop(args.runId);return this.ui();}
     if(action==='autopilot'){validateCoordinatorArgs('manageAutopilot',{workspaceId:w.id,requestId:'app-autopilot-change',revision:w.revision,...args});await this.manageAutopilot(w,args);await this.tick();return this.ui();}
     if(action.startsWith('workflow:')){const name=action.slice(9);const result=await this.workflowAction(w,name,args,'user');return result;}
-    if(action==='check-application-update'){if(!this.updater)throw Error('Updater unavailable');return this.updater.check();}
+    if(action==='check-application-update'){if(!this.updater)throw Error('Updater unavailable');return {...await this.updater.check(),coordination:this.updateCoordination()};}
     if(action==='update-application'){if(!this.updater)throw Error('Updater unavailable');return this.updater.request(args,w.path);}
     if(action==='is-coordinator-run'){const conversation=w.conversationId?this.context!.store.chatConversations.findById(w.conversationId):null;return {matches:!!conversation&&this.context!.store.agentRuns.findById(args.runId)?.threadId===conversation.threadId};}
     if(action==='resolve-chat-decision'){const chat=w.conversationId?await this.h()['chat:get']({conversationId:w.conversationId}):null;const card=chat?.cards.find(c=>c.id===args.cardId&&c.status==='pending');if(!card)throw Error('This question is no longer pending.');return this.h()['cards:resolve']({cardId:args.cardId,value:args.value});}
@@ -311,9 +335,10 @@ Never approve your own pairing. No provider API keys are needed.\n\nClaude Deskt
   async call(actor:string,scope:string,name:string,raw:unknown):Promise<any>{
     if(this.closing)throw Error('Workspace is closing; reconnect after opening it.');
     const args=validateCoordinatorArgs(name,raw);
-    if(name==='getCapabilities')return {version:'1.2.30',authority:'active-coordinator',guide:COORDINATOR_GUIDE,scope,tools:COORDINATOR_TOOLS.map(t=>t.name),releaseActions:['merge','draft-pr'],hosted:false};
+    if(name==='getCapabilities')return {version:'1.2.31',authority:'active-coordinator',guide:COORDINATOR_GUIDE,scope,tools:COORDINATOR_TOOLS.map(t=>t.name),releaseActions:['merge','draft-pr'],hosted:false};
     if(name==='listWorkspaces')return this.state.workspaces.filter(w=>w.id===scope).map(w=>({workspaceId:w.id,name:basename(w.path),open:this.context?.repoPath===w.path}));
     if(args.workspaceId!==scope)throw Error('This connection is not permitted for that workspace');const w=this.resolve(scope);
+    if(w.path!==this.context?.repoPath&&!['getChanges','waitForChanges','getCoordinatorRequests','getApplicationUpdate','acknowledgeCoordinatorRequest','renewCoordinator','getCoordinationSession'].includes(name))throw Error('Workspace is not open. Update notices remain available through getCoordinatorRequests.');
     if(name==='getControlCoverage')return {board:'listIssues/getIssue/createIssue/updateIssue/upsertWorkItem/addComment',workflows:'getWorkflow/previewWorkflowChange/applyWorkflowChange/undoWorkflowChange',workers:'dispatchTask/followUpRun/stopRun/manageAutopilot',decisions:'listDecisions/answerDecision; free-text user answers remain in app',evidence:'getRunResult/readRunLog/getDiffSummary/runQA',releases:'prepareRelease/getReleaseStatus/executeRelease subject to current authority',updates:'getApplicationUpdate/updateApplication after owner request',workspaces:'listWorkspaces; opening/selecting a different project remains owner UI only',pairing:'prepareExternalCoordinator for built-in; approval/revocation remain owner UI only',providers:'getCapacity read-only; credentials and provider configuration remain owner UI only',uiSettings:'UI only; no arbitrary UI automation proxy',existingChat:'proposeHostBinding/getOutboundEvents/acknowledgeWake/confirmHandoffReconciled; actual wake requires a supported installed adapter'};
     if(name==='getOutboundEvents')return {epoch:w.epoch,adapterIds:[...this.adapters.keys()],bindings:this.outbound(w).bindings.filter(b=>b.clientId===actor),events:this.outbound(w).events.filter(e=>e.clientId===actor).slice(-50)};
     if(name==='proposeHostBinding'){
@@ -323,7 +348,7 @@ Never approve your own pairing. No provider API keys are needed.\n\nClaude Deskt
     }
     if(name==='acknowledgeWake'){if(args.state==='acted'&&!args.summary?.trim())throw Error('Record a compact action outcome');const event=acknowledgeWake(this.outbound(w),actor,args.id,args.epoch,args.state,e=>this.wakeValid(w,e));if(args.summary)event.actionSummary=args.summary;this.save();return event;}
     if(name==='confirmHandoffReconciled'){if(w.controller!==actor||w.epoch!==args.epoch||w.handoff?.id!==args.handoffId||!w.handoff||w.handoff.state!=='completed')throw Error('Handoff authority changed');w.handoff.receivedBy=actor;this.save();return {accepted:true,epoch:w.epoch};}
-    if(name==='renewCoordinator'){if(w.controller!==actor||w.mode==='off')throw Error('Control belongs elsewhere');w.leaseUntil=Date.now()+30*60000;this.save();return this.session(w);}
+    if(name==='renewCoordinator'){if(w.controller!==actor||w.mode==='off')throw Error('Control belongs elsewhere');w.leaseUntil=Date.now()+30*60000;this.save();return w.path===this.context?.repoPath?this.session(w):{workspaceId:w.id,revision:w.revision,controller:w.controller,leaseUntil:w.leaseUntil,open:false};}
     // A former controller may confirm only its own already-recorded schedule was paused.
     // This cannot change task state, ownership, authority or another harness's schedule.
     if(name==='updateCoordinationSession'&&w.controller!==actor&&args.schedule?.status==='paused'&&args.objective===undefined&&args.summary===undefined&&w.schedules?.[actor]&&args.schedule.id===w.schedules[actor]!.id){
@@ -344,6 +369,8 @@ Never approve your own pairing. No provider API keys are needed.\n\nClaude Deskt
     const promise=(async()=>{try{const data=await this.mutate(w,name,args);const result={revision:w.revision,data};w.receipts[key]={digest,state:'done',result};this.event(w,name,{actor,requestId:args.requestId});return result;}catch(e){w.receipts[key]={digest,state:'failed',error:clip(e instanceof Error?e.message:'Action failed',1000)};this.save();throw e;}finally{this.inFlight.delete(key);}})();this.inFlight.set(key,promise);return promise;
   }
   private async read(w:Workspace,name:string,a:any):Promise<any>{
+    if(name==='getChanges'||name==='waitForChanges'){const start=Date.now();const wait=name==='waitForChanges'?(a.timeoutMs??20000):0;while(w.nextCursor-1<=(a.cursor??0)&&Date.now()-start<wait)await new Promise(r=>setTimeout(r,250));const events=w.events.filter(e=>e.cursor>(a.cursor??0)).slice(0,50);return {workflowVersion:w.workflow?.version??1,control:{controller:w.controller,mode:w.mode,leaseUntil:w.leaseUntil},handoff:w.handoff?{id:w.handoff.id,state:w.handoff.state,from:w.handoff.from,to:w.handoff.to}:null,pendingRequestIds:(w.requests??[]).filter(r=>r.state!=='completed').map(r=>r.id),checkIn:this.checkinPolicy(w,true),events,cursor:events.at(-1)?.cursor??a.cursor??0,resetRequired:(a.cursor??0)<(w.events[0]?.cursor??0)-1,revision:w.revision};}
+    if(w.path!==this.context?.repoPath){if(name==='getCoordinatorRequests')return (w.requests??[]).filter(r=>r.state!=='completed');if(name==='getApplicationUpdate')return {...await this.updater?.check(),coordination:this.updateCoordination()};if(name==='getCoordinationSession')return {workspaceId:w.id,revision:w.revision,epoch:w.epoch,mode:w.mode,controller:w.controller,open:false,requests:(w.requests??[]).filter(r=>r.state!=='completed'),updateDrain:w.updateDrain,summary:w.summary};}
     const h=this.h();
     switch(name){
       case 'getWorkflow':return this.workflowAction(w,'get',a,w.controller??'observer');
@@ -358,7 +385,7 @@ Never approve your own pairing. No provider API keys are needed.\n\nClaude Deskt
       case 'getRunResult':{const r=this.run(a.runId);const events=this.context!.store.events.list(r.id);const text=events.filter(e=>['text','result'].includes(e.type)).map(e=>clip(e.payload,3000)).slice(-3).join('\n');let sha=null;try{sha=await this.revision(r.id);}catch{}return {...this.compactRun(r.id),summary:clip(text,4000),commit:sha,qa:w.jobs.find(j=>j.runId===r.id)??null,checks:await h['agent-runs:checks:list']({runId:r.id}),evidence:{logs:{tool:'readRunLog',runId:r.id},diff:{tool:'getDiffSummary',runId:r.id}},nextAction:active(r.status)?'Wait for changes; answer pending decisions if blocked':'Review outcome and QA evidence; completion is not release approval'};}
       case 'readRunLog':{this.run(a.runId);const rows=this.context!.store.events.list(a.runId).filter(e=>e.seq>(a.offset??-1));const items=rows.slice(0,a.limit??10).map(e=>({seq:e.seq,type:e.type,content:clip(e.payload,2000)}));return {items,nextCursor:items.at(-1)?.seq??a.offset??0,hasMore:rows.length>items.length};}
       case 'getDiffSummary':{const d=await h['agent-runs:diff']({runId:a.runId});if(a.file){const f=d.files.find(f=>f.path===a.file);return {file:a.file,patch:f?.patch.slice(a.offset??0,(a.offset??0)+8000),truncated:(f?.patch.length??0)>(a.offset??0)+8000};}return {files:d.files.map(f=>({path:f.path,status:f.status}))};}
-      case 'getChanges':case 'waitForChanges':{const start=Date.now();const wait=name==='waitForChanges'?(a.timeoutMs??20000):0;while(w.nextCursor-1<=(a.cursor??0)&&Date.now()-start<wait)await new Promise(r=>setTimeout(r,250));const events=w.events.filter(e=>e.cursor>(a.cursor??0)).slice(0,50);return {workflowVersion:w.workflow?.version??1,control:{controller:w.controller,mode:w.mode,leaseUntil:w.leaseUntil},handoff:w.handoff?{id:w.handoff.id,state:w.handoff.state,from:w.handoff.from,to:w.handoff.to}:null,pendingRequestIds:(w.requests??[]).filter(r=>r.state!=='completed').map(r=>r.id),checkIn:this.checkinPolicy(w,true),events,cursor:events.at(-1)?.cursor??a.cursor??0,resetRequired:(a.cursor??0)<(w.events[0]?.cursor??0)-1,revision:w.revision};}
+
       case 'getCapacity':return (await collectCapacity()).snapshot;
       case 'listDecisions':return {pending:await h['decisions:pending'](),proposed:w.decisions.filter(d=>d.state==='pending'),authority:'Active coordinator answers directly with answerDecision'};
       case 'getReleaseStatus':return w.releases;
@@ -366,6 +393,7 @@ Never approve your own pairing. No provider API keys are needed.\n\nClaude Deskt
     }
   }
   private async mutate(w:Workspace,name:string,a:any):Promise<any>{
+    if(name==='acknowledgeCoordinatorRequest'){const r=w.requests?.find(r=>r.id===a.id);if(!r)throw Error('Request not found.');if(r.state!=='completed'){r.state=a.state;r.receivedBy=w.controller!;}return r;}
     const h=this.h();
     switch(name){
       case 'recordWorkflowEvent':if(!a.evidence.trim())throw Error('Record the exact revision and supporting evidence.');await this.workflowSignal(w,a.number,a.event,a.evidence,a.requestId);return workflowGuidance(w.workflow!,a.number);
@@ -503,7 +531,12 @@ Never approve your own pairing. No provider API keys are needed.\n\nClaude Deskt
     try{const result=await this.uiAction('chat-send',{body:`The user requested a coordinator change. Stop new assignments. Save a compact handoff of the objective, completed work, active workers, pending decisions and next actions. Call completeHandoff with handoffId ${h.id}. Do not merely describe the handoff: save it through the tool. Keep your reply concise.`});if(result?.dispatchError)throw Error(result.dispatchError);h.delivery='sent';h.deliveryRunId=result?.activeRun?.id??result?.latestRun?.id;this.event(w,'handoff-wrap-up-delivered',{id:h.id});}
     catch(e){h.delivery='failed';h.deliveryError=clip(e instanceof Error?e.message:'Could not deliver wrap-up');this.event(w,'handoff-wrap-up-failed',{id:h.id});}
   }
-  async tick(){this.reconcileUpdateWindDown();if(this.polling||this.closing||this.inFlight.size||!this.context||this.updater?.pending())return;this.polling=true;try{const w=this.current();await this.deliverHandoff(w);await deliverWake(this.outbound(w),this.adapters,()=>this.save(),e=>this.wakeValid(w,e));if((this.context.store as any).cards?.listAllPending)await this.uiAction('questions-list');
+  async tick(){this.reconcileUpdateWindDown();if(this.polling||this.closing||this.inFlight.size||!this.context)return;this.polling=true;try{if(this.updater?.pending()){
+      for(const workspace of this.state.workspaces)await deliverWake(this.outbound(workspace),this.adapters,()=>this.save(),e=>this.wakeValid(workspace,e));
+      const workspace=this.current();const notice=workspace.requests?.find(r=>r.id===workspace.updateDrain?.requestId&&r.state==='queued'&&!r.error);
+      if(workspace.mode==='internal'&&workspace.conversationId&&notice){const chat=await this.h()['chat:get']({conversationId:workspace.conversationId});if(!chat.activeRun){notice.state='received';notice.receivedBy=workspace.controller!;this.save();try{const result=await this.uiAction('chat-send',{body:notice.prompt});if(result?.dispatchError)throw Error(result.dispatchError);}catch(e){notice.state='queued';delete notice.receivedBy;notice.error=clip(e instanceof Error?e.message:'Update notice delivery failed');this.save();}}}
+      return;
+    }const w=this.current();await this.deliverHandoff(w);await deliverWake(this.outbound(w),this.adapters,()=>this.save(),e=>this.wakeValid(w,e));if((this.context.store as any).cards?.listAllPending)await this.uiAction('questions-list');
     if(w.mode==='internal'&&w.conversationId&&(!w.handoff||w.handoff.state==='completed')){
       const message=w.chatOutbox?.find(m=>m.state==='queued');
       if(message){const chat=await this.h()['chat:get']({conversationId:w.conversationId});if(!chat.activeRun){message.state='sending';this.save();try{const result=await this.uiAction('chat-send',{body:(message.steer?'Steering update from the user. Follow this direction using existing work and evidence; do not duplicate worker assignments.\n\n':'')+message.body});if(result?.dispatchError)throw Error(result.dispatchError);message.state='sent';this.event(w,'chat-message-sent',{id:message.id});}catch(e){message.state='failed';message.error=clip(e instanceof Error?e.message:'Delivery failed');this.event(w,'chat-message-failed',{id:message.id,error:message.error});}return;}}
