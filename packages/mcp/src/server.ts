@@ -74,7 +74,7 @@ async function callBridge(name: string, args: unknown): Promise<unknown> {
 }
 
 const server = new Server(
-  { name: 'kanborg', version: '1.2.28' },
+  { name: 'kanborg', version: '1.2.29' },
   { capabilities: { tools: {} }, ...(coordinated?{instructions:COORDINATOR_GUIDE}:{}) },
 );
 

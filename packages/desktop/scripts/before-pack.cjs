@@ -8,6 +8,13 @@ const PLATFORM_NAMES = { darwin: 'darwin', linux: 'linux', win32: 'win32', mas: 
 module.exports = async function beforePack(context) {
   const archName = ARCH_NAMES[context.arch];
   const platformName = PLATFORM_NAMES[context.electronPlatformName];
+  if (platformName === 'darwin') {
+    const env = process.env;
+    const authorized = env.APPLE_KEYCHAIN_PROFILE ||
+      (env.APPLE_API_KEY && env.APPLE_API_KEY_ID && env.APPLE_API_ISSUER) ||
+      (env.APPLE_ID && env.APPLE_APP_SPECIFIC_PASSWORD && env.APPLE_TEAM_ID);
+    if (!authorized) throw new Error('Apple notarization authorization is required. Configure the approved credential source before packaging; an unnotarized release will not be produced.');
+  }
 
   if (!archName || !platformName) {
     throw new Error(
