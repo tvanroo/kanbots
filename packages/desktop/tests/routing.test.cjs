@@ -11,7 +11,7 @@ const now=Date.parse('2026-11-05T20:00:00Z');
 function resetDetails(hours=24,used=100,natural=48){return {accountIdentity:'account',subscriptionUsage:{checkedAt:new Date(now).toISOString(),windows:[{usedPercent:used,resetsAt:now/1000+natural*3600}],resetCredits:{availableCount:1,credits:[{id:'reset1',expiresAt:now/1000+hours*3600,status:'available',resetType:'codexRateLimits'}]}}};}
 test('reset policy saves offers near natural reset but redeems before expiry without work',()=>{
  assert.equal(resetToRedeem(resetDetails(24,100,2),true,now),null);
- assert.equal(resetToRedeem(resetDetails(24,95,48),true,now),'reset1');
+ assert.equal(resetToRedeem(resetDetails(24,95,48),true,now),null);
  assert.equal(resetToRedeem(resetDetails(.25,10,2),false,now),'reset1');
  assert.equal(resetToRedeem(resetDetails(-1),true,now),null);
  assert.equal(resetToRedeem(resetDetails(),false,now),null);
@@ -129,4 +129,35 @@ test('failed key refresh preserves verified account identity and explicit balanc
   await api.saveApiConnection({...api.listApiConnections()[0],confirmBalance:true});
   const saved=api.listApiConnections()[0];assert.equal(saved.remaining,200);assert.ok(Date.parse(saved.balanceUpdatedAt)>0);assert.equal(saved.confirmBalance,undefined);
  }finally{global.fetch=oldFetch;fs.rmSync(dir,{recursive:true,force:true});}
+});
+
+test('long-lived and unknown-expiry reset credits stay reserved even with work and exhausted quota',()=>{
+ for(const used of [95,100])for(const hours of [24,21*24])assert.equal(resetToRedeem(resetDetails(hours,used,7*24),true,now),null);
+ const unknown=resetDetails();unknown.subscriptionUsage.resetCredits.credits[0].expiresAt=null;assert.equal(resetToRedeem(unknown,true,now),null);
+ for(const checkedAt of ['invalid',new Date(now-61000).toISOString(),new Date(now+1000).toISOString()]){const d=resetDetails(.25);d.subscriptionUsage.checkedAt=checkedAt;assert.equal(resetToRedeem(d,true,now),null);}
+ assert.equal(resetToRedeem(resetDetails(.5,0,1),false,now),'reset1');
+ assert.equal(resetToRedeem(resetDetails(.51,100,168),true,now),null);
+});
+test('capacity refresh with pending work does not redeem a long-lived reset',async()=>{
+ let redemptions=0;
+ const service=load('subscription-resets',{
+  electron:{Notification:{isSupported:()=>false},shell:{}},
+  './codex-catalogue.js':{getCodexDetails:async args=>{if(args)redemptions++;const d=resetDetails(21*24,100,168);const shift=Date.now()-now;d.subscriptionUsage.checkedAt=new Date().toISOString();d.subscriptionUsage.resetCredits.credits[0].expiresAt+=shift/1000;return d;}},
+  './reset-policy.js':{resetToRedeem},
+  './routing-state.js':{readRouting:()=>({config:{enabled:true,autoResets:true},redemptions:{}}),writeRouting:()=>{throw Error('No redemption should be recorded');}},
+ });
+ await service.manageCodexResets(true);assert.equal(redemptions,0);
+});
+test('renewable Claude CLI subscription can recover without presenting stale quota as current',async()=>{
+ for(const hasKey of [true,false]){
+ const service=load('routing-capacity',{
+ './grant-capacity.js':load('grant-capacity',{'./grant-estimate.js':load('grant-estimate')}),
+ '@kanborg/api':{readClaudeSubscriptionUsage:async()=>({source:'unauthorized',stale:true,checkedAt:new Date(Date.now()-86400000).toISOString(),windows:[{pct:.06,label:'Weekly',resetsAt:null}]})},
+ './api-connections.js':{listApiConnections:()=>[]},'./anthropic-reporting.js':{getAnthropicReportingAccounts:()=>[]},
+ './claude-auth.js':{getClaudeDetails:async()=>({hasKey,cliAvailable:true,authenticationLabel:'Claude subscription'})},
+ './subscription-resets.js':{manageCodexResets:async()=>null},
+ './routing-state.js':{readRouting:()=>({config:{}}),routingState:()=>({}),charged:()=>0},
+ './routing-models.js':{modelCatalogue:async()=>({}),selectApiModel:()=>null},
+ });service.configureRoutingProviders(()=>[{id:'claude-code',enabled:true}]);const r=await service.collectCapacity();assert.equal(r.candidates.some(c=>c.id==='claude-sub'),hasKey);assert.equal(r.snapshot.rows[0].stale,true);if(hasKey)assert.match(r.snapshot.rows[0].detail,/renewal is pending/);
+ }
 });

@@ -1032,13 +1032,13 @@ function registerIpc(): void {
   setInterval(() => { notifyClaudeReset(); void collectCapacity().catch(()=>{}); if(getAppStore().providers.get('codex-cli')?.enabled) void manageCodexResets(false).catch(()=>{}); }, 60000).unref();
   ipcMain.handle('kanbots:claude-subscription-usage', () => readClaudeSubscriptionUsage());
   ipcMain.handle('kanbots:claude-auth-status', async (): Promise<{ authed: boolean }> => {
-    return { authed: await isClaudeAuthenticated() };
+    return { authed: await isClaudeAuthenticated(true) };
   });
 
   ipcMain.handle(
     'kanbots:claude-login-start',
     async (_event, installIfMissing?: boolean): Promise<{ ok: true } | { ok: false; error: string }> => {
-      return startClaudeLogin(installIfMissing === true);
+      return startClaudeLogin(true);
     },
   );
 

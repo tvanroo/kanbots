@@ -1,3 +1,4 @@
+import { getClaudeDetails } from './claude-auth.js';
 import { grantCapacity, grantFunding } from './grant-capacity.js';
 import type { ApiConnection,CapacitySnapshot,CapacityRow } from '@kanborg/api';
 import { readClaudeSubscriptionUsage } from '@kanborg/api';
@@ -41,12 +42,16 @@ async function load(hasWork:boolean){
     const windows=quota?.windows??[];
     const fresh=quota?.source==='oauth'&&!quota.stale&&!!quota.checkedAt&&now-Date.parse(quota.checkedAt)>=0&&now-Date.parse(quota.checkedAt)<=6*60000&&windows.every(w=>!w.resetsAt||Date.parse(w.resetsAt)>now);
     const used=windows.length?Math.max(...windows.map(w=>w.pct*100)):null;
-    const usable=fresh&&used!==null&&used<95;
+    const cli = !fresh && quota?.source==='unauthorized' ? await getClaudeDetails().catch(()=>null) : null;
+    // A renewable access token is not a revoked CLI login. Let Claude Code own
+    // renewal on the next authorized run; never label the old quota as fresh.
+    const renewable=cli?.cliAvailable===true&&cli.hasKey&&cli.authenticationLabel==='Claude subscription'&&used!==null&&used<95;
+    const usable=(fresh&&used!==null&&used<95)||renewable;
     if(state.config.claudeResetExpiresAt)rows.push({id:'claude-reset',label:'Claude reset offer',kind:'unknown',usedPercent:null,remaining:null,spent:null,available:false,detail:`Manually tracked · ${Date.parse(state.config.claudeResetExpiresAt)>now?'expires':'expired'} ${new Date(state.config.claudeResetExpiresAt).toLocaleString()} · redeem in Claude Usage`});
     const resetSoon=state.config.claudeResetExpiresAt&&Date.parse(state.config.claudeResetExpiresAt)>now&&Date.parse(state.config.claudeResetExpiresAt)-now<48*3600000;
-    rows.push({id:'claude-sub',label:'Claude subscription',kind:'subscription',needsAttention:quota?.source==='unauthorized',stale:!fresh&&used!==null,usedPercent:used,remaining:used!==null?100-used:null,spent:null,available:!!usable,detail:!fresh?`${used!==null?'Last reported quota · ':''}${quota?.message??'Quota unavailable; retrying automatically.'}${quota?.checkedAt?` Last successful reading ${new Date(quota.checkedAt).toLocaleString()}.`:''}${quota?.retryAt?` Next check ${new Date(quota.retryAt).toLocaleTimeString()}.`:''}`:windows.map(w=>`${w.label}: ${Math.round(w.pct*100)}% used${w.resetsAt?` · resets ${new Date(w.resetsAt).toLocaleString()}`:''}`).join('; ')});
+    rows.push({id:'claude-sub',label:'Claude subscription',kind:'subscription',needsAttention:quota?.source==='unauthorized'&&!renewable,stale:!fresh&&used!==null,usedPercent:used,remaining:used!==null?100-used:null,spent:null,available:!!usable,detail:!fresh?`${used!==null?'Last reported quota · ':''}${renewable?'Claude Code is signed in; usage-token renewal is pending. The next eligible subscription run will let the CLI renew it.':quota?.message??'Quota unavailable; retrying automatically.'}${quota?.checkedAt?` Last successful reading ${new Date(quota.checkedAt).toLocaleString()}.`:''}${quota?.retryAt?` Next check ${new Date(quota.retryAt).toLocaleTimeString()}.`:''}`:windows.map(w=>`${w.label}: ${Math.round(w.pct*100)}% used${w.resetsAt?` · resets ${new Date(w.resetsAt).toLocaleString()}`:''}`).join('; ')});
     const resetHours=Math.min(...windows.filter(w=>w.resetsAt&&Date.parse(w.resetsAt)>now).map(w=>(Date.parse(w.resetsAt!)-now)/3600000));
-    if(usable)candidates.push({id:'claude-sub',provider:'claude-code',kind:'subscription',score:resetSoon?280:resetHours<24?270-resetHours:180-(used??0)/10,reason:resetSoon?'Use included capacity before the tracked Claude reset expires':resetHours<24?'Use subscription quota before its approaching reset':'Available Claude subscription quota'});
+    if(usable)candidates.push({id:'claude-sub',provider:'claude-code',kind:'subscription',score:renewable?100:resetSoon?280:resetHours<24?270-resetHours:180-(used??0)/10,reason:renewable?'Authenticated Claude subscription; CLI-managed renewal pending (quota is last known)':resetSoon?'Use included capacity before the tracked Claude reset expires':resetHours<24?'Use subscription quota before its approaching reset':'Available Claude subscription quota'});
   }
   if(enabled.has('codex-cli')){
     const usage=codex?.subscriptionUsage;

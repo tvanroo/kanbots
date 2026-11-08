@@ -649,7 +649,7 @@ function ProviderSection({ spec, config, onChanged }: SectionProps) {
         )}
       </div>
 
-      {!config.hasKey ? (
+      {(!config.hasKey || spec.id === 'claude-code') ? (
         <div className="kb-provider-actions">
           <button
             type="button"
@@ -657,7 +657,7 @@ function ProviderSection({ spec, config, onChanged }: SectionProps) {
             onClick={() => void handleSignIn()}
             disabled={loginState.kind === 'running'}
           >
-            {loginState.kind === 'running' ? (config.cliAvailable === false ? 'Installing, then opening sign-in…' : 'Waiting for browser…') : spec.id === 'claude-code' && config.cliAvailable === false ? 'Install Claude Code & sign in' : spec.signInLabel}
+            {loginState.kind === 'running' ? (config.cliAvailable === false ? 'Installing, then opening sign-in…' : 'Waiting for browser…') : spec.id === 'claude-code' && config.cliAvailable === false ? 'Install Claude Code & sign in' : spec.id === 'claude-code' && config.hasKey ? 'Reconnect Claude subscription' : spec.signInLabel}
           </button>
           {loginState.kind === 'running' ? (
             <button type="button" className="kb-btn ghost" onClick={handleCancelSignIn}>

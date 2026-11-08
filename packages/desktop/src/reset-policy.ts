@@ -1,12 +1,14 @@
 import type { CodexDetails } from './codex-catalogue.js';
-/** Redeem expiring credits even without queued work. Otherwise protect imminent natural resets. */
-export function resetToRedeem(details: CodexDetails, hasWork: boolean, now=Date.now()): string | null {
+/** Preserve reserve credits. Automatic redemption is only an expiry rescue, never a response to local demand. */
+export function resetToRedeem(details: CodexDetails, _hasWork: boolean, now=Date.now()): string | null {
   const usage=details.subscriptionUsage;
-  if(!details.accountIdentity||!usage||now-Date.parse(usage.checkedAt)>60000)return null;
+  if(!details.accountIdentity||!usage)return null;
+  const age=now-Date.parse(usage.checkedAt);
+  if(!Number.isFinite(age)||age<0||age>60000)return null;
   const credits=[...(usage.resetCredits?.credits??[])].filter(c=>c.status==='available' && c.resetType==='codexRateLimits' && (c.expiresAt===null||c.expiresAt*1000>now)).sort((a,b)=>(a.expiresAt??Infinity)-(b.expiresAt??Infinity));
   const expiring=credits.find(c=>c.expiresAt!==null&&c.expiresAt*1000-now<=30*60000);
   if(expiring)return expiring.id;
-  const depleted=usage.windows.filter(w=>w.usedPercent>=95);
-  if(hasWork && depleted.length && depleted.every(w=>w.resetsAt!==null&&w.resetsAt*1000-now>6*3600000))return credits[0]?.id??null;
+  // No automatic early spending: depletion of one provider says nothing about
+  // usable capacity elsewhere. Unknown/unreachable alternatives are not exhaustion.
   return null;
 }

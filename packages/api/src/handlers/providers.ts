@@ -175,10 +175,12 @@ export async function testConnection(
   const authCheck = id === 'claude-code'
     ? deps.providers.hasClaudeCodeCredentials
     : id === 'codex-cli' ? deps.providers.hasCodexCredentials : undefined;
+  const claudeDetails = id === 'claude-code' ? await deps.providers.getClaudeDetails?.() : undefined;
+  const authError = claudeDetails?.cliAvailable === false ? 'Claude Code is not installed. Use Reconnect to install it automatically and sign in.' : id === 'claude-code' ? 'Claude authorization needs attention. Use Reconnect to repair sign-in; Claude Code installation is checked separately.' : 'Codex authorization needs attention. Check authorization or sign in again.';
   const result = authCheck
     ? (await authCheck()
         ? { ok: true, models: undefined }
-        : { ok: false, error: 'CLI unavailable or signed out. Install the CLI and sign in, then retry.', models: undefined })
+        : { ok: false, error: authError, models: undefined })
     : await validateProvider(id, creds);
   deps.store.providers.update(id, {
     lastValidatedAt: new Date().toISOString(),

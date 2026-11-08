@@ -1,25 +1,37 @@
 import { claudeSignInNeedsRefresh } from '@kanborg/api';
 import { execFile, spawn, type ChildProcess } from 'node:child_process';
+import { accessSync, constants } from 'node:fs';
+import { homedir } from 'node:os';
+import { join, delimiter } from 'node:path';
+
+export function claudeExecutable(): string {
+  for(const directory of [...(process.env.PATH??'').split(delimiter),join(homedir(),'.local/bin'),'/opt/homebrew/bin','/usr/local/bin']){
+    if(!directory)continue;const candidate=join(directory,'claude');
+    try{accessSync(candidate,constants.X_OK);return candidate;}catch{}
+  }
+  return 'claude';
+}
+
 
 let login: ChildProcess | undefined;
 
 export function getClaudeDetails(): Promise<{ hasKey: boolean; authenticationLabel: string; cliAvailable: boolean }> {
   return new Promise((resolve) => {
-    execFile('claude', ['auth', 'status', '--json'], { timeout: 5000 }, (error, stdout) => {
+    execFile(claudeExecutable(), ['auth', 'status', '--json'], { timeout: 15000 }, (error, stdout) => {
       try {
         if (error && !stdout.trim()) throw error;
         const status = JSON.parse(stdout);
-        resolve({ cliAvailable: true, hasKey: status.loggedIn === true, authenticationLabel: status.loggedIn !== true ? 'Sign in to your Claude subscription' : status.authMethod === 'claude.ai'
+        resolve({ cliAvailable: true, hasKey: status.loggedIn === true && (!status.loginExpiresAt || Date.parse(status.loginExpiresAt)>Date.now()), authenticationLabel: status.loggedIn !== true ? 'Sign in to your Claude subscription' : status.authMethod === 'claude.ai'
           ? 'Claude subscription' : status.authMethod === 'api_key' ? 'Anthropic API billing' : 'Claude authentication detected — billing method unconfirmed' });
       } catch { const missing = (error as NodeJS.ErrnoException | null)?.code === 'ENOENT'; resolve({ hasKey: false, cliAvailable: !missing, authenticationLabel: missing ? 'Claude Code needs to be installed' : 'Claude sign-in could not be checked. Try signing in again.' }); }
     });
   });
 }
-export async function isClaudeAuthenticated(): Promise<boolean> {
-  return (await getClaudeDetails()).hasKey && !await claudeSignInNeedsRefresh();
+export async function isClaudeAuthenticated(requireFreshUsageToken=false): Promise<boolean> {
+  return (await getClaudeDetails()).hasKey && (!requireFreshUsageToken || !await claudeSignInNeedsRefresh());
 }
 
-export async function startClaudeLogin(installIfMissing = false): Promise<{ ok: true } | { ok: false; error: string }> {
+export async function startClaudeLogin(installIfMissing = true): Promise<{ ok: true } | { ok: false; error: string }> {
   if (await isClaudeAuthenticated() && !await claudeSignInNeedsRefresh()) return { ok: true };
   cancelClaudeLogin();
   if (!(await getClaudeDetails()).cliAvailable) {
@@ -36,9 +48,9 @@ export async function startClaudeLogin(installIfMissing = false): Promise<{ ok: 
     if (!installed) return { ok: false, error: 'Claude Code installation did not finish. Check your internet connection and try again.' };
   }
   return new Promise((resolve) => {
-    const child = spawn('claude', ['auth', 'login', '--claudeai'], { stdio: 'ignore' });
+    const child = spawn(claudeExecutable(), ['auth', 'login', '--claudeai'], { stdio: 'ignore' });
     login = child;
-    const timer = setTimeout(() => child.kill(), 5 * 60 * 1000);
+    const timer = setTimeout(() => child.kill(), 15 * 60 * 1000);
     child.once('error', () => {
       clearTimeout(timer);
       if (login === child) login = undefined;
