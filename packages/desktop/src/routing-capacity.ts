@@ -1,9 +1,8 @@
-import { grantCapacity } from './grant-capacity.js';
+import { grantCapacity, grantFunding } from './grant-capacity.js';
 import type { ApiConnection,CapacitySnapshot,CapacityRow } from '@kanborg/api';
 import { readClaudeSubscriptionUsage } from '@kanborg/api';
 import { listApiConnections } from './api-connections.js';
 import { getAnthropicReportingAccounts,updateAnthropicReporting } from './anthropic-reporting.js';
-import { getClaudeDetails } from './claude-auth.js';
 import { manageCodexResets } from './subscription-resets.js';
 import { readRouting,routingState,charged } from './routing-state.js';
 import { modelCatalogue,selectApiModel,type PricedModel } from './routing-models.js';
@@ -13,27 +12,36 @@ export function configureRoutingProviders(fn:typeof configuration){configuration
 const reportingAttempts = new Map<string, number>();
 let cached:{at:number;snapshot:CapacitySnapshot;candidates:Candidate[]}|undefined;
 let pending:Promise<{snapshot:CapacitySnapshot;candidates:Candidate[]}>|undefined;
-export function invalidateCapacity(){cached=undefined;}
+let revision=0;
+let settingsKey='';
+export function invalidateCapacity(){revision++;cached=undefined;}
 export async function collectCapacity(hasWork=false,force=false):Promise<{snapshot:CapacitySnapshot;candidates:Candidate[]}>{
+  const nextKey=JSON.stringify([configuration(),listApiConnections(),readRouting().config]);
+  if(nextKey!==settingsKey){settingsKey=nextKey;invalidateCapacity();}
   if(!force&&cached&&Date.now()-cached.at<60000)return cached;
-  if(pending)return pending;
-  pending=load(hasWork).then(value=>{cached={...value,at:Date.now()};return value;}).finally(()=>{pending=undefined;});return pending;
+  if(pending){const value=await pending;if(cached)return value;return collectCapacity(hasWork,force);}
+  const started=revision;
+  pending=load(hasWork).then(value=>{if(started===revision)cached={...value,at:Date.now()};return value;}).finally(()=>{pending=undefined;});
+  const value=await pending;
+  return started===revision?value:collectCapacity(hasWork,force);
 }
 async function load(hasWork:boolean){
-  const now=Date.now();const enabled=new Set(configuration().filter(p=>p.enabled).map(p=>p.id));
-  const [claude,quota,codex,catalogue]=await Promise.all([
-    enabled.has('claude-code')?getClaudeDetails().catch(()=>null):null,
+  let now=Date.now();const enabled=new Set(configuration().filter(p=>p.enabled).map(p=>p.id));
+  // A successful OAuth quota response already verifies subscription access.
+  // Do not launch short-lived CLI auth commands on every monitoring tick.
+  const [quota,codex,catalogue]=await Promise.all([
     enabled.has('claude-code')?readClaudeSubscriptionUsage().catch(()=>null):null,
     enabled.has('codex-cli')?manageCodexResets(hasWork).catch(()=>null):null,
     modelCatalogue().catch(()=>[]),
   ]);
+  now=Date.now();
   const rows:CapacityRow[]=[];const candidates:Candidate[]=[];
   const state=readRouting();
   if(enabled.has('claude-code')){
     const windows=quota?.windows??[];
-    const fresh=quota?.source==='oauth'&&!quota.stale&&!!quota.checkedAt&&now-Date.parse(quota.checkedAt)<=6*60000;
+    const fresh=quota?.source==='oauth'&&!quota.stale&&!!quota.checkedAt&&now-Date.parse(quota.checkedAt)>=0&&now-Date.parse(quota.checkedAt)<=6*60000&&windows.every(w=>!w.resetsAt||Date.parse(w.resetsAt)>now);
     const used=windows.length?Math.max(...windows.map(w=>w.pct*100)):null;
-    const usable=claude?.authenticationLabel==='Claude subscription'&&fresh&&used!==null&&used<95;
+    const usable=fresh&&used!==null&&used<95;
     if(state.config.claudeResetExpiresAt)rows.push({id:'claude-reset',label:'Claude reset offer',kind:'unknown',usedPercent:null,remaining:null,spent:null,available:false,detail:`Manually tracked · ${Date.parse(state.config.claudeResetExpiresAt)>now?'expires':'expired'} ${new Date(state.config.claudeResetExpiresAt).toLocaleString()} · redeem in Claude Usage`});
     const resetSoon=state.config.claudeResetExpiresAt&&Date.parse(state.config.claudeResetExpiresAt)>now&&Date.parse(state.config.claudeResetExpiresAt)-now<48*3600000;
     rows.push({id:'claude-sub',label:'Claude subscription',kind:'subscription',needsAttention:quota?.source==='unauthorized',stale:!fresh&&used!==null,usedPercent:used,remaining:used!==null?100-used:null,spent:null,available:!!usable,detail:!fresh?`${used!==null?'Last reported quota · ':''}${quota?.message??'Quota unavailable; retrying automatically.'}${quota?.checkedAt?` Last successful reading ${new Date(quota.checkedAt).toLocaleString()}.`:''}${quota?.retryAt?` Next check ${new Date(quota.retryAt).toLocaleTimeString()}.`:''}`:windows.map(w=>`${w.label}: ${Math.round(w.pct*100)}% used${w.resetsAt?` · resets ${new Date(w.resetsAt).toLocaleString()}`:''}`).join('; ')});
@@ -43,7 +51,7 @@ async function load(hasWork:boolean){
   if(enabled.has('codex-cli')){
     const usage=codex?.subscriptionUsage;
     const used=usage?.windows.length?Math.max(...usage.windows.map(w=>w.usedPercent)):null;
-    const fresh=!!usage?.checkedAt && now-Date.parse(usage.checkedAt)<=6*60000 && !codex?.subscriptionUsageError;
+    const fresh=!!usage?.checkedAt && now-Date.parse(usage.checkedAt)>=0&&now-Date.parse(usage.checkedAt)<=6*60000 && !codex?.subscriptionUsageError && usage.windows.every(w=>!w.resetsAt||w.resetsAt*1000>now);
     const usable=fresh&&codex?.authenticationLabel==='ChatGPT subscription'&&usage?.ordinaryUsageAllowed!==false&&used!==null&&used<95;
     const resetSoon=usage?.resetCredits?.credits.some(c=>c.expiresAt!==null&&c.expiresAt*1000>now&&c.expiresAt*1000-now<48*3600000);
     rows.push({id:'codex-sub',label:'ChatGPT subscription',kind:'subscription',stale:!fresh&&used!==null,usedPercent:used,remaining:used===null?null:100-used,spent:null,available:!!usable,detail:usage?`${!fresh?'Last reported quota · ':''}${codex?.subscriptionUsageError??''} ${usage.resetCredits?.availableCount??0} reset credits reported. `+usage.windows.map(w=>`${w.name}: ${Math.round(w.usedPercent)}% used${w.resetsAt?` · resets ${new Date(w.resetsAt*1000).toLocaleString()}`:''}`).join('; '):'Quota unavailable'});
@@ -55,6 +63,7 @@ async function load(hasWork:boolean){
   const refresh=reports.filter(a=>listApiConnections().some(k=>k.organizationId===a.organizationId&&k.grantBillingDay)&&(a.report.connected||a.report.eligibility==='supported'||!!a.report.attemptedAt||a.report.eligibility==='denied')&&(!a.report.retryAt||Date.parse(a.report.retryAt)<=now)&&now-(reportingAttempts.get(a.organizationId)??0)>15*60000&&(!a.report.checkedAt||now-Date.parse(a.report.checkedAt)>15*60000));
   await Promise.all(refresh.map(async a=>{reportingAttempts.set(a.organizationId,now);try{await updateAnthropicReporting('refresh',false,a.organizationId);}catch{/* Keep other accounts available if one reporting service fails. */}}));
   if(refresh.length)reports=getAnthropicReportingAccounts();
+  now=Date.now();
   const month=new Date();month.setUTCDate(1);month.setUTCHours(0,0,0,0);
   const displayed=new Set<string>();
   for(const row of listApiConnections().filter(r=>r.enabled)){
@@ -64,8 +73,7 @@ async function load(hasWork:boolean){
     const grant=!['paid','unknown'].includes(row.funding);
     const {amount,since,useBy,usable:balanceUsable,detail:balanceDetail}=grantCapacity(row,estimate,now);
     const remaining=amount===null?null:Math.max(0,amount-charged(pool,since));
-    const eligibleGrant=grant&&balanceUsable&&remaining!==null&&remaining>0.05&&now<useBy;
-    const paid=!grant||(!eligibleGrant&&row.afterGrant==='paygo');
+    const {eligibleGrant,paid}=grantFunding(grant,balanceUsable,remaining,useBy,now,row.afterGrant);
     const inactive=row.expired||!!(row.keyExpiresAt&&Date.parse(row.keyExpiresAt)<=now);
     const available=!inactive&&!!model&&(eligibleGrant||paid);
     const spend=charged(pool,month.getTime());

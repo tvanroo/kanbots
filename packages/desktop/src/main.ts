@@ -1027,7 +1027,7 @@ function registerIpc(): void {
   ipcMain.handle('kanbots:coordinator-action', (_event, action, args) => coordinators.uiAction(action,args));
   ipcMain.handle('kanbots:routing-state', () => routingState());
   ipcMain.handle('kanbots:routing-save', (_event, config) => { const state=saveRouting(config); invalidateCapacity(); return state; });
-  ipcMain.handle('kanbots:capacity', async () => (await collectCapacity()).snapshot);
+  ipcMain.handle('kanbots:capacity', async (_event, refresh?: boolean) => (await collectCapacity(false, refresh === true)).snapshot);
   setInterval(() => { notifyClaudeReset(); void collectCapacity().catch(()=>{}); if(getAppStore().providers.get('codex-cli')?.enabled) void manageCodexResets(false).catch(()=>{}); }, 60000).unref();
   ipcMain.handle('kanbots:claude-subscription-usage', () => readClaudeSubscriptionUsage());
   ipcMain.handle('kanbots:claude-auth-status', async (): Promise<{ authed: boolean }> => {

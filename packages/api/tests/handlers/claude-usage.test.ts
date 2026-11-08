@@ -88,3 +88,21 @@ it('credential changes cannot bypass a provider rate-limit cooldown', async () =
   const result=await api.readClaudeSubscriptionUsage();
   expect(fetch).toHaveBeenCalledTimes(1);expect(result.retryAt).toBeDefined();expect(result.sevenDay).toBeNull();
 });
+
+it('a late response from the previous sign-in cannot replace the new snapshot', async () => {
+  let finishFirst!: (value: Response) => void;
+  const fetch=vi.fn().mockImplementationOnce(()=>new Promise<Response>(resolve=>{finishFirst=resolve;})).mockResolvedValue(response());
+  vi.stubGlobal('fetch',fetch);
+  const api=await import('../../src/handlers/cost.js');
+  const first=api.readClaudeSubscriptionUsage();
+  await vi.waitFor(()=>expect(fetch).toHaveBeenCalledTimes(1));
+  fixture.token='new-account'; await api.readClaudeSubscriptionUsage();
+  finishFirst(new Response(JSON.stringify({seven_day:{utilization:12}}))); await first;
+  expect((await api.readClaudeSubscriptionUsage()).sevenDay?.pct).toBe(.88);
+  expect(fetch).toHaveBeenCalledTimes(2);
+});
+it('negative utilization does not become a fresh unused allowance', async () => {
+  vi.stubGlobal('fetch',vi.fn().mockResolvedValue(new Response(JSON.stringify({seven_day:{utilization:-1}}))));
+  const api=await import('../../src/handlers/cost.js');
+  expect((await api.readClaudeSubscriptionUsage()).source).toBe('unavailable');
+});

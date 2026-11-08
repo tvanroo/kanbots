@@ -67,7 +67,7 @@ export interface KanBorgBridge {
   coordinatorAction?: (action:string,args?:any) => Promise<any>;
   routingState?(): Promise<import('@kanborg/api').RoutingState>;
   saveRouting?(config: import('@kanborg/api').RoutingConfig): Promise<import('@kanborg/api').RoutingState>;
-  capacity?(): Promise<import('@kanborg/api').CapacitySnapshot>;
+  capacity?(refresh?: boolean): Promise<import('@kanborg/api').CapacitySnapshot>;
   claudeSubscriptionUsage?(): Promise<import('@kanborg/api').CostUsageResult>;
   claudeAuthStatus(): Promise<{ authed: boolean }>;
   claudeLoginStart(installIfMissing?: boolean): Promise<{ ok: true } | { ok: false; error: string }>;

@@ -80,6 +80,31 @@ export async function getCodexDetails(redemption?: { accountIdentity: string; cr
       ? 'ChatGPT subscription'
       : account?.type === 'apiKey' ? 'OpenAI API billing'
       : account ? 'Other Codex authentication' : 'Signed out of Codex';
+    if (account?.type === 'chatgpt') {
+      try {
+        const usage = await call('account/rateLimits/read', {});
+        const grouped = usage.rateLimitsByLimitId ? Object.values(usage.rateLimitsByLimitId) : [];
+        const snapshots = grouped.length ? grouped : [usage.rateLimits];
+        const windows: CodexSubscriptionUsage['windows'] = [];
+        const credits: CodexSubscriptionUsage['credits'] = [];
+        for (const snapshot of snapshots as any[]) {
+          if (!snapshot) continue;
+          const name = typeof snapshot.limitName === 'string' ? snapshot.limitName : typeof snapshot.limitId === 'string' ? snapshot.limitId : 'Codex';
+          for (const window of [snapshot.primary, snapshot.secondary]) if (window && typeof window.usedPercent === 'number' && Number.isFinite(window.usedPercent) && window.usedPercent >= 0) {
+            windows.push({ name, usedPercent: Math.min(100, window.usedPercent), windowMinutes: typeof window.windowDurationMins === 'number' ? window.windowDurationMins : null, resetsAt: typeof window.resetsAt === 'number' ? window.resetsAt : null });
+          }
+          if (snapshot.credits) credits.push({ name, balance: typeof snapshot.credits.balance === 'string' ? snapshot.credits.balance : null, unlimited: snapshot.credits.unlimited === true });
+        }
+        if (!windows.length) throw new Error('No quota windows returned');
+        const reset = usage.rateLimitResetCredits;
+        const resetCredits = reset && Number.isInteger(reset.availableCount) && reset.availableCount >= 0 ? {
+          availableCount: reset.availableCount,
+          credits: Array.isArray(reset.credits) ? reset.credits.filter((c: any)=>typeof c.id==='string' && c.status==='available' && c.resetType==='codexRateLimits' && (c.expiresAt===null || (typeof c.expiresAt==='number' && Number.isFinite(c.expiresAt)))).map((c: any)=>({id:c.id,expiresAt:c.expiresAt,status:c.status,resetType:c.resetType})) : [],
+        } : undefined;
+        details.subscriptionUsage = { ...(resetCredits ? {resetCredits} : {}), checkedAt: new Date().toISOString(), ordinaryUsageAllowed: typeof usage.ordinaryUsageAllowed === 'boolean' ? usage.ordinaryUsageAllowed : null, windows, credits };
+        if (details.accountIdentity && windows.length) saveUsage(details.accountIdentity, details.subscriptionUsage);
+      } catch { details.subscriptionUsageError = 'Subscription usage could not be read from Codex. Try Refresh again.'; }
+    }
     try {
     let cursor: string | null = null;
     const cursors = new Set<string>();
@@ -95,29 +120,7 @@ export async function getCodexDetails(redemption?: { accountIdentity: string; cr
       if (cursor) cursors.add(cursor);
     } while (cursor);
     } catch { details.catalogueError = 'Model catalogue unavailable; usage is checked separately.'; }
-    if (account?.type === 'chatgpt') {
-      try {
-        const usage = await call('account/rateLimits/read', {});
-        const snapshots = usage.rateLimitsByLimitId ? Object.values(usage.rateLimitsByLimitId) : [usage.rateLimits];
-        const windows: CodexSubscriptionUsage['windows'] = [];
-        const credits: CodexSubscriptionUsage['credits'] = [];
-        for (const snapshot of snapshots as any[]) {
-          if (!snapshot) continue;
-          const name = typeof snapshot.limitName === 'string' ? snapshot.limitName : typeof snapshot.limitId === 'string' ? snapshot.limitId : 'Codex';
-          for (const window of [snapshot.primary, snapshot.secondary]) if (window && typeof window.usedPercent === 'number' && Number.isFinite(window.usedPercent)) {
-            windows.push({ name, usedPercent: window.usedPercent, windowMinutes: typeof window.windowDurationMins === 'number' ? window.windowDurationMins : null, resetsAt: typeof window.resetsAt === 'number' ? window.resetsAt : null });
-          }
-          if (snapshot.credits) credits.push({ name, balance: typeof snapshot.credits.balance === 'string' ? snapshot.credits.balance : null, unlimited: snapshot.credits.unlimited === true });
-        }
-        const reset = usage.rateLimitResetCredits;
-        const resetCredits = reset && Number.isInteger(reset.availableCount) && reset.availableCount >= 0 ? {
-          availableCount: reset.availableCount,
-          credits: Array.isArray(reset.credits) ? reset.credits.filter((c: any)=>typeof c.id==='string' && c.status==='available' && c.resetType==='codexRateLimits' && (c.expiresAt===null || (typeof c.expiresAt==='number' && Number.isFinite(c.expiresAt)))).map((c: any)=>({id:c.id,expiresAt:c.expiresAt,status:c.status,resetType:c.resetType})) : [],
-        } : undefined;
-        details.subscriptionUsage = { ...(resetCredits ? {resetCredits} : {}), checkedAt: new Date().toISOString(), ordinaryUsageAllowed: typeof usage.ordinaryUsageAllowed === 'boolean' ? usage.ordinaryUsageAllowed : null, windows, credits };
-        if (details.accountIdentity && windows.length) saveUsage(details.accountIdentity, details.subscriptionUsage);
-      } catch { details.subscriptionUsageError = 'Subscription usage could not be read from Codex. Try Refresh again.'; }
-    }
+
   } catch {
     details.catalogueError = 'Could not load models from Codex. Check that the CLI is up to date and signed in, then refresh.';
   } finally {

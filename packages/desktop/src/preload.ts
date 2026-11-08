@@ -50,7 +50,7 @@ const api: KanBorgBridge = {
   coordinatorAction: (action,args) => ipcRenderer.invoke('kanbots:coordinator-action',action,args),
   routingState: () => ipcRenderer.invoke('kanbots:routing-state'),
   saveRouting: (config) => ipcRenderer.invoke('kanbots:routing-save',config),
-  capacity: () => ipcRenderer.invoke('kanbots:capacity'),
+  capacity: (refresh?: boolean) => ipcRenderer.invoke('kanbots:capacity', refresh),
   claudeSubscriptionUsage: () => ipcRenderer.invoke('kanbots:claude-subscription-usage'),
   claudeAuthStatus: () =>
     ipcRenderer.invoke('kanbots:claude-auth-status') as Promise<{ authed: boolean }>,

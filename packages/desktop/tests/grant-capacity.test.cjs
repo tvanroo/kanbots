@@ -10,3 +10,8 @@ test('newer confirmed manual balance supersedes an unavailable older estimate',(
 test('rollover balances survive the monthly boundary without adding fresh credit',()=>{const r=grantCapacity({...row,rollover:true,balanceUpdatedAt:'2026-10-01T00:00:00Z'},undefined,now);assert.equal(r.amount,200);assert.equal(r.usable,true);assert.equal(r.useBy,Infinity);});
 test('provider estimate only subtracts local spending after its reported accounting watermark',()=>{const r=grantCapacity(row,{remaining:180,stale:false,asOf:'2026-11-05T12:00:00Z',cycleEnd:'2026-11-30T00:00:00Z'},now);assert.equal(r.since,Date.parse('2026-11-05T12:00:00Z'));});
 test('invalid manual confirmation timestamps cannot authorize monthly credit',()=>{const r=grantCapacity({...row,balanceUpdatedAt:'invalid'},undefined,now);assert.equal(r.usable,false);assert.equal(r.since,0);});
+
+const {grantFunding}=load('grant-capacity');
+test('unknown and stale grants do not authorize pay-go fallback',()=>{for(const amount of [null,0,200]) assert.equal(grantFunding(true,false,amount,Infinity,now,'paygo').paid,false);});
+test('confirmed exhaustion or cutoff honors pay-go, while stop remains stop',()=>{assert.equal(grantFunding(true,true,0,Infinity,now,'paygo').paid,true);assert.equal(grantFunding(true,false,200,now-1,now,'paygo').paid,true);assert.equal(grantFunding(true,true,0,Infinity,now,'stop').paid,false);assert.equal(grantFunding(true,true,200,now+1,now,'paygo').eligibleGrant,true);});
+test('malformed balances and future confirmations never authorize spending',()=>{assert.equal(grantCapacity({...row,remaining:NaN},undefined,now).usable,false);assert.equal(grantCapacity({...row,balanceUpdatedAt:'2027-01-01'},undefined,now).usable,false);});

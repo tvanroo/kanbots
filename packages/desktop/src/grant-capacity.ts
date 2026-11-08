@@ -23,5 +23,17 @@ export function grantCapacity(row: ApiConnection, estimate: Estimate | undefined
       ? `Saved balance${since > 0 ? ` · entered ${new Date(since).toLocaleString()}` : ''}${!usable ? ' · confirm current balance in provider settings' : row.grantBillingDay ? ' · organization estimate unavailable' : ''}`
       : 'No balance available · enter a balance in provider settings or connect organization reporting';
   }
+  // An unknown reading is not exhaustion: it must never enable paid fallback.
+  if (amount !== null && (!Number.isFinite(amount) || amount < 0)) amount = null;
+  if (!Number.isFinite(since) || since > now) { since = 0; usable = false; }
+  if (Number.isNaN(useBy)) { useBy = Infinity; usable = false; }
+  usable = usable && amount !== null;
   return { amount, since, useBy, usable, detail };
+}
+
+/** Only confirmed depletion or a known cutoff may activate the owner's pay-go choice. */
+export function grantFunding(grant: boolean, usable: boolean, remaining: number | null, useBy: number, now: number, afterGrant: string | undefined) {
+  const eligibleGrant = grant && usable && remaining !== null && remaining > 0.05 && now < useBy;
+  const finished = (usable && remaining !== null && remaining <= 0.05) || (Number.isFinite(useBy) && now >= useBy);
+  return { eligibleGrant, paid: !grant || (afterGrant === 'paygo' && finished) };
 }

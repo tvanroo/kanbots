@@ -43,6 +43,7 @@ function persistSnapshot(): void {
   catch { /* Reporting must still work if snapshot storage is unavailable. */ }
 }
 let pending: { identity: string; promise: Promise<CostUsageResult> } | undefined;
+let currentIdentity: string | undefined;
 
 export async function usage(_deps: HandlerDeps): Promise<CostUsageResult> {
   return readClaudeSubscriptionUsage();
@@ -50,8 +51,9 @@ export async function usage(_deps: HandlerDeps): Promise<CostUsageResult> {
 export async function readClaudeSubscriptionUsage(): Promise<CostUsageResult> {
   const credential = await readCredential();
   const empty: CostUsageResult = { fiveHour: null, sevenDay: null, stale: false, source: 'unavailable', message: 'Subscription usage is not available from the existing Claude Code sign-in.' };
-  if (!credential) return empty;
+  if (!credential) return { ...(cache?.lastGood ?? empty), stale: Boolean(cache?.lastGood), source: 'unavailable', message: 'Claude Code credentials could not be read. Saved quota is historical only; checking again automatically.' };
   const identity = createHash('sha256').update(credential.accessToken).digest('hex');
+  currentIdentity = identity;
   // A token change must not bypass a provider cooldown or expose another account's quota.
   const cooldown = cache?.rateLimitUntil;
   if (cache?.identity !== identity) cache = cooldown && cooldown > Date.now() ? { identity, until: cooldown, rateLimitUntil: cooldown, payload: { ...empty, retryAt: new Date(cooldown).toISOString(), message: 'Claude usage checks are cooling down after a rate limit. Checking again automatically.' } } : undefined;
@@ -92,21 +94,26 @@ async function loadUsage(credential: Credential, identity: string, empty: CostUs
     }
     if (!windows.length) throw new Error('unavailable');
     const payload: CostUsageResult = { fiveHour: toWindow(data.five_hour), sevenDay: toWindow(data.seven_day), windows, source: 'oauth', checkedAt: new Date().toISOString(), stale: false };
-    cache = { identity, until: Date.now() + 5 * 60000, payload, lastGood: payload, failures: 0 };
-    persistSnapshot();
+    // A read begun under an old sign-in must not overwrite a newer account's snapshot.
+    if (currentIdentity === identity) {
+      cache = { identity, until: Date.now() + 5 * 60000, payload, lastGood: payload, failures: 0 };
+      persistSnapshot();
+    }
     return payload;
   } catch (error) {
     const unauthorized = error instanceof Error && error.message === 'unauthorized';
     const payload: CostUsageResult = { ...(lastGood ?? empty), source: unauthorized ? 'unauthorized' : 'unavailable', stale: Boolean(lastGood), retryAt: new Date(Date.now() + delay).toISOString(), message: unauthorized ? 'Claude sign-in has expired. Reconnect Claude in provider settings; saved quota is retained until a fresh reading is available.' : rateLimited ? 'Claude has paused usage checks (rate limit). Retrying automatically after its requested delay.' : 'Claude usage is temporarily unavailable. Retrying automatically; previous readings may be stale.' };
-    cache = { identity, until: Date.now() + delay, payload, failures, ...(rateLimited ? { rateLimitUntil: Date.now() + delay } : {}), ...(lastGood ? { lastGood } : {}) };
-    persistSnapshot();
+    if (currentIdentity === identity) {
+      cache = { identity, until: Date.now() + delay, payload, failures, ...(rateLimited ? { rateLimitUntil: Date.now() + delay } : {}), ...(lastGood ? { lastGood } : {}) };
+      persistSnapshot();
+    }
     return payload;
   }
 }
 function toWindow(raw: unknown): CostUsageWindow | null {
   if (!raw || typeof raw !== 'object') return null;
   const value = raw as { utilization?: unknown; resets_at?: unknown };
-  if (typeof value.utilization !== 'number' || !Number.isFinite(value.utilization)) return null;
+  if (typeof value.utilization !== 'number' || !Number.isFinite(value.utilization) || value.utilization < 0) return null;
   const reset = typeof value.resets_at === 'string' && Number.isFinite(Date.parse(value.resets_at)) ? value.resets_at : null;
   return { pct: Math.max(0, Math.min(1, value.utilization / 100)), resetsAt: reset };
 }
