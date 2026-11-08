@@ -8,7 +8,7 @@ import { startAgentRun,type StartAgentRunOptions,type AgentRunHandle,type RunSum
 import { apiTurn,RouteUnavailable,type TranscriptEntry } from './api-task.js';
 import { collectCapacity,invalidateCapacity,type Candidate } from './routing-capacity.js';
 import { readRouting,recordDecision } from './routing-state.js';
-import { subscriptionFailure } from './routing-recovery.js';
+import { subscriptionFailure, recoveryContext } from './routing-recovery.js';
 type Session={cwd:string;transcript:TranscriptEntry[];native?:{provider:'claude-code'|'codex-cli';id:string}};
 const sessions=()=>join(app.getPath('userData'),'routed-sessions');
 function saveSession(id:string,data:Session){mkdirSync(sessions(),{recursive:true,mode:0o700});const path=join(sessions(),id+'.json');writeFileSync(path+'.tmp',JSON.stringify(data),{mode:0o600});renameSync(path+'.tmp',path);}
@@ -31,7 +31,7 @@ export function startRoutedRun(opts:StartAgentRunOptions):AgentRunHandle{
         if(session.cwd!==opts.cwd)throw Error('Session workspace changed; start a new task.');
       }
       session.transcript.push({role:'user',text:opts.prompt});saveSession(id,session);
-      const blocked=new Set<string>();const recovered=new Set<string>();let lastRoute='';
+      const blocked=new Set<string>();const recovered=new Set<string>();let lastRoute='';let compactRecovery=false;
       const maxUsd=Math.min(readRouting().config.maxRunUsd,opts.costBudgetUsd??Infinity);
       for(let step=0;step<80;step++){
         abort.signal.throwIfAborted();
@@ -59,7 +59,9 @@ export function startRoutedRun(opts:StartAgentRunOptions):AgentRunHandle{
           }
         }else{
           const same=session.native?.provider===route.provider;
-          const prompt=same?opts.prompt:session.transcript.map(m=>`${m.role}: ${m.text}`).join('\n\n');
+          const archive=join(sessions(),id+'.json');
+          const fullContext=session.transcript.map(m=>`${m.role}: ${m.text}`).join('\n\n');
+          const prompt=same?opts.prompt:compactRecovery||fullContext.length>32000?recoveryContext(session.transcript,opts.prompt,archive):fullContext;
           // Never inherit API credentials or alternate endpoints into subscription workers.
           const cleanSpawn:NonNullable<StartAgentRunOptions['spawn']>=(command,args,options)=>{
             const env={...process.env,...options?.env};
@@ -82,7 +84,7 @@ export function startRoutedRun(opts:StartAgentRunOptions):AgentRunHandle{
             ...(same&&session.native?{resumeFromSessionId:session.native.id}:{}),
             ...(opts.env?{env:opts.env}:{}),...(extraArgs?{extraArgs}:{}),
           });
-          let limited=false;let hadTools=false;let hadOutput=false;let launchError='';
+          let limited=false;let hadTools=false;let hadOutput=false;let launchError='';let diagnostic='';
           child.on('event',event=>{
             if(event.kind==='session'){
               session.native={provider:route.provider,id:event.sessionId};saveSession(id,session);
@@ -90,7 +92,10 @@ export function startRoutedRun(opts:StartAgentRunOptions):AgentRunHandle{
             }
             if(event.kind==='rate_limit'){limited=true;return;}
             if(event.kind==='tool_use')hadTools=true;
-            if(event.kind==='text'&&event.text.trim())hadOutput=true;
+            if(event.kind==='text'&&event.text.trim()){
+              if(subscriptionFailure(event.text).kind==='context')diagnostic=event.text.slice(0,2000);
+              else hadOutput=true;
+            }
             if(event.kind==='text')session.transcript.push({role:'assistant',text:event.text});
             if(event.kind==='tool_result')session.transcript.push({role:'user',text:`Completed tool ${event.toolUseId}: ${JSON.stringify(event.content)}`});
             // Subscription CLI dollar values are price equivalents, not API charges.
@@ -107,11 +112,15 @@ export function startRoutedRun(opts:StartAgentRunOptions):AgentRunHandle{
             continue;
           }
           if(summary.result?.isError||summary.exitCode!==0){
-            const problem=subscriptionFailure([launchError,summary.stderr,summary.result?.text??''].join('\n'));
+            const problem=subscriptionFailure([launchError,summary.stderr,summary.result?.text??'',diagnostic].join('\n'));
             const providerName=route.provider==='codex-cli'?'ChatGPT / Codex':'Claude';
             // Only restart automatically when the failure is known and no useful
             // output or tool execution has happened. Never replay ambiguous work.
             if(!abort.signal.aborted&&!summary.killedByStop&&!hadTools&&!hadOutput&&problem.recoverable){
+              if(problem.kind==='context'&&!recovered.has(route.id+':context')){
+                recovered.add(route.id+':context');compactRecovery=true;delete session.native;saveSession(id,session);
+                emit({kind:'text',text:`KanBorg recovery: ${providerName} reached its context limit. Continuing the same run from bounded saved context; full history remains available by reference.\n`});continue;
+              }
               if(same&&problem.kind==='session'&&!recovered.has(route.id)){
                 recovered.add(route.id);delete session.native;saveSession(id,session);
                 emit({kind:'text',text:`KanBorg recovery: ${providerName} could not resume its saved session. Starting a fresh session with this conversation's saved context.\n`});continue;

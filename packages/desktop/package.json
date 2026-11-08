@@ -1,6 +1,6 @@
 {
   "name": "@kanborg/desktop",
-  "version": "1.2.26",
+  "version": "1.2.27",
   "private": true,
   "description": "KanBorg desktop app (Electron)",
   "main": "./dist/main.cjs",
@@ -57,6 +57,7 @@
     "logLevel": "quiet"
   },
   "build": {
+    "forceCodeSigning": true,
     "appId": "com.tvanroo.kanbots.local",
     "productName": "KanBorg",
     "executableName": "KanBorg",
@@ -102,7 +103,7 @@
       ],
       "category": "public.app-category.developer-tools",
       "artifactName": "kanborg-${version}-mac-${arch}.${ext}",
-      "identity": null,
+      "identity": "Tobias vanRoojen (J997PDPCC4)",
       "hardenedRuntime": false,
       "gatekeeperAssess": false
     },
@@ -129,7 +130,7 @@
     },
     "npmRebuild": false,
     "nodeGypRebuild": false,
-    "afterPack": "scripts/sign-local-mac.cjs"
+    "afterSign": "scripts/sign-local-mac.cjs"
   },
   "homepage": "https://kanborg.ai"
 }

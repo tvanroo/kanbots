@@ -146,6 +146,8 @@ export interface StartRunInput {
 export interface ResumeRunInput {
   runId: number;
   prompt: string;
+  /** Begin a new phase in the same run/worktree using an explicit checkpoint. */
+  freshContext?: boolean;
   appendSystemPrompt?: string;
   costBudgetUsd?: number | null;
 }
@@ -1084,7 +1086,7 @@ export async function createSupervisor(
     if (conflicting !== null && conflicting.id !== input.runId) {
       throw threadAlreadyActiveError(conflicting);
     }
-    if (!existing.sessionId) {
+    if (!existing.sessionId && !input.freshContext) {
       throw new Error(`agent run ${input.runId} has no session_id to resume`);
     }
     if (!existing.worktreePath) {
@@ -1098,7 +1100,7 @@ export async function createSupervisor(
       cwd: existing.worktreePath,
       ...(existing.provider ? {provider: existing.provider as import('@kanborg/dispatcher').AgentRunProvider} : {}),
       prompt: input.prompt,
-      resumeFromSessionId: existing.sessionId,
+      ...(!input.freshContext && existing.sessionId ? { resumeFromSessionId: existing.sessionId } : {}),
       ...((input.costBudgetUsd ?? existing.costBudgetUsd) !== null && (input.costBudgetUsd ?? existing.costBudgetUsd) !== undefined ? { costBudgetUsd: Math.max(0, (input.costBudgetUsd ?? existing.costBudgetUsd)! - (existing.totalCostUsd ?? 0)) } : {}),
       appendSystemPrompt: composed.prompt,
     });
