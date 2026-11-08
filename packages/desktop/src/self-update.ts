@@ -18,7 +18,7 @@ export function startupSwitch(name:string,args=process.argv):string{
   }
   return '';
 }
-export type UpdateRecord = { id:string; phase:'staging'|'waiting'|'installing'|'completed'|'failed'|'cancelled'; version:string; fromVersion:string; repoPath:string; target:string; stage:string; job:string; error?:string; requestedAt:string; completedAt?:string; workflowResumePending?:boolean };
+export type UpdateRecord = { id:string; phase:'staging'|'waiting'|'installing'|'completed'|'failed'|'cancelled'; version:string; fromVersion:string; repoPath:string; target:string; stage:string; job:string; error?:string; requestedAt:string; completedAt?:string; waitingAt?:string; checkpointRequestedAt?:string; workflowResumePending?:boolean };
 export function newerVersion(candidate:string,current:string){
   const parse=(v:string)=>/^\d+\.\d+\.\d+$/.test(v)?v.split('.').map(Number):null;
   const a=parse(candidate),b=parse(current);if(!a||!b)return false;
@@ -156,12 +156,23 @@ export class SelfUpdater {
       const arch=(await exec('/usr/bin/lipo',['-archs',binary])).stdout;
       if(!arch.split(/\s+/).includes(process.arch==='arm64'?'arm64':'x86_64'))throw Error('Installer does not support this Mac.');
       await exec('/usr/bin/ditto',[bundle,join(stage,'KanBorg.app')],{timeout:120000});
-      this.record.phase='waiting';this.save();return this.status();
+      this.record.phase='waiting';this.record.waitingAt=new Date().toISOString();this.save();return this.status();
     }catch(e){if(this.record?.phase==='staging'){this.record.phase='failed';this.record.error=e instanceof Error?e.message:'Update failed';this.save();}throw e;}
     finally{if(downloaded)await rm(downloaded,{force:true});if(mount)await exec('/usr/bin/hdiutil',['detach',mount],{timeout:30000}).catch(()=>{});this.busy=false;}
   }
-  async installWhenIdle(isIdle:()=>Promise<boolean>,checkpoint:()=>Promise<void>){
-    if(this.busy||this.record?.phase!=='waiting'||!await isIdle())return;
+  async installWhenIdle(isIdle:()=>Promise<boolean>,checkpoint:()=>Promise<void>,expedite?:()=>Promise<void>){
+    if(this.busy||this.record?.phase!=='waiting')return;
+    const record=this.record;
+    const ready=await isIdle();
+    if(this.record!==record||record.phase!=='waiting')return;
+    if(!ready){
+      const start=Date.parse(record.waitingAt??record.requestedAt);
+      if(!Number.isFinite(start)){record.waitingAt=new Date().toISOString();this.save();return;}
+      const elapsed=Date.now()-start;
+      if(elapsed>=15*60000){record.phase='failed';record.error='Update deferred after 15 minutes: workers could not reach a safe stopping point. No workers were killed. Existing work can continue; retry the update when ready.';this.save();return;}
+      if(elapsed>=5*60000&&!record.checkpointRequestedAt&&expedite){record.checkpointRequestedAt=new Date().toISOString();this.save();await expedite();}
+      return;
+    }
     // Cancellation can complete while the readiness check is awaiting workers.
     if(this.busy||this.record?.phase!=='waiting')return;
     this.busy=true;

@@ -1556,7 +1556,7 @@ if (ownsLocalInstance) void app.whenReady().then(async () => {
     await closeActiveWorkspace();
     deviceChatStore?.close();deviceChatStore=null;
     closeProvidersStoreForShutdown();
-  }).catch(async error=>{console.error('[update] Could not finish update:',error.message);updateRestart=false;coordinators.allowRequests();const record=selfUpdater.status().update;if(!activeWorkspace&&record?.repoPath)await openWorkspaceInternal(record.repoPath).catch(()=>{});}),3000);updateTimer.unref();
+  },()=>coordinators.expediteUpdate()).catch(async error=>{console.error('[update] Could not finish update:',error.message);updateRestart=false;coordinators.allowRequests();const record=selfUpdater.status().update;if(!activeWorkspace&&record?.repoPath)await openWorkspaceInternal(record.repoPath).catch(()=>{});}),3000);updateTimer.unref();
 
   app.on('activate' , async () => {
     if (BrowserWindow.getAllWindows().length === 0) {

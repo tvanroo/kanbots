@@ -60,6 +60,12 @@ export class CoordinatorService{
   updateCoordination(){return this.state.workspaces.filter(w=>w.updateDrain).map(w=>({workspaceId:w.id,name:basename(w.path),coordinator:this.state.clients.find(c=>c.id===w.controller)?.name??(w.mode==='internal'?'KanBorg chat':'Paused'),notification:w.mode==='off'?'not-needed':w.requests?.find(r=>r.id===w.updateDrain?.requestId)?.state??'queued',open:w.path===this.context?.repoPath}));}
   private reconcileUpdateWindDown(){if(this.updater&&!this.updater.pending()&&['cancelled','failed','completed'].includes(this.updater.status()?.update?.phase))this.endUpdateWindDown();}
   async updateWorkersReady(){if(!this.context)return false;const w=this.current();this.session(w);this.save();for(const j of w.jobs){if(blocksUpdate(this.run(j.runId))||(j.reviewRunId&&blocksUpdate(this.run(j.reviewRunId))))return false;if(j.state==='checks'){const checks=await this.h()['agent-runs:checks:list']({runId:j.runId});if(checks.some(c=>j.checkIds?.includes(c.id)&&!['pass','fail'].includes(c.status)))return false;}}return true;}
+  async expediteUpdate(){
+    for(const w of this.state.workspaces){if(!w.updateDrain)continue;
+      for(const j of w.jobs)for(const id of [j.controlId,j.reviewControlId])if(id)requestCheckpoint(this.root,id);
+      this.event(w,'update-checkpoint-requested',{instruction:'Finish the current bounded step and save a checkpoint. Preserve unfinished validation.'});
+    }
+  }
   updateIdle(){return !this.polling&&!this.inFlight.size;}
   allowRequests(){this.closing=false;}
   setUpdater(updater:NonNullable<CoordinatorService['updater']>){this.updater=updater;}
