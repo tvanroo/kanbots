@@ -26,7 +26,7 @@ type Client={id:string;name:string;workspaceId:string;role:'observer'|'coordinat
 type Job={phaseContextPending?:boolean;phaseCheckpoint?:unknown;manualQA?:boolean;controlId?:string;reviewControlId?:string;checkpoint?:unknown;autopilot?:boolean;runId:number;number:number;role:string;qa:boolean;maxReworks:number;reworks:number;budgetUsd:number;state:string;sha?:string;reviewRunId?:number;checkIds?:number[];error?:string};
 type Release={id:string;runId:number;sha:string;targetBranch:string;targetSha:string;action:'merge'|'draft-pr';title?:string;body?:string;state:string;result?:unknown};
 type Handoff={delivery?:'waiting'|'sending'|'sent'|'failed';deliveryError?:string;deliveryRunId?:number;id:string;from:string|null;to:string;mode:'internal'|'external';state:'requested'|'ready'|'completed';requestedAt:string;summary:string;checkpoint:unknown;receivedBy?:string};
-type CoordinatorRequest={id:string;kind:'discovery'|'resume-workflows'|'workflow-change'|'workflow-action'|'autopilot';prompt:string;state:'queued'|'received'|'completed';createdAt:string;receivedBy?:string};
+type CoordinatorRequest={id:string;kind:'discovery'|'resume-workflows'|'workflow-change'|'workflow-action'|'autopilot';prompt:string;state:'queued'|'received'|'completed';createdAt:string;receivedBy?:string;error?:string};
 type ScheduleReceipt={id?:string;status:'active'|'paused'|'unsupported';cadenceMinutes?:number;cursor?:number;confirmedAt:string};
 type ChatDraft={id:string;body:string;steer:boolean;state:'queued'|'sending'|'sent'|'failed';createdAt:string;error?:string};
 type UserQuestion={id:number;runId:number;threadId:number;question:string;options:Array<{value:string;label:string}>;state:string;reply?:string;responseRunId?:number;explanationAfter?:number};
@@ -59,6 +59,20 @@ export class CoordinatorService{
     // Advance existing pipelines and queued assignments immediately. External
     // coordinators pick up the durable request on their next connection/check-in.
     await this.tick();return request;
+  }
+
+  private restoredAutopilot = new Set<string>();
+  resumeAutopilotAfterLaunch(){
+    const w=this.current();
+    if(this.restoredAutopilot.has(w.id)||this.updater?.pending()||w.updateDrain)return;
+    this.restoredAutopilot.add(w.id);
+    if(w.autopilot?.status!=='active'||w.mode==='off'||(w.handoff&&w.handoff.state!=='completed'))return;
+    // Existing queued instructions already provide the kick. Never restart workers
+    // directly: the assigned coordinator reconciles their saved identities first.
+    if(w.requests?.some(r=>r.state==='queued'&&['autopilot','resume-workflows'].includes(r.kind)))return;
+    const request:CoordinatorRequest={id:`launch-resume:${randomUUID()}`,kind:'resume-workflows',state:'queued',createdAt:new Date().toISOString(),prompt:'KanBorg has reopened with Autopilot On. Read the saved Autopilot settings, objective, active assignments, checkpoints and pending decisions. Continue the existing authorized objective using those settings. Reconcile interrupted runs and resume eligible existing work through followUpRun before considering new assignments; never duplicate tasks or repeat completed validation. Preserve Off, wind-down and handoff controls if they changed since this request was queued. Acknowledge this request and record the result or blocker.'};
+    w.requests??=[];w.requests.push(request);w.revision++;
+    this.event(w,'coordinator-request',{requestId:request.id,kind:request.kind});
   }
 
   private adapters=new Map<string,HostAdapter>();
@@ -106,7 +120,7 @@ export class CoordinatorService{
       this.event(w,action,{bindingId:b.id});return this.ui();
     }
     if(action==='stop-wind-down-worker'){const j=w.jobs.find(j=>j.runId===args.runId||j.reviewRunId===args.runId);if(!j)throw Error('Worker not found');j.state='interrupted';j.error='Interrupted—recovery needed';this.event(w,'worker-interrupted',{runId:args.runId});await this.context!.supervisor.stop(args.runId);return this.ui();}
-    if(action==='autopilot'){validateCoordinatorArgs('manageAutopilot',{workspaceId:w.id,requestId:'app-autopilot-change',revision:w.revision,...args});return this.manageAutopilot(w,args);}
+    if(action==='autopilot'){validateCoordinatorArgs('manageAutopilot',{workspaceId:w.id,requestId:'app-autopilot-change',revision:w.revision,...args});await this.manageAutopilot(w,args);await this.tick();return this.ui();}
     if(action.startsWith('workflow:')){const name=action.slice(9);const result=await this.workflowAction(w,name,args,'user');return result;}
     if(action==='check-application-update'){if(!this.updater)throw Error('Updater unavailable');return this.updater.check();}
     if(action==='update-application'){if(!this.updater)throw Error('Updater unavailable');return this.updater.request(args,w.path);}
@@ -297,7 +311,7 @@ Never approve your own pairing. No provider API keys are needed.\n\nClaude Deskt
   async call(actor:string,scope:string,name:string,raw:unknown):Promise<any>{
     if(this.closing)throw Error('Workspace is closing; reconnect after opening it.');
     const args=validateCoordinatorArgs(name,raw);
-    if(name==='getCapabilities')return {version:'1.2.29',authority:'active-coordinator',guide:COORDINATOR_GUIDE,scope,tools:COORDINATOR_TOOLS.map(t=>t.name),releaseActions:['merge','draft-pr'],hosted:false};
+    if(name==='getCapabilities')return {version:'1.2.30',authority:'active-coordinator',guide:COORDINATOR_GUIDE,scope,tools:COORDINATOR_TOOLS.map(t=>t.name),releaseActions:['merge','draft-pr'],hosted:false};
     if(name==='listWorkspaces')return this.state.workspaces.filter(w=>w.id===scope).map(w=>({workspaceId:w.id,name:basename(w.path),open:this.context?.repoPath===w.path}));
     if(args.workspaceId!==scope)throw Error('This connection is not permitted for that workspace');const w=this.resolve(scope);
     if(name==='getControlCoverage')return {board:'listIssues/getIssue/createIssue/updateIssue/upsertWorkItem/addComment',workflows:'getWorkflow/previewWorkflowChange/applyWorkflowChange/undoWorkflowChange',workers:'dispatchTask/followUpRun/stopRun/manageAutopilot',decisions:'listDecisions/answerDecision; free-text user answers remain in app',evidence:'getRunResult/readRunLog/getDiffSummary/runQA',releases:'prepareRelease/getReleaseStatus/executeRelease subject to current authority',updates:'getApplicationUpdate/updateApplication after owner request',workspaces:'listWorkspaces; opening/selecting a different project remains owner UI only',pairing:'prepareExternalCoordinator for built-in; approval/revocation remain owner UI only',providers:'getCapacity read-only; credentials and provider configuration remain owner UI only',uiSettings:'UI only; no arbitrary UI automation proxy',existingChat:'proposeHostBinding/getOutboundEvents/acknowledgeWake/confirmHandoffReconciled; actual wake requires a supported installed adapter'};
@@ -400,7 +414,7 @@ Never approve your own pairing. No provider API keys are needed.\n\nClaude Deskt
     }else{
       if(!w.autopilot)throw Error('No autopilot assignment exists for this project.');
       if(a.action==='pause'||a.action==='expedite'){w.autopilot.status='paused';if(w.updateDrain)w.updateDrain.priorStatus='paused';}if(a.action==='expedite'){w.expediting=true;this.save();for(const j of w.jobs.filter(j=>j.autopilot||w.updateDrain)){for(const id of [j.controlId,j.reviewControlId])if(id)requestCheckpoint(this.root,id);}}
-      if(a.action==='resume'){if(w.updateDrain)throw Error('An update is winding down. Cancel the update before turning On.');w.autopilot.status='active';w.expediting=false;}
+      if(a.action==='resume'){if(w.updateDrain)throw Error('An update is winding down. Cancel the update before turning On.');if(w.mode==='off')await this.uiAction('handoff',{mode:'internal'});w.autopilot.status='active';w.expediting=false;}
       if(a.action==='complete')w.autopilot.status='completed';
       if(a.personas)w.autopilot.personas=a.personas;if(a.effort)w.autopilot.effort=a.effort;if(a.parallelism)w.autopilot.parallelism=a.parallelism;if(a.objective!==undefined)w.autopilot.objective=a.objective;w.autopilot.updatedAt=new Date().toISOString();
     }
@@ -452,7 +466,7 @@ Never approve your own pairing. No provider API keys are needed.\n\nClaude Deskt
     if(waiting)throw Error('Task is still waiting for worker capacity');
     const issue=(await this.h()['issues:get']({number})).issue;const thread=this.context!.store.threads.getOrCreate({repoOwner:(await this.h()['config:get']()).owner,repoName:(await this.h()['config:get']()).repo,issueNumber:number});
     w.workflow??=newWorkflow();materialize(w.workflow,[issue]);
-    const guidance='\nWorkflow contract: '+JSON.stringify(workflowGuidance(w.workflow,number));
+    const guidance='\nWorkflow contract: '+JSON.stringify(workflowGuidance(w.workflow,number))+(autopilot&&w.autopilot?`\nAutopilot effort: ${w.autopilot.effort}. Objective: ${w.autopilot.objective}. Stay within this task and its acceptance criteria.\n`:'');
     if((autopilot&&w.autopilot?.status!=='active')||w.updateDrain||this.updater?.pending())throw Error('New assignments are paused.');
     const control=createCheckpoint(this.root);
     const run=await this.context!.supervisor.start({appendSystemPrompt:control.prompt,threadId:thread.id,issueNumber:number,prompt:guidance+(readOnly?`Read-only discovery task. Do not modify source files, commit, merge, push or deploy. Return concise evidence and an inventory that the coordinator can use.\n${issue.title}\n${issue.body??''}`:`Implement this task, observing repository instructions and acceptance criteria. Do not expand scope. Commit the completed implementation locally in your worktree; do not merge, push or deploy.\n\n${issue.title}\n${issue.body??''}`),costBudgetUsd:budgetUsd,provider:'claude-code',personaId:'implementation'});
@@ -494,7 +508,7 @@ Never approve your own pairing. No provider API keys are needed.\n\nClaude Deskt
       const message=w.chatOutbox?.find(m=>m.state==='queued');
       if(message){const chat=await this.h()['chat:get']({conversationId:w.conversationId});if(!chat.activeRun){message.state='sending';this.save();try{const result=await this.uiAction('chat-send',{body:(message.steer?'Steering update from the user. Follow this direction using existing work and evidence; do not duplicate worker assignments.\n\n':'')+message.body});if(result?.dispatchError)throw Error(result.dispatchError);message.state='sent';this.event(w,'chat-message-sent',{id:message.id});}catch(e){message.state='failed';message.error=clip(e instanceof Error?e.message:'Delivery failed');this.event(w,'chat-message-failed',{id:message.id,error:message.error});}return;}}
     }
-    if(w.mode==='internal'&&w.conversationId&&(!w.handoff||w.handoff.state==='completed')){const pending=w.requests?.find(r=>r.state==='queued');if(pending){const chat=await this.h()['chat:get']({conversationId:w.conversationId});if(!chat.activeRun){pending.state='received';pending.receivedBy=w.controller!;this.save();try{const result=await this.uiAction('chat-send',{body:pending.prompt});if(result?.dispatchError)throw Error(result.dispatchError);this.event(w,'coordinator-request-received',{id:pending.id});}catch(e){this.event(w,'coordinator-request-blocked',{id:pending.id,error:clip(e instanceof Error?e.message:'Could not start request')});}}}}
+    if(w.mode==='internal'&&w.conversationId&&(!w.handoff||w.handoff.state==='completed')){const pending=w.requests?.find(r=>r.state==='queued'&&!r.error);if(pending){const chat=await this.h()['chat:get']({conversationId:w.conversationId});if(!chat.activeRun){pending.state='received';pending.receivedBy=w.controller!;this.save();try{const result=await this.uiAction('chat-send',{body:pending.prompt});if(result?.dispatchError)throw Error(result.dispatchError);this.event(w,'coordinator-request-received',{id:pending.id});}catch(e){pending.state='queued';delete pending.receivedBy;pending.error=clip(e instanceof Error?e.message:'Could not start request');this.event(w,'coordinator-request-blocked',{id:pending.id,error:pending.error});}}}}
     for(const q of [...(w.handoff&&w.handoff.state!=='completed'?[]:w.queue??[])]){
       if((q.autopilot&&w.autopilot?.status!=='active')||w.updateDrain)continue;
       const slots=w.jobs.filter(j=>active(this.run(j.runId).status)||(j.reviewRunId&&active(this.run(j.reviewRunId).status))).length;

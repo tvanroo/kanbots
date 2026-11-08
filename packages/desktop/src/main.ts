@@ -766,6 +766,7 @@ async function openWorkspaceInternal(repoPath: string): Promise<ActiveWorkspaceI
   const startAutopilot=handlers['autopilot:start'];
   handlers['autopilot:start']=(args)=>{if(coordinators.hasController())return Promise.reject(new Error('Pause coordination before starting independent autopilot.'));return startAutopilot(args);};
   coordinators.attach({repoPath:gitRoot,handlers,store,supervisor,source});
+  coordinators.resumeAutopilotAfterLaunch();
   sentryPoller.start();
 
   await ensureGitignoreEntry(gitRoot, '.kanbots/').catch(() => {
