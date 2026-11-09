@@ -17,7 +17,7 @@ const net=require('node:net');
   fs.writeFileSync(path.join(root,'application-update.json'),JSON.stringify({id:'packaged-recovery',phase:'installing',version:require('../package.json').version,fromVersion:'1.2.12',repoPath:repo,job,requestedAt:new Date().toISOString()}));
   if(process.argv.includes('--restore-project')){fs.unlinkSync(path.join(root,'application-update.json'));fs.writeFileSync(path.join(root,'workspaces.json'),JSON.stringify({recents:[{repoPath:repo,displayName:'Restored project'}]}));}else recoveryArgs=process.argv.includes('--split-update-args')?['--kanborg-update-token','packaged-recovery']:['--kanborg-update-token=packaged-recovery'];
  }
- const child=spawn(binary,[`--user-data-dir=${root}`,`--remote-debugging-port=${port}`,...recoveryArgs],{env,stdio:['ignore','pipe','pipe']});
+ const child=spawn(binary,['--use-mock-keychain',`--user-data-dir=${root}`,`--remote-debugging-port=${port}`,...recoveryArgs],{env,stdio:['ignore','pipe','pipe']});
  let logs='',socket;child.stdout.on('data',b=>logs+=b);child.stderr.on('data',b=>logs+=b);
  try{
   let page;const until=Date.now()+25000;
@@ -51,6 +51,24 @@ const net=require('node:net');
    const registry=JSON.parse(fs.readFileSync(path.join(root,'coordinators.json'),'utf8'));
    if(!registry.workspaces.some(w=>fs.realpathSync(w.path)===fs.realpathSync(receipt.repoPath)&&w.events.some(e=>e.type==='application-updated')))throw Error('Recovery event or workspace missing');
    console.log(JSON.stringify({updateRecovery:true,workspaceRestored:true,readyReceipt:true}));
+  }
+  if(process.argv.includes('--navigation')){
+   await new Promise(r=>setTimeout(r,1800));
+   for(const name of ['Coordinator','Questions','Activity','Development','Providers','Autopilot','Settings','Board']){
+    const result=await call('Runtime.evaluate',{expression:`(()=>{const b=[...document.querySelectorAll('.workspace-destinations button')].find(b=>b.textContent.startsWith(${JSON.stringify(name)}));if(!b)throw Error('Missing destination');b.click();return true;})()`,returnByValue:true});
+    if(result.exceptionDetails)throw Error('Missing navigation '+name);
+    await new Promise(r=>setTimeout(r,name==='Providers'?18000:800));
+    const view=await call('Runtime.evaluate',{expression:`JSON.stringify({main:document.querySelector('.workspace-main')?.getAttribute('aria-label'),text:document.querySelector('.workspace-main')?.innerText})`,returnByValue:true});
+    const actual=JSON.parse(view.result.value);if(actual.main!==name||!actual.text?.trim())throw Error('Empty destination '+name);
+    const shot=await call('Page.captureScreenshot',{format:'png'});fs.writeFileSync(path.resolve('output/navigation-'+name.toLowerCase()+'.png'),Buffer.from(shot.data,'base64'));
+   }
+   await call('Runtime.evaluate',{expression:`[...document.querySelectorAll('.workspace-destinations button')].find(b=>b.textContent==='Settings').click()`});
+   await new Promise(r=>setTimeout(r,200));
+   await call('Runtime.evaluate',{expression:`[...document.querySelectorAll('.workspace-settings-grid button')].find(b=>b.textContent.startsWith('Workflow')).click()`});
+   await new Promise(r=>setTimeout(r,800));
+   const workflow=await call('Runtime.evaluate',{expression:`!!document.querySelector('.wf-scrim')`,returnByValue:true});
+   if(!workflow.result.value)throw Error('Workflow editor did not open');
+   console.log(JSON.stringify({navigationScreens:8,workflowEditor:true,passed:true}));
   }
   if(process.argv.includes('--board')){
    const repo=path.join(root,'sample-repository');fs.mkdirSync(repo);execFileSync('git',['init',repo],{stdio:'ignore'});fs.writeFileSync(path.join(repo,'README.md'),'# Sample project\n');execFileSync('git',['-C',repo,'add','README.md']);execFileSync('git',['-C',repo,'-c','user.name=Smoke Test','-c','user.email=smoke@example.invalid','commit','-m','Initial test repository'],{stdio:'ignore'});

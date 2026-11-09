@@ -33,7 +33,7 @@ export function BoardUsageRow({ fiveHour, sevenDay, stale, issueCount=0, workspa
   const [error,setError]=useState('');
   const [notice,setNotice]=useState('');
   const bridge=getBridge();
-  useEffect(()=>{const open=()=>{setSetup(false);setCoordinators(true);};window.addEventListener('kanbots:open-coordinator',open);return()=>window.removeEventListener('kanbots:open-coordinator',open);},[]);
+  useEffect(()=>{const open=()=>{setSetup(false);setCoordinators(true);};window.addEventListener('kanbots:open-coordinator-modal',open);return()=>window.removeEventListener('kanbots:open-coordinator-modal',open);},[]);
   const refresh=async()=>{const state=await bridge?.coordinatorState?.();setMode(state?.workspace?.mode??'off');setRequest(state?.workspace?.requests?.find((r:any)=>r.kind==='discovery')??null);const status=await bridge?.coordinatorAction?.('onboarding-status');setDiscover(!!status?.needed);};
   useEffect(()=>{setError('');setNotice('');setMessage('');void refresh().catch(()=>{});},[workspaceId,issueCount,coordinators]);
   useEffect(()=>{const t=setInterval(()=>void bridge?.coordinatorState?.().then(s=>{setMode(s?.workspace?.mode??'off');setRequest(s?.workspace?.requests?.find((r:any)=>r.kind==='discovery')??null);}).catch(()=>{}),3000);return()=>clearInterval(t);},[workspaceId]);

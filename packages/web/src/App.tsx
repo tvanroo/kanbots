@@ -1,3 +1,4 @@
+import { WorkspaceNavigation } from './components/shell/WorkspaceNavigation.js';
 import { QuestionsQueue } from './components/QuestionsQueue.js';
 import { useEffect, useMemo, useState } from 'react';
 import { useFetch } from './hooks/useFetch.js';
@@ -226,7 +227,7 @@ function ShellHost({
 
   return (
     <>
-      <QuestionsQueue />
+
       <Window
         workspaceName="KanBorg workspace"
         folderName={describeFolder(config)}
@@ -236,10 +237,13 @@ function ShellHost({
         tweaksOpen={tweaksOpen}
         onToggleTweaks={() => setTweaksOpen((v) => !v)}
       >
-        <Shell
-          rail={
-            tweaks.showRail ? (
-              <LeftRail
+        <WorkspaceNavigation project={describeFolder(config)} onTask={openDetail}
+          board={<Board
+              onOpenDetail={openDetail}
+              onOpenCreate={() => openCreate()}
+              onOpenPalette={() => setPaletteOpen(true)}
+              onOpenStats={() => setStatsOpen(true)}
+            />} development={<LeftRail
                 selectedNumber={selectedNumber}
                 onSelectIssue={setSelectedNumber}
                 onOpenPalette={() => setPaletteOpen(true)}
@@ -251,18 +255,19 @@ function ShellHost({
                 onOpenRepos={() => setReposOpen(true)}
                 onOpenSentry={() => setSentrySettingsOpen(true)}
                 onOpenCardTemplates={() => setCardTemplatesOpen(true)}
-              />
-            ) : null
-          }
-          center={
-            <Board
-              onOpenDetail={openDetail}
-              onOpenCreate={() => openCreate()}
-              onOpenPalette={() => setPaletteOpen(true)}
-              onOpenStats={() => setStatsOpen(true)}
-            />
-          }
-        />
+              />}
+          settings={[
+            {name:'Projects',description:'Repositories and project selection',open:()=>setReposOpen(true)},
+            {name:'Workflow',description:'Stages, rules, evidence and completion',open:()=>window.dispatchEvent(new CustomEvent('kanborg:open-workflow'))},
+            {name:'Appearance',description:'Theme, accent and display preferences',open:()=>setTweaksOpen(true)},
+            {name:'House rules',description:'Shared guidance for workers',open:()=>setHouseRulesOpen(true)},
+            {name:'Scripts',description:'Project setup and cleanup commands',open:()=>setScriptsOpen({})},
+            {name:'Task templates',description:'Reusable task defaults',open:()=>setCardTemplatesOpen(true)},
+            {name:'Error monitoring',description:'Sentry connection and issue intake',open:()=>setSentrySettingsOpen(true)},
+            {name:'Usage',description:'Provider usage and run history',open:()=>setStatsOpen(true)},
+            {name:'Archive',description:'Browse and recover archived tasks',open:()=>setArchiveOpen(true)},
+          ]}/>
+
       </Window>
       {detailIssueNumber !== null ? (
         <TaskDetailModal
