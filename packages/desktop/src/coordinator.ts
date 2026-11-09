@@ -1,3 +1,6 @@
+import {getProviderHandlers} from './providers-ipc.js';
+import {routingState,saveRouting} from './routing-state.js';
+import {invalidateCapacity} from './routing-capacity.js';
 import {newPersonaLibrary, editPersonaLibrary, type PersonaLibrary} from './persona-library.js';
 import {enqueueWake, deliverWake, reconcileAuthority, acknowledgeWake, type Outbound, type Wake, type HostAdapter} from './coordinator-outbound.js';
 import {createCheckpoint, requestCheckpoint, readCheckpoint} from './worker-checkpoint.js';
@@ -14,7 +17,7 @@ import type { Handlers,AgentSupervisor } from '@kanborg/api';
 import { withStatusLabel } from '@kanborg/core';
 import type { IssueSource } from '@kanborg/core';
 import type { Store } from '@kanborg/local-store';
-import { COORDINATOR_TOOLS,COORDINATOR_GUIDE,COORDINATOR_REMINDER,REPO_ONBOARDING_PROMPT,validateCoordinatorArgs } from '@kanborg/mcp';
+import { APP_CONTROLS, APP_CONTROL_EQUIVALENTS,COORDINATOR_TOOLS,COORDINATOR_GUIDE,COORDINATOR_REMINDER,REPO_ONBOARDING_PROMPT,validateCoordinatorArgs } from '@kanborg/mcp';
 import { collectCapacity } from './routing-capacity.js';
 const exec=promisify(execFile);
 const hash=(v:string)=>createHash('sha256').update(v).digest('hex');
@@ -32,9 +35,11 @@ type CoordinatorRequest={id:string;kind:'discovery'|'resume-workflows'|'workflow
 type ScheduleReceipt={id?:string;status:'active'|'paused'|'unsupported';cadenceMinutes?:number;cursor?:number;confirmedAt:string};
 type ChatDraft={id:string;body:string;steer:boolean;state:'queued'|'sending'|'sent'|'failed';createdAt:string;error?:string};
 type UserQuestion={id:number;runId:number;threadId:number;question:string;options:Array<{value:string;label:string}>;state:string;reply?:string;responseRunId?:number;explanationAfter?:number};
-type Workspace={personas?:PersonaLibrary;outbound?:Outbound;questions?:UserQuestion[];chatOutbox?:ChatDraft[];updateDrain?:{priorStatus:string;at:string;requestId?:string};expediting?:boolean;autopilot?:{status:string;personas:Array<{id:string;name:string;prompt:string}>;effort:string;parallelism:number;objective:string;updatedAt:string;legacyWork:unknown[]};workflow?:WorkflowState;workflowSignals?:Record<string,string>;schedules?:Record<string,ScheduleReceipt>;requests?:CoordinatorRequest[];handoff?:Handoff;queue?:Array<{autopilot?:boolean;id:string;number:number;budgetUsd:number;qa:boolean;maxReworks:number;readOnly:boolean}>;onboardedAt?:string;inventory?:Record<string,{number:number;kind:string;evidence:string;verifiedAt:string;sourceHash?:string}>;id:string;path:string;revision:number;mode:'internal'|'external'|'off';controller:string|null;leaseUntil:number;epoch:number;conversationId?:number;objective:string;summary:string;parallelism:number;qaDefault:boolean;maxReworks:number;budgetUsd:number;dependencies:Record<string,number[]>;jobs:Job[];releases:Release[];decisions:Array<{id:string;cardId:number;value:string;question?:string;label?:string;state:string}>;events:Array<{cursor:number;at:string;type:string;data:unknown}>;nextCursor:number;snapshot?:string;receipts:Record<string,{digest:string;state:string;result?:unknown;error?:string}>};
+type Workspace={sharedChats?:number[];ownerActions?:Array<{id:string;action:string;target:string;reason:string;epoch:number;state:string;result?:unknown;error?:string}>;uiPreferences?:{version:number;value:Record<string,any>};personas?:PersonaLibrary;outbound?:Outbound;questions?:UserQuestion[];chatOutbox?:ChatDraft[];updateDrain?:{priorStatus:string;at:string;requestId?:string};expediting?:boolean;autopilot?:{status:string;personas:Array<{id:string;name:string;prompt:string}>;effort:string;parallelism:number;objective:string;updatedAt:string;legacyWork:unknown[]};workflow?:WorkflowState;workflowSignals?:Record<string,string>;schedules?:Record<string,ScheduleReceipt>;requests?:CoordinatorRequest[];handoff?:Handoff;queue?:Array<{autopilot?:boolean;id:string;number:number;budgetUsd:number;qa:boolean;maxReworks:number;readOnly:boolean}>;onboardedAt?:string;inventory?:Record<string,{number:number;kind:string;evidence:string;verifiedAt:string;sourceHash?:string}>;id:string;path:string;revision:number;mode:'internal'|'external'|'off';controller:string|null;leaseUntil:number;epoch:number;conversationId?:number;objective:string;summary:string;parallelism:number;qaDefault:boolean;maxReworks:number;budgetUsd:number;dependencies:Record<string,number[]>;jobs:Job[];releases:Release[];decisions:Array<{id:string;cardId:number;value:string;question?:string;label?:string;state:string}>;events:Array<{cursor:number;at:string;type:string;data:unknown}>;nextCursor:number;snapshot?:string;receipts:Record<string,{digest:string;state:string;result?:unknown;error?:string}>};
 type Registry={templates?:Record<string,{id:string;name:string;version:number;config:WorkflowConfig;updatedAt:string;actor:string}>;clients:Client[];workspaces:Workspace[]};
 export class CoordinatorService{
+  private appRuntime?: (action:string,args:Record<string,any>,path:string)=>Promise<any>;
+  setAppRuntime(fn:(action:string,args:Record<string,any>,path:string)=>Promise<any>){this.appRuntime=fn;}
   private workflowNotifier?:()=>void;
   setWorkflowNotifier(fn:()=>void){this.workflowNotifier=fn;}
   private updater?:{status:()=>any;check:()=>Promise<any>;request:(args:any,repoPath:string)=>Promise<any>;pending:()=>boolean};
@@ -116,7 +121,7 @@ export class CoordinatorService{
   }
   private outbound(w:Workspace){return w.outbound??={bindings:[],events:[]};}
   private state:Registry;private context:CoordinatorContext|null=null;private url='';private inFlight=new Map<string,Promise<any>>();private polling=false;private closing=false;private internalTokens=new Map<string,{workspaceId:string;actor:string;epoch:number;expires:number;clientId?:string}>();private launcher='';private entry='';
-  constructor(private root=app.getPath('userData')){mkdirSync(root,{recursive:true,mode:0o700});this.state=existsSync(this.file())?JSON.parse(readFileSync(this.file(),'utf8')):{clients:[],workspaces:[]};for(const w of this.state.workspaces)for(const m of w.chatOutbox??[])if(m.state==='sending'){m.state='failed';m.error='Delivery was interrupted by restart. Check the transcript before resending.';}for(const w of this.state.workspaces){if(w.handoff?.delivery==='sending'){w.handoff.delivery='failed';w.handoff.deliveryError='Wrap-up delivery was interrupted. Review the conversation before retrying.';}}for(const w of this.state.workspaces)for(const q of w.questions??[])if(q.state==='sending')q.state='pending';this.save();}
+  constructor(private root=app.getPath('userData')){mkdirSync(root,{recursive:true,mode:0o700});this.state=existsSync(this.file())?JSON.parse(readFileSync(this.file(),'utf8')):{clients:[],workspaces:[]};for(const w of this.state.workspaces)for(const m of w.chatOutbox??[])if(m.state==='sending'){m.state='failed';m.error='Delivery was interrupted by restart. Check the transcript before resending.';}for(const w of this.state.workspaces){if(w.handoff?.delivery==='sending'){w.handoff.delivery='failed';w.handoff.deliveryError='Wrap-up delivery was interrupted. Review the conversation before retrying.';}}for(const w of this.state.workspaces)for(const q of w.questions??[])if(q.state==='sending')q.state='pending';for(const w of this.state.workspaces)for(const r of w.ownerActions??[])if(r.state==='executing'){r.state='uncertain';r.error='Restart interrupted this action. Verify its actual state before requesting it again; it will not be replayed.';}this.save();}
   private file(){return join(this.root,'coordinators.json');}
   private save(){writeFileSync(this.file()+'.tmp',JSON.stringify(this.state),{mode:0o600});renameSync(this.file()+'.tmp',this.file());}
   private event(w:Workspace,type:string,data:unknown){w.events.push({cursor:w.nextCursor++,at:new Date().toISOString(),type,data});if(w.events.length>2000)w.events.splice(0,w.events.length-2000);
@@ -142,10 +147,24 @@ export class CoordinatorService{
       ...(!compact?{instruction:'Replace this workspace reminder on takeover. Pause superseded harness reminders; do not claim completion without confirmation. No continuing responsibility means pause.'}:{})};
   }
   private personaLibrary(w:Workspace){if(!w.personas){w.personas=newPersonaLibrary(basename(w.path));this.save();}return w.personas;}
-  private session(w:Workspace){const workers=w.jobs.filter(j=>j.autopilot||w.updateDrain).flatMap(j=>[j.runId,...(j.reviewRunId?[j.reviewRunId]:[])].map(runId=>{const controlId=runId===j.runId?j.controlId:j.reviewControlId;const report=controlId?readCheckpoint(this.root,controlId):null;if(report)j.checkpoint=report;return {runId,number:j.number,active:active(this.run(runId).status),state:j.state==='interrupted'?'interrupted—recovery needed':report?.state??(active(this.run(runId).status)?w.expediting?(controlId?'requested':'waiting for worker to finish (legacy run)'):'finishing':'finished'),checkpoint:report??j.checkpoint};}));const remaining=w.jobs.filter(j=>j.autopilot&&(active(this.run(j.runId).status)||(j.reviewRunId&&active(this.run(j.reviewRunId).status)))).length;return {personas:this.personaLibrary(w),epoch:w.epoch,outbound:{adapterIds:[...this.adapters.keys()],bindings:this.outbound(w).bindings,events:this.outbound(w).events.slice(-50),supported:this.adapters.size>0},chatOutbox:w.chatOutbox??[],autopilot:w.autopilot?{...w.autopilot,workers,expediting:!!w.expediting,remaining,label:w.autopilot.status==='active'?'On':remaining?`Winding down · ${remaining} tasks remaining`:'Off'}:null,workflowVersion:w.workflow?.version??1,workflowContract:w.workflow?.config??newWorkflow().config,workspaceId:w.id,revision:w.revision,mode:w.mode,controller:w.controller,leaseUntil:w.leaseUntil,objective:w.objective,summary:w.summary,authority:{coordination:'assigned-controller',release:w.workflow?.config.releaseOwner==='user'?'owner decision required; tool authorization remains enforced':'assigned-controller within owner-authorized scope',pairing:'owner-only'},checkIn:this.checkinPolicy(w),parallelism:w.parallelism,qaDefault:w.qaDefault,budgetUsd:w.budgetUsd,maxReworks:w.maxReworks,conversationId:w.conversationId,onboardedAt:w.onboardedAt,handoff:w.handoff,requests:(w.requests??[]).filter(r=>r.state!=='completed')};}
+  private session(w:Workspace){const workers=w.jobs.filter(j=>j.autopilot||w.updateDrain).flatMap(j=>[j.runId,...(j.reviewRunId?[j.reviewRunId]:[])].map(runId=>{const controlId=runId===j.runId?j.controlId:j.reviewControlId;const report=controlId?readCheckpoint(this.root,controlId):null;if(report)j.checkpoint=report;return {runId,number:j.number,active:active(this.run(runId).status),state:j.state==='interrupted'?'interrupted—recovery needed':report?.state??(active(this.run(runId).status)?w.expediting?(controlId?'requested':'waiting for worker to finish (legacy run)'):'finishing':'finished'),checkpoint:report??j.checkpoint};}));const remaining=w.jobs.filter(j=>j.autopilot&&(active(this.run(j.runId).status)||(j.reviewRunId&&active(this.run(j.reviewRunId).status)))).length;return {ownerActions:w.ownerActions??[],personas:this.personaLibrary(w),epoch:w.epoch,outbound:{adapterIds:[...this.adapters.keys()],bindings:this.outbound(w).bindings,events:this.outbound(w).events.slice(-50),supported:this.adapters.size>0},chatOutbox:w.chatOutbox??[],autopilot:w.autopilot?{...w.autopilot,workers,expediting:!!w.expediting,remaining,label:w.autopilot.status==='active'?'On':remaining?`Winding down · ${remaining} tasks remaining`:'Off'}:null,workflowVersion:w.workflow?.version??1,workflowContract:w.workflow?.config??newWorkflow().config,workspaceId:w.id,revision:w.revision,mode:w.mode,controller:w.controller,leaseUntil:w.leaseUntil,objective:w.objective,summary:w.summary,authority:{coordination:'assigned-controller',release:w.workflow?.config.releaseOwner==='user'?'owner decision required; tool authorization remains enforced':'assigned-controller within owner-authorized scope',pairing:'owner-only'},checkIn:this.checkinPolicy(w),parallelism:w.parallelism,qaDefault:w.qaDefault,budgetUsd:w.budgetUsd,maxReworks:w.maxReworks,conversationId:w.conversationId,onboardedAt:w.onboardedAt,handoff:w.handoff,requests:(w.requests??[]).filter(r=>r.state!=='completed')};}
   ui(){return {workspace:this.context?this.session(this.current()):null,workspaces:this.state.workspaces.map(w=>({id:w.id,name:basename(w.path),open:w.path===this.context?.repoPath})),clients:this.state.clients.map(({tokenHash,...c})=>c),jobs:this.context?this.current().jobs:[],queue:this.context?this.current().queue??[]:[],releases:this.context?this.current().releases:[],decisions:this.context?this.current().decisions:[],guide:COORDINATOR_GUIDE,applicationUpdate:this.updater?{...this.updater.status(),coordination:this.updateCoordination()}:null};}
-  async uiAction(action:string,args:any={}):Promise<any>{
+  async uiAction(action:string,args:any={},ownReceipt=false):Promise<any>{
     const w=this.current();
+    if(action==='owner-action-answer'){
+      const request=w.ownerActions?.find(r=>r.id===args.id&&r.state==='pending');if(!request)throw Error('Approval is no longer pending');
+      if(!args.approve){request.state='declined';this.event(w,'owner-action-declined',{id:request.id});return request;}
+      if(request.epoch!==w.epoch)throw Error('Coordinator changed; request a fresh approval');
+      request.state='executing';this.save();
+      try{if(request.action==='share-chat'){const id=Number(request.target);if(!Number.isSafeInteger(id)||id<1)throw Error('Invalid chat ID');if(!this.appRuntime)throw Error('Saved chats unavailable');await this.appRuntime('saved-chat:verify',{conversationId:id},w.path);w.sharedChats=[...new Set([...(w.sharedChats??[]),id])];}else if(request.action==='add-repo'){await this.h()['workspace:repos-add']({repoPath:request.target});}else if(request.action==='add-folder'){await this.h()['folders:add']({name:basename(request.target),path:request.target});}else if(request.action==='remove-worktree'){if(!this.appRuntime)throw Error('Desktop control unavailable');await this.appRuntime('tree-remove',{path:request.target},w.path);}else if(request.action==='configure-provider'){const result=await getProviderHandlers()['providers:test-connection']({id:request.target as any});if(!result.ok)throw Error(result.error??'Provider connection has not been verified');}else if(request.action==='remove-provider-credential'){await getProviderHandlers()['providers:save']({id:request.target as any,apiKey:null});}else if(request.action==='open-project'){if(!this.appRuntime)throw Error('Desktop control unavailable');await this.appRuntime('owner-open-project',{path:request.target},w.path);}else await this.uiAction(request.action,{id:request.target});request.result={action:request.action,target:request.target,completedAt:new Date().toISOString()};request.state='completed';this.event(w,'owner-action-completed',{id:request.id});return request;}catch(e){request.state=request.action==='configure-provider'?'pending':'failed';request.error=e instanceof Error?e.message:'Action failed';this.save();throw e;}
+    }
+    if(action==='preferences-get')return {workspaceId:w.id,boardWorkspaceId:(await this.h()['workspace:get']()).id,...(w.uiPreferences??{version:0,value:{}})};
+    if(action==='preferences-save'){
+      validateCoordinatorArgs('setUiPreferences',{workspaceId:w.id,revision:w.revision,requestId:'app-preferences-save',preferences:args.preferences});
+      const views=args.preferences.savedViews;if(views){if(new Set(views.views.map((v:any)=>v.id)).size!==views.views.length)throw Error('Saved view IDs must be unique');if(views.activeViewId!==null&&!views.views.some((v:any)=>v.id===views.activeViewId))throw Error('Active view does not exist');}const old=w.uiPreferences??{version:0,value:{}};if(args.expectedVersion!==undefined&&args.expectedVersion!==old.version)throw Error('Preferences changed; reload before saving');
+      const value={...old.value};for(const [key,patch] of Object.entries(args.preferences))value[key]={...value[key],...(patch as object)};
+      w.uiPreferences={version:old.version+1,value};this.event(w,'preferences-changed',{version:w.uiPreferences.version});return {workspaceId:w.id,boardWorkspaceId:(await this.h()['workspace:get']()).id,...w.uiPreferences};
+    }
     if(action==='upsert-persona'||action==='remove-persona'){
       const name=action==='upsert-persona'?'upsertPersona':'removePersona';
       validateCoordinatorArgs(name,{...args,workspaceId:w.id,revision:w.revision,requestId:'app-persona-change'});
@@ -207,7 +226,7 @@ export class CoordinatorService{
       return client?{...this.config(client.id)}:this.uiAction('add-client',{name});
     }
     if(action==='request-handoff'){
-      if(this.inFlight.size)throw Error('Wait for the current action to finish, then try again.');
+      if(this.inFlight.size>(ownReceipt?1:0))throw Error('Wait for the current action to finish, then try again.');
       const mode=args.mode==='internal'?'internal':'external';
       if(mode==='internal'&&!w.conversationId){const chat=await this.h()['chat:create']({title:'Project coordinator'});w.conversationId=chat.conversation.id;}
       const to=mode==='internal'?`internal:${w.conversationId}`:String(args.clientId);
@@ -224,13 +243,13 @@ export class CoordinatorService{
     if(action==='finish-handoff'){
       const h=w.handoff;if(!h||h.state==='completed')throw Error('No handoff is waiting.');
       if(h.state!=='ready'&&!args.useSavedProgress)throw Error('Waiting for the current coordinator to wrap up.');
-      const result=await this.uiAction('handoff',{mode:h.mode,clientId:h.to,summary:h.summary});
+      const result=await this.uiAction('handoff',{mode:h.mode,clientId:h.to,summary:h.summary},ownReceipt);
       h.state='completed';this.event(w,'handoff-completed',{id:h.id,from:h.from,to:h.to,instruction:pauseCheckins,usedSavedProgress:!!args.useSavedProgress});if(h.from&&w.schedules?.[h.from]?.status==='active'){enqueueWake(this.outbound(w),{workspaceId:w.id,clientId:h.from,epoch:w.epoch,kind:'retire-schedule',cursor:w.nextCursor-1,handoffId:h.id});this.save();}
       if(h.mode==='internal')return this.uiAction('chat-send',{body:'You are now the coordinator. Read getWorkspaceSummary and the saved handoff first. Reconcile active workers and pending decisions; do not duplicate work. Briefly tell the user where things stand and the next action. Do not dispatch new development until the objective is clear.'});
       return result;
     }
     if(action==='handoff'){
-      if(this.inFlight.size)throw Error('Wait for the current coordinator action to finish before handing off.');
+      if(this.inFlight.size>(ownReceipt?1:0))throw Error('Wait for the current coordinator action to finish before handing off.');
       if(args.mode!=='off'&&(await this.h()['autopilot:list-active']()).length)throw Error('Stop the active Autopilot session before choosing a coordinator.');
       const old=w.conversationId;if(old){const chat=await this.h()['chat:get']({conversationId:old});if(chat.activeRun)await this.context!.supervisor.stop(chat.activeRun.id);}
       if(args.mode==='internal'){
@@ -349,11 +368,11 @@ Never approve your own pairing. No provider API keys are needed.\n\nClaude Deskt
   async call(actor:string,scope:string,name:string,raw:unknown):Promise<any>{
     if(this.closing)throw Error('Workspace is closing; reconnect after opening it.');
     const args=validateCoordinatorArgs(name,raw);
-    if(name==='getCapabilities')return {version:'1.2.31',authority:'active-coordinator',guide:COORDINATOR_GUIDE,scope,tools:COORDINATOR_TOOLS.map(t=>t.name),releaseActions:['merge','draft-pr'],hosted:false};
+    if(name==='getCapabilities')return {version:app.getVersion(),authority:'active-coordinator',guide:COORDINATOR_GUIDE,scope,tools:COORDINATOR_TOOLS.map(t=>t.name),releaseActions:['merge','draft-pr'],hosted:false};
     if(name==='listWorkspaces')return this.state.workspaces.filter(w=>w.id===scope).map(w=>({workspaceId:w.id,name:basename(w.path),open:this.context?.repoPath===w.path}));
     if(args.workspaceId!==scope)throw Error('This connection is not permitted for that workspace');const w=this.resolve(scope);
-    if(w.path!==this.context?.repoPath&&!['getChanges','waitForChanges','getCoordinatorRequests','getApplicationUpdate','acknowledgeCoordinatorRequest','renewCoordinator','getCoordinationSession'].includes(name))throw Error('Workspace is not open. Update notices remain available through getCoordinatorRequests.');
-    if(name==='getControlCoverage')return {personas:'listPersonas/upsertPersona/removePersona; shared workspace library, active assignments unchanged',board:'listIssues/getIssue/createIssue/updateIssue/upsertWorkItem/addComment',workflows:'getWorkflow/previewWorkflowChange/applyWorkflowChange/undoWorkflowChange',workers:'dispatchTask/followUpRun/stopRun/manageAutopilot',decisions:'listDecisions/answerDecision; free-text user answers remain in app',evidence:'getRunResult/readRunLog/getDiffSummary/runQA',releases:'prepareRelease/getReleaseStatus/executeRelease subject to current authority',updates:'getApplicationUpdate/updateApplication after owner request',workspaces:'listWorkspaces; opening/selecting a different project remains owner UI only',pairing:'prepareExternalCoordinator for built-in; approval/revocation remain owner UI only',providers:'getCapacity read-only; credentials and provider configuration remain owner UI only',uiSettings:'UI only; no arbitrary UI automation proxy',existingChat:'proposeHostBinding/getOutboundEvents/acknowledgeWake/confirmHandoffReconciled; actual wake requires a supported installed adapter'};
+    if(w.path!==this.context?.repoPath&&!['getChanges','waitForChanges','getCoordinatorRequests','getApplicationUpdate','acknowledgeCoordinatorRequest','renewCoordinator','getCoordinationSession','openScopedWorkspace','listOwnerActionRequests','getControlCoverage'].includes(name))throw Error('Workspace is not open. Update notices remain available through getCoordinatorRequests.');
+    if(name==='getControlCoverage')return {operations:APP_CONTROLS.map(c=>({tool:c.tool.name,scope:'workspace',access:c.write?'controller':'read',channel:c.channel??null,action:c.action??null,startsWork:!!c.startsWork})),coordinatorTools:COORDINATOR_TOOLS.map(t=>t.name),equivalents:APP_CONTROL_EQUIVALENTS,ownerMediated:{tool:'requestOwnerAction',actions:['approve-client','revoke-client','approve-binding','revoke-binding','approve-release','share-chat','add-repo','add-folder','remove-worktree','configure-provider','remove-provider-credential','open-project']},localOnly:['Native file-picker dialogs are represented by typed path inputs; ownership-sensitive paths require owner approval.'],remaining:[],contract:'Direct operations use shared handlers. Legacy execution/release actions use the coordinator contract. Owner-mediated controls remain pending until the owner acts; they cannot be self-approved by a coordinator.'};
     if(name==='getOutboundEvents')return {epoch:w.epoch,adapterIds:[...this.adapters.keys()],bindings:this.outbound(w).bindings.filter(b=>b.clientId===actor),events:this.outbound(w).events.filter(e=>e.clientId===actor).slice(-50)};
     if(name==='proposeHostBinding'){
       const client=this.state.clients.find(c=>c.id===actor&&c.workspaceId===scope&&c.status==='approved');if(!client)throw Error('An approved external connection is required');const out=this.outbound(w);
@@ -371,8 +390,8 @@ Never approve your own pairing. No provider API keys are needed.\n\nClaude Deskt
     const isWrite=(COORDINATOR_TOOLS.find(t=>t.name===name)!.inputSchema.required as string[]).includes('requestId');
     // Reading state is not reconciliation acknowledgement.
     if(w.controller===actor&&w.mode!=='off'){w.leaseUntil=Date.now()+30*60000;this.save();}
-    if(!isWrite){const result=await this.read(w,name,args);if(['getWorkspaceSummary','getCoordinationSession'].includes(name)&&w.handoff?.from===actor&&w.handoff.state!=='requested')return {...result,coordinatorInstruction:pauseCheckins};return result;}
-    if(w.handoff&&w.handoff.state!=='completed'&&!['updateCoordinationSession','completeHandoff'].includes(name))throw Error('Handoff requested. Stop new work and call completeHandoff with a current summary.');
+    if(!isWrite){const result=await this.read(w,name,args);if(['getWorkspaceSummary','getCoordinationSession','openScopedWorkspace','listOwnerActionRequests','getControlCoverage'].includes(name)&&w.handoff?.from===actor&&w.handoff.state!=='requested')return {...result,coordinatorInstruction:pauseCheckins};return result;}
+    if(w.handoff&&w.handoff.state!=='completed'&&!['updateCoordinationSession','completeHandoff','cancelCoordinatorHandoff','finishCoordinatorHandoff','retryCoordinatorHandoff'].includes(name))throw Error('Handoff requested. Stop new work and call completeHandoff with a current summary.');
     this.assertControl(w,actor);
     if(this.updater?.pending()&&['dispatchTask','followUpRun','runQA','executeRelease','prepareExternalCoordinator'].includes(name))throw Error('An application update is waiting. Existing runs can finish; new work resumes after restart.');
     const key=actor+':'+args.requestId;const digest=hash(JSON.stringify({name,args}));const existing=w.receipts[key];
@@ -382,10 +401,54 @@ Never approve your own pairing. No provider API keys are needed.\n\nClaude Deskt
     w.receipts[key]={digest,state:'pending'};w.revision++;w.leaseUntil=Date.now()+30*60000;this.save();
     const promise=(async()=>{try{const data=await this.mutate(w,name,args);const result={revision:w.revision,data};w.receipts[key]={digest,state:'done',result};this.event(w,name,{actor,requestId:args.requestId});return result;}catch(e){w.receipts[key]={digest,state:'failed',error:clip(e instanceof Error?e.message:'Action failed',1000)};this.save();throw e;}finally{this.inFlight.delete(key);}})();this.inFlight.set(key,promise);return promise;
   }
+  private async appControl(w:Workspace,name:string,a:any):Promise<any>{
+    const control=APP_CONTROLS.find(c=>c.tool.name===name);if(!control)throw Error('Unknown app control');
+    if(w.path!==this.context?.repoPath&&!['openScopedWorkspace','listOwnerActionRequests'].includes(name))throw Error('Workspace is not open');
+    if(control.startsWork&&(this.updater?.pending()||w.updateDrain))throw Error('Update wind-down is active. Reconnect after restart.');
+    const {workspaceId,requestId,revision,...input}=a;
+    if(input.runId!==undefined&&!control.action?.startsWith('saved-chat:'))this.run(input.runId);
+    if(control.action?.startsWith('host:')){if(!this.appRuntime)throw Error('Desktop control unavailable');return this.appRuntime(control.action.slice(5),input,w.path);}
+    if(control.action?.startsWith('saved-chat:')){
+      if(!this.appRuntime)throw Error('Saved chats unavailable');
+      const action=control.action;
+      if(action==='saved-chat:list')return this.appRuntime(action,{ids:w.sharedChats??[]},w.path);
+      if(action!=='saved-chat:create'&&!(w.sharedChats??[]).includes(input.conversationId))throw Error('Chat is not shared with this workspace. Request owner action share-chat first.');
+      const result=await this.appRuntime(action,input,w.path);
+      if(action==='saved-chat:create'){w.sharedChats??=[];w.sharedChats.push(result.conversation.id);this.save();}
+      if(action==='saved-chat:delete')w.sharedChats=(w.sharedChats??[]).filter(id=>id!==input.conversationId);
+      return result;
+    }
+    if(control.action==='attachment-upload'){if(!/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(input.base64))throw Error('Invalid base64 attachment');return this.h()['attachments:upload']({contentType:input.contentType,data:Buffer.from(input.base64,'base64')});}
+    if(control.action==='owner-actions')return w.ownerActions??[];
+    if(control.action==='owner-action-request'){const request={id:randomUUID(),action:input.action,target:input.target,reason:input.reason,epoch:w.epoch,state:'pending'};w.ownerActions??=[];w.ownerActions.push(request);this.event(w,'owner-action-requested',{id:request.id});return request;}
+    if(control.action==='queue-get')return w.queue??[];
+    if(control.action==='queue-cancel'||control.action==='queue-update'){const queued=w.queue?.find(q=>q.id===input.id);if(!queued)throw Error('Assignment already started or does not exist');if(control.action==='queue-cancel'){w.queue=w.queue!.filter(q=>q.id!==input.id);return {cancelled:input.id};}Object.assign(queued,input);return queued;}
+    if(control.action==='issue-labels'){const current=(await this.h()['issues:get']({number:input.number})).issue;const patch:any={};if(input.labels){const stage=(labels:string[])=>labels.filter(l=>l.startsWith('status:')).sort().join(',');if(stage(input.labels)!==stage(current.labels))throw Error('Use updateWorkflowCard to change stages');patch.labels=input.labels;}if(input.assignees)patch.assignees=input.assignees;return this.h()['issues:patch']({number:input.number,patch});}
+    if(control.action==='api-metadata'){
+      const handlers=getProviderHandlers();const settings=await handlers['providers:get']();const current=settings.apiConnections?.find(c=>c.id===input.connectionId);if(!current)throw Error('API connection does not exist');
+      const {balanceUpdatedAt,organizationId,workspaceId,keyPreview,models,checkedAt,status,reportedSpend,spendCheckedAt,billingStatus,...editable}=current;
+      return handlers['providers:save']({id:input.id,connection:{...editable,...input.changes}});
+    }
+    if(control.action==='routing-get')return routingState();
+    if(control.action==='routing-save'){const result=saveRouting(input.config);invalidateCapacity();return result;}
+    if(control.action==='capacity-refresh')return (await collectCapacity(false,true)).snapshot;
+    if(control.action==='connections-list')return this.state.clients.filter(c=>c.workspaceId===w.id).map(({tokenHash,...c})=>c);
+    if(control.action==='handoff-status')return {epoch:w.epoch,controller:w.controller,handoff:w.handoff??null,schedules:w.schedules??{}};
+    if(control.action==='templates-list')return Object.values(this.state.templates??{});
+    if(control.action==='template-remove'){const template=this.state.templates?.[input.id];if(!template)throw Error('Template not found');delete this.state.templates![input.id];this.event(w,'workflow-template-removed',{id:input.id,previous:template});return {removed:input.id};}
+    if(control.action==='persona-restore'){const library=this.personaLibrary(w);const previous=library.history.find(h=>h.id===input.id&&h.previous?.version===input.version)?.previous;if(!previous)throw Error('Historical persona version not found');return editPersonaLibrary(library,'upsert',{persona:previous,reason:input.reason},w.controller!,w.autopilot?.personas.map(p=>p.id)??[]);}
+    if(control.action==='question-explain')return this.uiAction('question-reply',{...input,explain:true});
+    if(control.action==='chat-get')return {conversation:await this.uiAction('chat-get'),queue:w.chatOutbox??[]};
+    if(control.action){const result=await this.uiAction(control.action,input,true);if(result?.workspaces&&result?.clients)return {...result,workspaces:result.workspaces.filter((x:any)=>x.id===w.id),clients:result.clients.filter((x:any)=>x.workspaceId===w.id)};return result;}
+    const handler=(control.channel?.startsWith('providers:')?getProviderHandlers() as Partial<Handlers>:this.h())[control.channel as keyof Handlers];if(!handler)throw Error('App control unavailable');
+    return (handler as (input:any)=>Promise<any>)(input);
+  }
   private async read(w:Workspace,name:string,a:any):Promise<any>{
     if(name==='listPersonas')return this.personaLibrary(w);
     if(name==='getChanges'||name==='waitForChanges'){const start=Date.now();const wait=name==='waitForChanges'?(a.timeoutMs??20000):0;while(w.nextCursor-1<=(a.cursor??0)&&Date.now()-start<wait)await new Promise(r=>setTimeout(r,250));const events=w.events.filter(e=>e.cursor>(a.cursor??0)).slice(0,50);return {workflowVersion:w.workflow?.version??1,control:{controller:w.controller,mode:w.mode,leaseUntil:w.leaseUntil},handoff:w.handoff?{id:w.handoff.id,state:w.handoff.state,from:w.handoff.from,to:w.handoff.to}:null,pendingRequestIds:(w.requests??[]).filter(r=>r.state!=='completed').map(r=>r.id),checkIn:this.checkinPolicy(w,true),events,cursor:events.at(-1)?.cursor??a.cursor??0,resetRequired:(a.cursor??0)<(w.events[0]?.cursor??0)-1,revision:w.revision};}
     if(w.path!==this.context?.repoPath){if(name==='getCoordinatorRequests')return (w.requests??[]).filter(r=>r.state!=='completed');if(name==='getApplicationUpdate')return {...await this.updater?.check(),coordination:this.updateCoordination()};if(name==='getCoordinationSession')return {workspaceId:w.id,revision:w.revision,epoch:w.epoch,mode:w.mode,controller:w.controller,open:false,requests:(w.requests??[]).filter(r=>r.state!=='completed'),updateDrain:w.updateDrain,summary:w.summary};}
+    const control=APP_CONTROLS.find(c=>c.tool.name===name);
+    if(control&&!control.write)return this.appControl(w,name,a);
     const h=this.h();
     switch(name){
       case 'getWorkflow':return this.workflowAction(w,'get',a,w.controller??'observer');
@@ -409,6 +472,7 @@ Never approve your own pairing. No provider API keys are needed.\n\nClaude Deskt
   }
   private async mutate(w:Workspace,name:string,a:any):Promise<any>{
     if(name==='acknowledgeCoordinatorRequest'){const r=w.requests?.find(r=>r.id===a.id);if(!r)throw Error('Request not found.');if(r.state!=='completed'){r.state=a.state;r.receivedBy=w.controller!;}return r;}
+    const control=APP_CONTROLS.find(c=>c.tool.name===name);if(control?.write)return this.appControl(w,name,a);
     const h=this.h();
     switch(name){
       case 'recordWorkflowEvent':if(!a.evidence.trim())throw Error('Record the exact revision and supporting evidence.');await this.workflowSignal(w,a.number,a.event,a.evidence,a.requestId);return workflowGuidance(w.workflow!,a.number);

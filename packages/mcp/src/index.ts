@@ -283,3 +283,5 @@ export type ToolName = (typeof KANBOTS_TOOLS)[number]['name'];
 
 export { COORDINATOR_TOOLS, COORDINATOR_GUIDE, COORDINATOR_REMINDER, validateCoordinatorArgs } from './coordinator.js';
 export { REPO_ONBOARDING_PROMPT } from './onboarding.js';
+
+export { APP_CONTROLS, APP_CONTROL_EQUIVALENTS } from './app-controls.js';

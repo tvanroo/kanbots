@@ -1,5 +1,5 @@
 import { exec, execFile } from 'node:child_process';
-import { readdir, readFile, stat } from 'node:fs/promises';
+import { readdir, readFile, stat, realpath, open } from 'node:fs/promises';
 import { isAbsolute, join, normalize, relative, resolve, sep } from 'node:path';
 import { promisify } from 'node:util';
 import { clipboard, dialog, ipcMain, shell, type WebContents } from 'electron';
@@ -599,3 +599,28 @@ export function repoRelativePath(absPath: string): string | null {
   return rel.split(sep).join('/');
 }
 
+
+/** Scoped read adapter shared with the coordinator; no arbitrary host paths. */
+export async function workspaceTreeControl(root:string,action:string,args:{path?:string}):Promise<unknown>{
+ if(action==='tree-worktrees'){const records=await parseWorktreeList(root);return Promise.all(records.map(async record=>({...record,dirtyCount:(await statusForWorktree(record.path)).length})));}
+ if(action==='tree-status')return worktreeStatus(root);
+ if(['tree-reveal','tree-copy','tree-remove'].includes(action)){
+  const records=await parseWorktreeList(root);const record=records.find(r=>resolve(r.path)===resolve(args.path??''));if(!record)throw Error('Not a worktree of the paired project');
+  if(action==='tree-reveal'){const error=await shell.openPath(record.path);if(error)throw Error(error);return {revealed:record.path};}
+  if(action==='tree-copy'){clipboard.writeText(record.path);return {copied:true};}
+  if(record.isMain||record.locked)throw Error('Cannot remove the main or locked worktree');
+  if((await statusForWorktree(record.path)).length)throw Error('Worktree has unsaved changes; preserve or commit them before removal');
+  await removeGitWorktree({repoPath:root,worktreePath:record.path});return {removed:record.path};
+ }
+ if(action==='tree-list'||action==='tree-read'){
+  const path=args.path??'';const lexical=resolveSafe(root,path);if(!lexical)throw Error('Path leaves the paired project');
+  const [base,target]=await Promise.all([realpath(root),realpath(lexical)]);if(target!==base&&!target.startsWith(base+sep))throw Error('Symlink leaves the paired project');
+  if((path+'/'+relative(base,target)).split(/[\\/]/).some(p=>p==='.git'||p==='.kanbots'))throw Error('Internal state is not a source directory');
+  if(action==='tree-read'){
+   if((path+'/'+relative(base,target)).split(/[\\/]/).some(p=>/^\.env(?:\.|$)|^\.(?:npmrc|netrc|pypirc|ssh|aws)$|credentials|secrets|\.(?:pem|key|p12|p8)$/i.test(p)))throw Error('Credential files are not exposed through source inspection');
+   const handle=await open(target,'r');try{const info=await handle.stat();if(!info.isFile())throw Error('Not a regular source file');const buffer=Buffer.alloc(Math.min(info.size,MAX_FILE_READ_BYTES));const {bytesRead}=await handle.read(buffer,0,buffer.length,0);const content=buffer.subarray(0,bytesRead);return {content:content.includes(0)?null:content.toString('utf8'),isBinary:content.includes(0),size:info.size,truncated:info.size>bytesRead};}finally{await handle.close();}
+  }
+  return readDirEntries(root,path);
+ }
+ throw Error('Unknown workspace tree operation');
+}

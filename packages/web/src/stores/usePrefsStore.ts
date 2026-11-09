@@ -1,3 +1,4 @@
+import {getBridge} from '../desktop-bridge.js';
 import { create } from 'zustand';
 import { persist, type PersistStorage, type StorageValue } from 'zustand/middleware';
 
@@ -571,3 +572,29 @@ export const useWorkspaceBoardViews = (
   usePrefsStore((s) =>
     workspaceId === null ? null : (s.boardViews[workspaceId] ?? null),
   );
+
+// Desktop preferences are shared with the scoped coordinator. Browser-only mode
+// retains local persistence. Apply remote snapshots without echoing them back.
+if (typeof window !== 'undefined' && getBridge()?.coordinatorAction) {
+ let applying=false,ready=false,version=0,busy=false,workspaceId:string|undefined,boardWorkspaceId:string|undefined;
+ let pending:Record<string,unknown>={};
+ const snapshot=()=>{const s=usePrefsStore.getState();return {tweaks:s.tweaks,diff:s.diff,board:s.board,savedViews:boardWorkspaceId?s.boardViews[boardWorkspaceId]??{views:[],activeViewId:null,seeded:false}:{views:[],activeViewId:null,seeded:false}};};
+ let previous=snapshot();
+ usePrefsStore.subscribe(()=>{
+  const next=snapshot();
+  if(!applying)for(const key of ['tweaks','diff','board','savedViews'] as const){const changed:Record<string,unknown>={};for(const [field,value] of Object.entries(next[key]))if(JSON.stringify(value)!==JSON.stringify((previous[key] as any)[field]))changed[field]=value;if(Object.keys(changed).length)pending[key]={...(pending[key] as object??{}),...changed};}
+  previous=next;
+ });
+ const sync=async()=>{
+  if(busy)return;busy=true;
+  try{
+   const bridge=getBridge();let saved=await bridge?.coordinatorAction?.('preferences-get');if(!saved)return;
+   if(workspaceId!==saved.workspaceId){if(workspaceId)pending={};workspaceId=saved.workspaceId;boardWorkspaceId=saved.boardWorkspaceId;previous=snapshot();ready=false;version=-1;}
+   if(!ready&&saved.version===0)pending={...snapshot(),...pending};
+   if(Object.keys(pending).length){const change=pending;pending={};try{saved=await bridge?.coordinatorAction?.('preferences-save',{preferences:change,expectedVersion:saved.version});}catch{for(const [key,value] of Object.entries(change))pending[key]={...(value as object),...(pending[key] as object??{})};return;}}
+   if(saved.version!==version){applying=true;const local=snapshot();const patch:any={};for(const key of ['tweaks','diff','board','savedViews'] as const)if(saved.value[key])patch[key]={...local[key],...saved.value[key]};if(patch.savedViews){patch.boardViews={...usePrefsStore.getState().boardViews,[boardWorkspaceId!]:patch.savedViews};delete patch.savedViews;}usePrefsStore.setState(patch);applying=false;version=saved.version;}
+   ready=true;
+  }catch{/* Keep unsaved edits; workspace may be switching. */}finally{applying=false;busy=false;}
+ };
+ void sync();window.setInterval(()=>void sync(),2000);
+}

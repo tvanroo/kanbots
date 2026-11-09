@@ -38,7 +38,7 @@ export function getAppStore(): Store {
   return appStore;
 }
 
-export function registerProvidersIpc(): void {
+export function getProviderHandlers(): ProvidersHandlers {
   const runtime: ProvidersRuntime = {
     safeStorageAvailable,
     hasClaudeCodeCredentials: isClaudeAuthenticated,
@@ -55,7 +55,11 @@ export function registerProvidersIpc(): void {
     },
     providers: runtime,
   };
-  const handlers: ProvidersHandlers = createProvidersHandlers(deps);
+  return createProvidersHandlers(deps);
+}
+
+export function registerProvidersIpc(): void {
+  const handlers=getProviderHandlers();
 
   const channels = Object.keys(handlers) as ReadonlyArray<
     keyof ProvidersHandlers & string

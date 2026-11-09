@@ -143,6 +143,7 @@ import {
 } from './providers-ipc.js';
 import {
   broadcastWorkspaceTouched,
+  workspaceTreeControl,
   registerWorkspaceTreeIpc,
 } from './workspace-tree-ipc.js';
 import { SentryPoller } from './sentry-poller.js';
@@ -884,14 +885,14 @@ async function ensureDeviceChat(): Promise<{
   return { store, supervisor };
 }
 
+let deviceChatHandlers: ChatHandlers | null = null;
+async function getDeviceChatHandlers(): Promise<ChatHandlers> {
+  if (deviceChatHandlers !== null) return deviceChatHandlers;
+  const { store, supervisor } = await ensureDeviceChat();
+  deviceChatHandlers = createChatHandlers({ store: { ...store, providerSettings: getAppStore().providerSettings }, supervisor });
+  return deviceChatHandlers;
+}
 function registerDeviceChatIpc(): void {
-  let handlers: ChatHandlers | null = null;
-  async function getHandlers(): Promise<ChatHandlers> {
-    if (handlers !== null) return handlers;
-    const { store, supervisor } = await ensureDeviceChat();
-    handlers = createChatHandlers({ store: { ...store, providerSettings: getAppStore().providerSettings }, supervisor });
-    return handlers;
-  }
   const channels: Array<keyof ChatHandlers> = [
     'chat:list',
     'chat:create',
@@ -911,7 +912,7 @@ function registerDeviceChatIpc(): void {
       `kanbots:invoke:${channel}`,
       async (_event, args: unknown) => {
         try {
-          const map = await getHandlers();
+          const map = await getDeviceChatHandlers();
           // The Handlers map types args per-channel; the IPC bridge passes them
           // through opaquely so the runtime cast is safe.
           const fn = map[channel] as (a: unknown) => Promise<unknown>;
@@ -1513,6 +1514,49 @@ if (ownsLocalInstance) void app.whenReady().then(async () => {
   configureCodexUsageSnapshot(join(app.getPath('userData'), 'codex-usage-snapshot.json'));
   selfUpdater=new SelfUpdater();
   coordinators=new CoordinatorService();
+  coordinators.setAppRuntime(async(action,args,path)=>{
+    if(action==='workspace-open'){
+      if(activeWorkspace&&activeWorkspace.repoPath!==path)throw Error('Another project is open; close it through its own scoped connection first');
+      if(activeWorkspace)return {accepted:true,open:true};
+      setImmediate(()=>void openWorkspaceInternal(path).then(()=>mainWindow?.webContents.reloadIgnoringCache()).catch(e=>console.error('Scoped workspace reopen failed:',e instanceof Error?e.message:'unknown error')));
+      return {accepted:true,open:false,verifyWith:'listWorkspaces'};
+    }
+    if(activeWorkspace?.repoPath!==path)throw Error('Workspace is not active');
+    if(action==='owner-open-project'){
+      if(activeWorkspace.store.agentRuns.listActive().some(blocksUpdate)||activeWorkspace.autopilot.listActive().length)throw Error('Workers are active. Wind down before switching projects.');
+      await openWorkspaceInternal(args.path);mainWindow?.webContents.reloadIgnoringCache();return {open:true};
+    }
+    if(action==='workspace-close'){
+      if(activeWorkspace.store.agentRuns.listActive().some(blocksUpdate)||activeWorkspace.autopilot.listActive().length)throw Error('Workers are active. Wind down before closing the workspace.');
+      setImmediate(()=>void closeActiveWorkspace().then(()=>mainWindow?.webContents.reloadIgnoringCache()).catch(()=>{}));
+      return {accepted:true,verifyWith:'listWorkspaces'};
+    }
+
+    if(action==='tree-remove'&&activeWorkspace.store.agentRuns.listActive().some(r=>r.worktreePath===args.path))throw Error('A worker still owns this worktree');
+    if(action.startsWith('tree-'))return workspaceTreeControl(path,action,args);
+    if(action.startsWith('saved-chat:')){
+      const handlers=await getDeviceChatHandlers();
+      if(action==='saved-chat:list')return (await handlers['chat:list']()).filter(c=>(args.ids as number[]).includes(c.id));
+      const allowed=['create','get','rename','delete','post-message','stop-run','sessions:list','sessions:create','sessions:rename','sessions:delete','sessions:set-active','verify'];
+      const operation=action.slice('saved-chat:'.length);if(!allowed.includes(operation))throw Error('Unknown saved chat control');
+      if(operation==='verify'){await handlers['chat:get']({conversationId:args.conversationId});return {exists:true};}
+      if(operation!=='create'){
+        const payload=await handlers['chat:get']({conversationId:args.conversationId});
+        if(args.runId!==undefined){const run=deviceChatStore!.agentRuns.findById(args.runId);if(!run||run.threadId!==payload.conversation.threadId)throw Error('Run belongs to another chat');}
+        if(args.id!==undefined||args.sessionId!==undefined){const sessions=await handlers['chat:sessions:list']({conversationId:args.conversationId});if(!sessions.some(s=>s.id===(args.id??args.sessionId)))throw Error('Session belongs to another chat');}
+      }
+      const channel=`chat:${operation}` as keyof ChatHandlers;
+      const input={...args};if(['sessions:rename','sessions:delete','stop-run'].includes(operation))delete input.conversationId;
+      return (handlers[channel] as (a:any)=>Promise<any>)(input);
+    }
+    if(action==='auth-status')return {authed:args.provider==='claude'?await isClaudeAuthenticated(true):await isCodexAuthenticated()};
+    if(action==='auth-start')return args.provider==='claude'?startClaudeLogin(true):startCodexLogin();
+    if(action==='auth-cancel'){if(args.provider==='claude')cancelClaudeLogin();else cancelCodexLogin();return {cancelled:true};}
+    if(action==='notifications-get')return {enabled:activeWorkspace.config.notifyOnRunComplete??false};
+    if(action==='notifications-set'){const next={...activeWorkspace.config,notifyOnRunComplete:args.enabled};await writeWorkspaceConfig(path,next);activeWorkspace.config=next;return {enabled:next.notifyOnRunComplete};}
+    if(action==='window'){if(!mainWindow)throw Error('App window unavailable');if(args.action==='focus'){mainWindow.show();mainWindow.focus();}else if(args.action==='minimize')mainWindow.minimize();else if(args.action==='maximize')mainWindow.maximize();else mainWindow.unmaximize();return {minimized:mainWindow.isMinimized(),maximized:mainWindow.isMaximized()};}
+    throw Error('Unknown desktop control');
+  });
   await registerMacCodexCliAdapter(adapter => coordinators.registerHostAdapter(adapter));
   coordinators.setWorkflowNotifier(()=>{for(const window of BrowserWindow.getAllWindows())window.webContents.send('workflow:changed',{});});
   coordinators.setUpdater({status:()=>selfUpdater.status(),check:()=>selfUpdater.check(),request:async(a,p)=>{try{const result=await selfUpdater.enqueue(a,p);if(a.action!=='cancel')coordinators.beginUpdateWindDown();return result;}finally{if(!selfUpdater.pending()&&['cancelled','failed','completed'].includes(selfUpdater.status().update?.phase??''))coordinators.endUpdateWindDown();}},pending:()=>selfUpdater.pending()});

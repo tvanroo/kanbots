@@ -1,3 +1,4 @@
+import { APP_CONTROL_TOOLS } from './app-controls.js';
 import { workflowChangeFields, workflowCardFields } from './workflow-schema.js';
 import type { ToolDef } from './index.js';
 const s={type:'string'}, n={type:'integer',minimum:1}, cursor={type:'integer',minimum:0};
@@ -5,6 +6,7 @@ const workspace={workspaceId:s};
 const mutation={...workspace,requestId:{type:'string',minLength:8,maxLength:120},revision:cursor};
 function tool(name:string,description:string,properties:Record<string,unknown>,required:string[]=[]):ToolDef{return {name,description,inputSchema:{type:'object',additionalProperties:false,properties,required}};}
 export const COORDINATOR_TOOLS:readonly ToolDef[]=[
+  ...APP_CONTROL_TOOLS,
   tool('listPersonas','Read the workspace persona library, version and history. Persona edits do not change active assignments.',workspace,['workspaceId']),
   tool('upsertPersona','Save a substantive workspace persona. App and MCP share this library. Updating a definition does not alter current Autopilot selection or running worker instructions.',{...mutation,reason:{type:'string',minLength:1,maxLength:2000},persona:{type:'object',additionalProperties:false,properties:{id:{type:'string',minLength:1,maxLength:120},name:{type:'string',minLength:1,maxLength:100},tagline:{type:'string',maxLength:300},emoji:{type:'string',maxLength:20},prompt:{type:'string',minLength:20,maxLength:30000}},required:['id','name','tagline','emoji','prompt']}},['workspaceId','requestId','revision','reason','persona']),
   tool('removePersona','Remove a workspace persona definition, retaining its history. Rejects selected Autopilot personas; running worker instructions are unchanged.',{...mutation,id:{type:'string',minLength:1,maxLength:120},reason:{type:'string',minLength:1,maxLength:2000}},['workspaceId','requestId','revision','id','reason']),
@@ -65,20 +67,23 @@ export function validateCoordinatorArgs(name:string,value:unknown):Record<string
   const def=COORDINATOR_TOOLS.find(t=>t.name===name);if(!def)throw Error('Unknown coordinator tool');
   const check=(v:any,schema:any,depth=0):void=>{
     if(depth>9)throw Error('Input nesting exceeds limit');
+    if(schema.anyOf){for(const choice of schema.anyOf){try{check(v,choice,depth+1);return;}catch{}}throw Error('Invalid value');}
+    if(schema.type==='null'){if(v!==null)throw Error('Expected null');return;}
     if(schema.type==='object'){
       if(!v||Array.isArray(v)||typeof v!=='object')throw Error('Expected object');
       for(const k of schema.required??[])if(v[k]===undefined)throw Error(`Missing ${k}`);
       for(const [k,x] of Object.entries(v)){if(!schema.properties[k])throw Error(`Unexpected field ${k}`);check(x,schema.properties[k],depth+1);}
-    }else if(schema.type==='array'){if(!Array.isArray(v)||v.length>(schema.maxItems??100))throw Error('Invalid array');for(const x of v)check(x,schema.items,depth+1);}
+    }else if(schema.type==='array'){if(!Array.isArray(v)||v.length<(schema.minItems??0)||v.length>(schema.maxItems??100))throw Error('Invalid array');for(const x of v)check(x,schema.items,depth+1);}
     else if(schema.type==='string'){if(typeof v!=='string'||v.length<(schema.minLength??0)||v.length>(schema.maxLength??16000))throw Error('Invalid text');}
     else if(schema.type==='boolean'){if(typeof v!=='boolean')throw Error('Expected boolean');}
-    else if(typeof v!=='number'||!Number.isFinite(v)||(schema.type==='integer'&&!Number.isInteger(v))||v<(schema.minimum??-Infinity)||v>(schema.maximum??Infinity))throw Error('Invalid number');
+    else if(typeof v!=='number'||!Number.isFinite(v)||(schema.type==='integer'&&!Number.isInteger(v))||v<(schema.minimum??-Infinity)||v>(schema.maximum??Infinity)||(schema.exclusiveMinimum!==undefined&&v<=schema.exclusiveMinimum))throw Error('Invalid number');
     if(schema.enum&&!schema.enum.includes(v))throw Error('Invalid choice');
   };
   check(value??{},def.inputSchema);return (value??{}) as Record<string,any>;
 }
 export const COORDINATOR_REMINDER = 'Check this workspace as its assigned coordinator. Read changes since the saved cursor and handle authorized requests using the durable coordination state. Preserve active ownership and avoid duplicate work. If control has moved, stop and pause this schedule. Notify the owner only for meaningful outcomes or decisions requiring them.';
-export const COORDINATOR_GUIDE = `Read getWorkflow for the current stage contract and task-specific completion rules. Routine user-requested workflow edits require no additional approval: read, translate to a structured config preserving stage IDs, preview affected cards, applyWorkflowChange and verify the returned result. Do not promise a chat-only change. Use updateWorkflowCard to record evidence, review ownership, waiting reason and next trigger. Research and QA supporting cards may finish after their deliverables are accepted; implementation and release cards need their configured delivery evidence. A failed or interrupted run is recovery work, never review-ready solely because it stopped. Use evidence before reconciling stale Review cards. Keep exact merge and deployment revisions distinct. Workflow configuration never expands credentials or tool authority.
+export const COORDINATOR_GUIDE = `Use getControlCoverage to discover app controls and legacy-action equivalents. Non-secret settings, saved views, personas and templates use the same persisted configuration as the app. Every write needs the current revision and a stable requestId; an uncertain result is not permission to replay. Use requestOwnerAction for protected actions and read its durable receipt; never approve your own request. Saved device chats require explicit workspace sharing or creation through this connection; reuse existing chats for continuations.
+Read getWorkflow for the current stage contract and task-specific completion rules. Routine user-requested workflow edits require no additional approval: read, translate to a structured config preserving stage IDs, preview affected cards, applyWorkflowChange and verify the returned result. Do not promise a chat-only change. Use updateWorkflowCard to record evidence, review ownership, waiting reason and next trigger. Research and QA supporting cards may finish after their deliverables are accepted; implementation and release cards need their configured delivery evidence. A failed or interrupted run is recovery work, never review-ready solely because it stopped. Use evidence before reconciling stale Review cards. Keep exact merge and deployment revisions distinct. Workflow configuration never expands credentials or tool authority.
 After workflow changes, update the SAME existing workspace schedule to the current checkIn policy using authorized harness tools; record its confirmed receipt. Never create a second reminder. Re-read workflowVersion when change events report it. Hand off review responsibility, release state and waiting triggers along with running workers.
 On an existing-chat wake, call getOutboundEvents, verify the event epoch and assigned control, acknowledgeWake as received, read authoritative requests and changes, act within scope, then acknowledgeWake as acted with a compact outcome summary. After a handoff, read session, active workers, decisions and evidence before confirmHandoffReconciled. Never infer receipt from transport acceptance.
 You are the active coordinator. KanBorg executes workers and records work; you make coordination decisions within owner-authorized scope. Delegate implementation and independent QA through dispatchTask. Answer routine worker questions with answerDecision; escalate only owner-reserved actions. Pairing always requires the owner. Release authority is separate from coordinator ownership: use the current session authority, never inherit a historical harness instruction. QA findings and dependencies are advisory; exact revision, scope and single-controller checks remain enforced.
