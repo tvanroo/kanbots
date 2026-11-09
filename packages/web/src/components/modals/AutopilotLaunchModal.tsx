@@ -47,7 +47,7 @@ export function AutopilotLaunchModal({ onClose, onStarted }: AutopilotLaunchModa
 
   useEffect(()=>{
     const items=coordinator?.workspace?.personas?.items;
-    if(items)setPersonas(current=>mergeAutopilotPersonas(current,items));
+    if(items)setPersonas(current=>mergeAutopilotPersonas(mergeAutopilotPersonas(listPersonas(),current.filter(p=>selectedIds.has(p.id))),items));
   },[coordinator?.workspace?.personas?.version]);
 
   const selected = useMemo(
