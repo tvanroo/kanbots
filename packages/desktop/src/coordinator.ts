@@ -122,9 +122,11 @@ export class CoordinatorService{
     if(tracking&&Date.now()-tracking.lastAttemptAt<120_000)return;
     const prompt=`Autopilot target: ${capacity.target} active workers; currently ${capacity.active}, ${capacity.missing} slots open. Maintain the configured target now. Reconcile active work and checkpoints, resume eligible existing assignments, then assign distinct authorized ready work using saved perspectives and automatic routing. Queue additional approved assignments so KanBorg can refill immediately when workers finish. Do not duplicate tasks, invent busywork, or exceed the target. If dependencies, capacity, or owner decisions prevent filling slots, record the concrete blocker and next action in the coordination summary. Recheck current control and Autopilot status before dispatch; Off, handoff and update wind-down suspend replenishment. Acknowledge this request received, then completed after assignments are running or blockers are recorded.`;
     const request=tracking&&w.requests?.find(r=>r.id===tracking.requestId);
-    if(request){request.state='queued';request.prompt=prompt;delete request.error;delete request.receivedBy;}
-    else{w.requests??=[];w.requests.push({id:`autopilot-capacity:${w.epoch}:${randomUUID()}`,kind:'autopilot',state:'queued',createdAt:new Date().toISOString(),prompt});}
-    const id=request?.id??w.requests![w.requests!.length-1]!.id;
+    // Each attempt gets a fresh identity: late or replayed acknowledgements for
+    // an earlier attempt must never consume the current replenishment request.
+    if(request)request.state='completed';
+    const id=`autopilot-capacity:${w.epoch}:${randomUUID()}`;
+    w.requests??=[];w.requests.push({id,kind:'autopilot',state:'queued',createdAt:new Date().toISOString(),prompt});
     w.replenishment={requestId:id,epoch:w.epoch,lastAttemptAt:Date.now()};w.revision++;
     this.event(w,'coordinator-request',{requestId:id,kind:'autopilot',capacity});
   }
