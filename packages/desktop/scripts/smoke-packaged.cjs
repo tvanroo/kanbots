@@ -68,7 +68,9 @@ const net=require('node:net');
    await new Promise(r=>setTimeout(r,800));
    const workflow=await call('Runtime.evaluate',{expression:`!!document.querySelector('.wf-scrim')`,returnByValue:true});
    if(!workflow.result.value)throw Error('Workflow editor did not open');
-   console.log(JSON.stringify({navigationScreens:8,workflowEditor:true,passed:true}));
+   await call('Emulation.setDeviceMetricsOverride',{width:390,height:844,deviceScaleFactor:1,mobile:false});
+   const narrow=await call('Page.captureScreenshot',{format:'png'});fs.writeFileSync(path.resolve('output/navigation-narrow.png'),Buffer.from(narrow.data,'base64'));
+   console.log(JSON.stringify({navigationScreens:8,workflowEditor:true,narrowLayout:true,passed:true}));
   }
   if(process.argv.includes('--board')){
    const repo=path.join(root,'sample-repository');fs.mkdirSync(repo);execFileSync('git',['init',repo],{stdio:'ignore'});fs.writeFileSync(path.join(repo,'README.md'),'# Sample project\n');execFileSync('git',['-C',repo,'add','README.md']);execFileSync('git',['-C',repo,'-c','user.name=Smoke Test','-c','user.email=smoke@example.invalid','commit','-m','Initial test repository'],{stdio:'ignore'});
