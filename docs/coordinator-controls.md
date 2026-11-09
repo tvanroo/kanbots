@@ -25,3 +25,20 @@ Native file selectors have typed path equivalents. Source inspection is bounded,
 ## Verification scope
 
 Tests cover schema/handler alignment, API channel inventory, current authority, stale revisions, durable duplicate receipts, handoff, update wind-down, uncertain approvals, chat sharing, preference persistence, project reopening and source-path containment. This does not imply every third-party provider, editor or remote service was exercised live. Provider sign-in remains successful only after its own verification succeeds.
+
+## Maintained Autopilot concurrency
+
+While On, the saved parallelism is a maintained worker target, not only a ceiling.
+The app drains already-authorized queued assignments as slots become available,
+and reconciles the actual worker count every scheduler tick. A single durable
+capacity request asks the assigned coordinator to fill any remaining deficit.
+Its identity, controller epoch and retry time survive restart; acknowledgement
+alone cannot disable maintenance. Unfilled requests are renewed no more often
+than every two minutes. The coordinator must resume existing eligible work or
+select distinct authorized work, or record an actual blocker and next action.
+Off, completed assignments, coordinator handoff and update wind-down suspend
+replenishment. The app never invents tasks just to fill slots. An external
+harness without a wake adapter still receives requests on its next check-in;
+this is visible as an unfilled target rather than reported as running workers.
+The Autopilot screen and MCP session expose actual, target, missing and suspended
+capacity. No second coordinator or reminder is created.
