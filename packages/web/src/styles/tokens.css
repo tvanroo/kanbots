@@ -95,6 +95,14 @@
   --ff-serif: 'Instrument Serif', 'Times New Roman', Georgia, serif;
 }
 
+:root[data-theme='paper'] {
+  --bg:#ffffff; --bg-1:#f4f6f9; --bg-2:#eef2f7; --bg-3:#e5ebf3; --bg-inset:#f4f6f9;
+  --hairline:#d9dee7; --hairline-soft:#e8ecf1;
+  --ink:#223149; --ink-1:#334155; --ink-2:#526176; --ink-3:#65748a; --ink-4:#65748a;
+  --ff-sans:Inter,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
+  color-scheme:light;
+}
+
 /* Typography utilities — opt-in. Don't restyle html/body globally so that
    legacy widgets (which Phase 2+ replaces) keep rendering as-is until each
    phase migrates them to the new design surface. */

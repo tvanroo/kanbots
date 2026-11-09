@@ -117,7 +117,7 @@ export const DIFF_PREFS_DEFAULTS: DiffPrefs = {
 };
 
 export const TWEAK_DEFAULTS: Tweaks = {
-  theme: 'dark',
+  theme: 'paper',
   accentHue: 45,
   showRail: true,
   showTray: true,
@@ -540,6 +540,11 @@ function hydrateFromLegacyIfDefault(): void {
 // `persist` synchronously when this module is imported in the browser, so
 // the check above sees the final post-rehydration state.
 hydrateFromLegacyIfDefault();
+// Adopt the approved app-wide visual system once; subsequent theme choices persist.
+if (safeGetItem('kanborg:visual-system-v2') !== '1') {
+  usePrefsStore.getState().setTweak('theme', 'paper');
+  try { localStorage.setItem('kanborg:visual-system-v2', '1'); } catch { /* Storage unavailable. */ }
+}
 
 // ---------------------------------------------------------------------------
 // Selector hooks — encourage scoped subscriptions. Components that only care

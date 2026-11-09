@@ -1,0 +1,21 @@
+/* Shared surface and interaction contract, loaded after component styles. */
+:root[data-theme='paper'] .kb-stage { background:var(--bg-1); }
+:root[data-theme='paper'] .kb-titlebar { background:var(--bg); }
+:root[data-theme='paper'] .kb-card:hover { background:#eef2f7; color:#223149; }
+:root[data-theme='paper'] .kb-card.kb-card-selected { background:#fff0e5; color:#223149; box-shadow:inset 0 0 0 2px #b34813; }
+:root[data-theme='paper'] .kb-tag { color:#4c427f; background:#eeeafa; border-color:#d6cfee; }
+:root[data-theme='paper'] .kb-tag-FEAT { color:#155c85; background:#e7f3fb; }
+:root[data-theme='paper'] .kb-status-pill { color:#8b3b16; background:#fff0e5; }
+:root[data-theme='paper'] .kb-task-waiting { color:#954000; }
+:root[data-theme='paper'] .kb-card-progress .kb-pct { color:#334155; }
+:root[data-theme='paper'] .kb-tree-row.has-dirty-descendants,
+:root[data-theme='paper'] .kb-tree-row.is-status-m { color:#805400; }
+:root[data-theme='paper'] .kb-tree-row.is-status-a,
+:root[data-theme='paper'] .kb-tree-row.is-status-u { color:#23643f; }
+:root[data-theme='paper'] .kb-app button:disabled { opacity:1; color:#526176; background:#edf0f4; cursor:not-allowed; }
+:root[data-theme='paper'] .kb-app input::placeholder,
+:root[data-theme='paper'] .kb-app textarea::placeholder { color:#65748a; opacity:1; }
+.kb-app :focus-visible { outline:2px solid var(--accent); outline-offset:3px; }
+.kb-board-toolbar { min-height:58px; }
+.kb-coordinator-strip { border-color:var(--hairline-soft); }
+@media(max-width:700px) { .kb-board-toolbar { flex-wrap:wrap; gap:8px; } }

@@ -22,9 +22,10 @@ import './styles/tray.css';
 import './styles/palette.css';
 import './styles/tweaks.css';
 import './styles/cloud-auth.css';
+import './styles/visual-system.css';
 import './styles.css';
 
-document.documentElement.setAttribute('data-theme', 'dark');
+document.documentElement.setAttribute('data-theme', 'paper');
 
 window.addEventListener('unhandledrejection', (event) => {
   console.error('[renderer] unhandledRejection:', event.reason);
