@@ -14,7 +14,7 @@ import {
   waitForChildSettled,
 } from './orchestrator.js';
 
-const MAX_PARALLELISM = 4;
+const MAX_PARALLELISM = 8;
 const SLOT_PAUSE_MS = 500;
 
 interface PersonaClaim {

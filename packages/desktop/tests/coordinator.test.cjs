@@ -129,3 +129,32 @@ test('Autopilot continuously reconciles deficits with one durable request across
  }finally{f.cleanup();}});
 test('Autopilot target maintenance stops for Off, update drain, and handoff and resumes after',async()=>{const f=fixture();try{await control(f);const w=f.svc.state.workspaces[0];w.mode='external';w.autopilot={status:'active',parallelism:4,personas:[],effort:'medium',objective:'Useful',updatedAt:'now',legacyWork:[]};await f.svc.tick();assert.ok(w.replenishment);w.autopilot.status='paused';await f.svc.tick();assert.equal(w.replenishment,undefined);assert.equal(f.svc.ui().workspace.autopilot.capacity.suspended,true);w.autopilot.status='active';w.handoff={state:'requested',from:w.controller,to:'other'};await f.svc.tick();assert.equal(w.replenishment,undefined);delete w.handoff;w.updateDrain={priorStatus:'active',at:new Date().toISOString()};f.svc.maintainAutopilot(w);assert.equal(w.replenishment,undefined);delete w.updateDrain;await f.svc.tick();assert.ok(w.replenishment);assert.equal(f.starts,0);}finally{f.cleanup();}});
 test('Autopilot refills approved queued assignments before asking for new work',async()=>{const f=fixture();try{const c=await control(f);const w=f.svc.state.workspaces[0];w.mode='external';w.parallelism=1;w.autopilot={status:'active',parallelism:1,personas:[],effort:'medium',objective:'Useful',updatedAt:'now',legacyWork:[]};await write(f,c,'dispatchTask',{number:1,qa:false});const issue=(await write(f,c,'createIssue',{title:'Second bounded task'})).data;await write(f,c,'dispatchTask',{number:issue.number,qa:false});assert.equal(w.queue.length,1);f.runs.get(1).status='complete';const start=f.svc.context.supervisor.start;f.svc.context.supervisor.start=async a=>{const r=await start(a);r.status='running';return r;};await f.svc.tick();assert.equal(f.starts,2);assert.equal(w.queue.length,0);assert.equal(f.svc.ui().workspace.autopilot.capacity.active,1);assert.equal(w.replenishment,undefined);}finally{f.cleanup();}});
+
+test('Autopilot saves five worker slots and queues the sixth assignment', async () => {
+  const f = fixture();
+  try {
+    const c = await control(f);
+    const start = f.svc.context.supervisor.start;
+    f.svc.context.supervisor.start = async (args) => {
+      const run = await start(args);
+      run.status = 'running';
+      return run;
+    };
+    await write(f, c, 'manageAutopilot', {
+      action: 'start',
+      parallelism: 5,
+      personas: [{ id: 'support', name: 'Support', prompt: 'Triage incoming reports' }],
+    });
+    for (let number = 1; number <= 6; number++) {
+      if (number > 1) await write(f, c, 'createIssue', { title: `Task ${number}` });
+      await write(f, c, 'dispatchTask', { number, qa: false });
+    }
+    assert.equal(f.starts, 5);
+    assert.equal(f.svc.ui().queue[0].number, 6);
+    assert.equal(f.svc.ui().workspace.autopilot.capacity.target, 5);
+    assert.equal(f.reload().ui().workspace.autopilot.parallelism, 5);
+    await assert.rejects(write(f, c, 'manageAutopilot', { action: 'update', parallelism: 9 }), /Invalid number/);
+  } finally {
+    f.cleanup();
+  }
+});

@@ -42,7 +42,7 @@ const featureDevConfigSchema = z
       ])
       .optional(),
     effort: effortSchema.optional(),
-    parallelism: z.number().int().min(1).max(4).optional(),
+    parallelism: z.number().int().min(1).max(8).optional(),
     sessionCostBudgetUsd: z.number().positive().optional(),
   })
   .strict();

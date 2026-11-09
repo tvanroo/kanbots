@@ -12,9 +12,8 @@ export interface AutopilotLaunchModalProps {
 
 type Tab = 'feature-dev' | 'qa';
 type Effort = 'low' | 'medium' | 'high' | 'xhigh' | 'max';
-type Parallelism = 1 | 2 | 3 | 4;
-
-const PARALLELISM_OPTIONS: Parallelism[] = [1, 2, 3, 4];
+const PARALLELISM_OPTIONS = [1, 2, 3, 4, 5, 6, 7, 8] as const;
+type Parallelism = (typeof PARALLELISM_OPTIONS)[number];
 
 export function AutopilotLaunchModal({ onClose, onStarted }: AutopilotLaunchModalProps) {
   const bridge=getBridge();const coordinated=!!bridge?.coordinatorAction;
