@@ -1,13 +1,13 @@
 import { execFile } from 'node:child_process';
-import { chmod, mkdir, writeFile } from 'node:fs/promises';
-import { isAbsolute, resolve } from 'node:path';
+import { lstat, readFile, unlink } from 'node:fs/promises';
+import { resolve } from 'node:path';
 import { promisify } from 'node:util';
 
 const execFileAsync = promisify(execFile);
 
 const AGENT_BRANCH_PREFIX = 'refs/heads/kanbots/issue-';
 
-const PRE_PUSH_HOOK = `#!/bin/sh
+const LEGACY_PRE_PUSH_HOOK = `#!/bin/sh
 # Installed by kanbots to block pushes of agent worktree branches.
 # Git treats hooks/ as shared across worktrees, so this file may end up
 # in the main repo's .git/hooks/. The branch-name guard below keeps it
@@ -24,17 +24,20 @@ done
 exit 0
 `;
 
-async function hardenWorktree(worktreePath: string): Promise<void> {
-  const { stdout } = await execFileAsync('git', ['rev-parse', '--git-path', 'hooks'], {
-    cwd: worktreePath,
+// The old app installed this shared hook even when a project allowed worker publication.
+export async function removeLegacyAgentPushHook(repoPath: string): Promise<void> {
+  const { stdout } = await execFileAsync('git', ['rev-parse', '--git-path', 'hooks/pre-push'], {
+    cwd: repoPath,
   });
-  const hooksRel = stdout.trim();
-  if (!hooksRel) throw new Error('git rev-parse --git-path hooks returned empty');
-  const hooksDir = isAbsolute(hooksRel) ? hooksRel : resolve(worktreePath, hooksRel);
-  await mkdir(hooksDir, { recursive: true });
-  const hookPath = resolve(hooksDir, 'pre-push');
-  await writeFile(hookPath, PRE_PUSH_HOOK, { mode: 0o755 });
-  await chmod(hookPath, 0o755);
+  const hook = resolve(repoPath, stdout.trim());
+  try {
+    if (!(await lstat(hook)).isFile()) return;
+    if (await readFile(hook, 'utf8') === LEGACY_PRE_PUSH_HOOK) {
+      await unlink(hook);
+    }
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+  }
 }
 
 export interface CreateWorktreeInput {
@@ -55,14 +58,14 @@ export async function createWorktree(input: CreateWorktreeInput): Promise<Worktr
   if (input.baseRef) args.push(input.baseRef);
   await execFileAsync('git', args, { cwd: input.repoPath });
   try {
-    await hardenWorktree(input.worktreePath);
+    await removeLegacyAgentPushHook(input.worktreePath);
   } catch (err) {
     try {
       await execFileAsync('git', ['worktree', 'remove', '--force', input.worktreePath], {
         cwd: input.repoPath,
       });
     } catch {
-      // best-effort cleanup; surface the original hardening error below
+      // best-effort cleanup; surface the original hook migration error below
     }
     throw err;
   }
