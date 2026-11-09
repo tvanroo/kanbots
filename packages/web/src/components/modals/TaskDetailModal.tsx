@@ -171,7 +171,7 @@ export function TaskDetailModal({ issueNumber, onClose, onOpenDetail }: TaskDeta
     : ['overview', 'thread', 'diff', 'preview', 'runs'];
 
   return (
-    <div className="kb-modal-scrim kb-app" onClick={onClose} role="dialog" aria-modal="true">
+    <div className="kb-modal-scrim kb-app kb-task-detail-scrim" onClick={onClose} role="dialog" aria-modal="true">
       <div className="kb-modal" onClick={stopInner}>
         <div className="kb-modal-head">
           <Logo size={11} withWordmark />
