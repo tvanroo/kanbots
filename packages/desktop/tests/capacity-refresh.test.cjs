@@ -10,3 +10,13 @@ test('settings changes during a pending refresh cannot republish the older resul
 test('concurrent explicit refreshes share one provider read',async()=>{let finish;let calls=0;const f={rows:[row],catalogue:()=>{calls++;return new Promise(resolve=>{finish=resolve;});}};const api=load(f);const first=api.collectCapacity(false,true);const second=api.collectCapacity(false,true);finish([]);await Promise.all([first,second]);assert.equal(calls,1);});
 
 test('authenticated Claude quota is sufficient without spawning an auth-status process',async()=>{const api=load({rows:[],catalogue:async()=>[]});api.configureRoutingProviders(()=>[{id:'claude-code',enabled:true}]);const result=await api.collectCapacity();assert.equal(result.candidates[0].id,'claude-sub');assert.equal(result.snapshot.rows[0].remaining,75);});
+
+test('historical quota confidence declines without converting an outage into exhaustion',()=>{
+ const {historicalQuotaUsable:usable}=load({rows:[],catalogue:async()=>[]});const now=Date.now();const stamp=h=>new Date(now-h*3600000).toISOString();
+ assert.equal(usable(60,stamp(1),[now+3600000],now),true);
+ assert.equal(usable(60,stamp(20),[now+3600000],now),false);
+ assert.equal(usable(94,stamp(1),[],now),false);
+ assert.equal(usable(6,stamp(25),[],now),false);
+ assert.equal(usable(6,stamp(1),[now-1],now),false);
+ assert.equal(usable(null,stamp(1),[],now),false);
+});

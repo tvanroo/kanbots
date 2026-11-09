@@ -128,9 +128,9 @@ export async function getCodexDetails(redemption?: { accountIdentity: string; cr
     child.stdin.end();
     child.kill();
   }
-  if (!details.subscriptionUsage && details.accountIdentity && lastUsage?.identity === details.accountIdentity) {
+  if (!details.subscriptionUsage && lastUsage && (!details.accountIdentity || lastUsage.identity === details.accountIdentity)) {
     details.subscriptionUsage = lastUsage.usage;
-    details.subscriptionUsageError = 'Last reported usage; retrying automatically. Figures may have changed.';
+    details.subscriptionUsageError = details.accountIdentity ? 'Last reported usage; retrying automatically. Figures may have changed.' : 'Historical usage; account verification is temporarily unavailable. This reading is not used for automatic routing.';
   }
   return details;
 }

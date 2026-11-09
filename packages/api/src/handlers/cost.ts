@@ -2,7 +2,7 @@ import { execFile } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { readFileSync, writeFileSync, renameSync } from 'node:fs';
-import { homedir } from 'node:os';
+import { homedir, userInfo } from 'node:os';
 import { join } from 'node:path';
 import type { CostTodayResult, CostUsageResult, CostUsageWindow, CostBreakdownItem } from '../bridge.js';
 import type { HandlerDeps } from './types.js';
@@ -26,8 +26,8 @@ export async function breakdown(deps: HandlerDeps): Promise<CostBreakdownItem[]>
 // Claude Code's existing OAuth usage endpoint. This is a best-effort integration:
 // do not turn a missing window or failed request into a full allowance.
 const USAGE_ENDPOINT = 'https://api.anthropic.com/api/oauth/usage';
-interface Credential { accessToken: string; expiresAt?: number }
-let cache: { identity: string; until: number; payload: CostUsageResult; lastGood?: CostUsageResult; failures?: number; rateLimitUntil?: number } | undefined;
+interface Credential { accessToken: string; expiresAt?: number; account?: string | undefined }
+let cache: { identity: string; account?: string | undefined; until: number; payload: CostUsageResult; lastGood?: CostUsageResult; failures?: number; rateLimitUntil?: number } | undefined;
 let snapshotPath: string | undefined;
 /** Persist quota metadata only; never persist the OAuth token. */
 export function configureClaudeUsageSnapshot(path: string): void {
@@ -56,6 +56,10 @@ export async function readClaudeSubscriptionUsage(): Promise<CostUsageResult> {
   currentIdentity = identity;
   // A token change must not bypass a provider cooldown or expose another account's quota.
   const cooldown = cache?.rateLimitUntil;
+  if (cache && cache.identity !== identity && credential.account && cache.account === credential.account) {
+    // Token renewal preserves account-scoped history, but immediately retries auth failures.
+    cache = { ...cache, identity, until: cooldown && cooldown > Date.now() ? cooldown : 0 };
+  }
   if (cache?.identity !== identity) cache = cooldown && cooldown > Date.now() ? { identity, until: cooldown, rateLimitUntil: cooldown, payload: { ...empty, retryAt: new Date(cooldown).toISOString(), message: 'Claude usage checks are cooling down after a rate limit. Checking again automatically.' } } : undefined;
   if (cache && cache.until > Date.now()) return cache.payload;
   if (pending?.identity === identity) return pending.promise;
@@ -96,15 +100,15 @@ async function loadUsage(credential: Credential, identity: string, empty: CostUs
     const payload: CostUsageResult = { fiveHour: toWindow(data.five_hour), sevenDay: toWindow(data.seven_day), windows, source: 'oauth', checkedAt: new Date().toISOString(), stale: false };
     // A read begun under an old sign-in must not overwrite a newer account's snapshot.
     if (currentIdentity === identity) {
-      cache = { identity, until: Date.now() + 5 * 60000, payload, lastGood: payload, failures: 0 };
+      cache = { identity, account: credential.account, until: Date.now() + 5 * 60000, payload, lastGood: payload, failures: 0 };
       persistSnapshot();
     }
     return payload;
   } catch (error) {
     const unauthorized = error instanceof Error && error.message === 'unauthorized';
-    const payload: CostUsageResult = { ...(lastGood ?? empty), source: unauthorized ? 'unauthorized' : 'unavailable', stale: Boolean(lastGood), retryAt: new Date(Date.now() + delay).toISOString(), message: unauthorized ? 'Claude sign-in has expired. Reconnect Claude in provider settings; saved quota is retained until a fresh reading is available.' : rateLimited ? 'Claude has paused usage checks (rate limit). Retrying automatically after its requested delay.' : 'Claude usage is temporarily unavailable. Retrying automatically; previous readings may be stale.' };
+    const payload: CostUsageResult = { ...(lastGood ?? empty), source: unauthorized ? 'unauthorized' : 'unavailable', stale: Boolean(lastGood), retryAt: new Date(Date.now() + delay).toISOString(), message: unauthorized ? 'Claude usage authorization needs renewal. Saved quota is retained; this does not mean your subscription is exhausted or your CLI is signed out.' : rateLimited ? 'Claude has paused usage checks (rate limit). Retrying automatically after its requested delay.' : 'Claude usage is temporarily unavailable. Retrying automatically; previous readings may be stale.' };
     if (currentIdentity === identity) {
-      cache = { identity, until: Date.now() + delay, payload, failures, ...(rateLimited ? { rateLimitUntil: Date.now() + delay } : {}), ...(lastGood ? { lastGood } : {}) };
+      cache = { identity, account: credential.account, until: Date.now() + delay, payload, failures, ...(rateLimited ? { rateLimitUntil: Date.now() + delay } : {}), ...(lastGood ? { lastGood } : {}) };
       persistSnapshot();
     }
     return payload;
@@ -118,15 +122,27 @@ function toWindow(raw: unknown): CostUsageWindow | null {
   return { pct: Math.max(0, Math.min(1, value.utilization / 100)), resetsAt: reset };
 }
 async function readCredential(): Promise<Credential | null> {
-  const directory = process.env.CLAUDE_CONFIG_DIR || join(homedir(), '.claude');
-  // macOS Claude Code uses Keychain. Never send the credential to the renderer
-  // or persist a duplicate in KanBorg. Custom config directories use their file.
-  if (process.platform === 'darwin' && directory === join(homedir(), '.claude')) {
-    const raw = await new Promise<string | null>(resolve => execFile('/usr/bin/security', ['find-generic-password', '-s', 'Claude Code-credentials', '-w'], { timeout: 10000, maxBuffer: 1024 * 1024 }, (error, stdout) => resolve(error ? null : stdout)));
+  const directory = (process.env.CLAUDE_CONFIG_DIR || join(homedir(), '.claude')).normalize('NFC');
+  const secureOverride = process.env.CLAUDE_SECURESTORAGE_CONFIG_DIR;
+  const secureDirectory = (secureOverride !== undefined ? secureOverride || join(homedir(), '.claude') : directory).normalize('NFC');
+  const customStore = secureOverride !== undefined ? !!secureOverride : !!process.env.CLAUDE_CONFIG_DIR;
+  const suffix = customStore ? '-' + createHash('sha256').update(secureDirectory).digest('hex').slice(0, 8) : '';
+  let account: string | undefined;
+  try {
+    const config = JSON.parse(await readFile(process.env.CLAUDE_CONFIG_DIR ? join(directory, '.claude.json') : join(homedir(), '.claude.json'), 'utf8'));
+    if (typeof config.oauthAccount?.accountUuid === 'string') account = createHash('sha256').update(secureDirectory + ':' + config.oauthAccount.accountUuid).digest('hex');
+  } catch { /* Without verified account metadata, never reuse another token's quota. */ }
+  const withAccount = (value: Credential | null) => value ? { ...value, account } : null;
+  if (process.platform === 'darwin') {
+    let username = process.env.USER;
+    if (!username) { try { username = userInfo().username; } catch { username = 'claude-code-user'; } }
+    // Match Claude Code's account AND service. An unscoped query can return an
+    // obsolete credential belonging to an earlier installation on the same Mac.
+    const raw = await new Promise<string | null>(resolve => execFile('/usr/bin/security', ['find-generic-password', '-a', username!, '-s', 'Claude Code-credentials' + suffix, '-w'], { timeout: 10000, maxBuffer: 1024 * 1024 }, (error, stdout) => resolve(error ? null : stdout)));
     const credential = parseCredential(raw);
-    if (credential) return credential;
+    if (credential) return withAccount(credential);
   }
-  try { return parseCredential(await readFile(join(directory, '.credentials.json'), 'utf8')); }
+  try { return withAccount(parseCredential(await readFile(join(secureDirectory, '.credentials.json'), 'utf8'))); }
   catch { return null; }
 }
 function parseCredential(raw: string | null): Credential | null {

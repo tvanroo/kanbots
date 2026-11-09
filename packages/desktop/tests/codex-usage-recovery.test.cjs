@@ -7,3 +7,9 @@ test('a dead CLI cannot leave subsequent usage requests hanging',async()=>{const
 
 test('quota is read before model discovery so catalogue failure cannot consume its timeout',async()=>{const calls=[];const api=load(method=>{calls.push(method);return reply(method);});await api.getCodexDetails();assert.ok(calls.indexOf('account/rateLimits/read')<calls.indexOf('model/list'));});
 test('empty quota response preserves a same-account reading as stale',async()=>{let empty=false;const api=load(method=>empty&&method==='account/rateLimits/read'?{result:{}}:reply(method));await api.getCodexDetails();empty=true;const r=await api.getCodexDetails();assert.equal(r.subscriptionUsage.windows[0].usedPercent,25);assert.ok(r.subscriptionUsageError);});
+
+test('account endpoint outage retains historical quota without claiming a verified account',async()=>{
+ let offline=false;const api=load(method=>offline&&method==='account/read'?{error:{code:500}}:reply(method));
+ await api.getCodexDetails();offline=true;const r=await api.getCodexDetails();
+ assert.equal(r.subscriptionUsage.windows[0].usedPercent,25);assert.equal(r.accountIdentity,undefined);assert.match(r.subscriptionUsageError,/not used for automatic routing/);
+});

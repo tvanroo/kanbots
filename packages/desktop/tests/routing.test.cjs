@@ -152,12 +152,12 @@ test('renewable Claude CLI subscription can recover without presenting stale quo
  for(const hasKey of [true,false]){
  const service=load('routing-capacity',{
  './grant-capacity.js':load('grant-capacity',{'./grant-estimate.js':load('grant-estimate')}),
- '@kanborg/api':{readClaudeSubscriptionUsage:async()=>({source:'unauthorized',stale:true,checkedAt:new Date(Date.now()-86400000).toISOString(),windows:[{pct:.06,label:'Weekly',resetsAt:null}]})},
+ '@kanborg/api':{readClaudeSubscriptionUsage:async()=>({source:'unauthorized',stale:true,checkedAt:new Date(Date.now()-3600000).toISOString(),windows:[{pct:.06,label:'Weekly',resetsAt:null}]})},
  './api-connections.js':{listApiConnections:()=>[]},'./anthropic-reporting.js':{getAnthropicReportingAccounts:()=>[]},
  './claude-auth.js':{getClaudeDetails:async()=>({hasKey,cliAvailable:true,authenticationLabel:'Claude subscription'})},
  './subscription-resets.js':{manageCodexResets:async()=>null},
  './routing-state.js':{readRouting:()=>({config:{}}),routingState:()=>({}),charged:()=>0},
  './routing-models.js':{modelCatalogue:async()=>({}),selectApiModel:()=>null},
- });service.configureRoutingProviders(()=>[{id:'claude-code',enabled:true}]);const r=await service.collectCapacity();assert.equal(r.candidates.some(c=>c.id==='claude-sub'),hasKey);assert.equal(r.snapshot.rows[0].stale,true);if(hasKey)assert.match(r.snapshot.rows[0].detail,/renewal is pending/);
+ });service.configureRoutingProviders(()=>[{id:'claude-code',enabled:true}]);const r=await service.collectCapacity();assert.equal(r.candidates.some(c=>c.id==='claude-sub'),hasKey);assert.equal(r.snapshot.rows[0].stale,true);if(hasKey)assert.match(r.snapshot.rows[0].detail,/growing safety margin/);
  }
 });

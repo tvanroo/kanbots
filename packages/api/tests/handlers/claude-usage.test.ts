@@ -2,14 +2,14 @@ import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest';
-const fixture = vi.hoisted(() => ({ token: 'synthetic-a', expiresAt: undefined as number | undefined, keychain: vi.fn(), file: vi.fn() }));
+const fixture = vi.hoisted(() => ({ account: undefined as string | undefined, token: 'synthetic-a', expiresAt: undefined as number | undefined, keychain: vi.fn(), file: vi.fn() }));
 vi.mock('node:child_process', () => ({ execFile: (...args: unknown[]) => {
-  fixture.keychain();
+  fixture.keychain(args[1]);
   (args[3] as (error: null, value: string) => void)(null, JSON.stringify({ claudeAiOauth: { accessToken: fixture.token, expiresAt: fixture.expiresAt } }));
 } }));
-vi.mock('node:fs/promises', () => ({ readFile: async () => { fixture.file(); return JSON.stringify({ claudeAiOauth: { accessToken: fixture.token, expiresAt: fixture.expiresAt } }); } }));
+vi.mock('node:fs/promises', () => ({ readFile: async (path: string) => { if (path.endsWith('.claude.json')) return JSON.stringify({oauthAccount:{accountUuid:fixture.account}}); fixture.file(); return JSON.stringify({ claudeAiOauth: { accessToken: fixture.token, expiresAt: fixture.expiresAt } }); } }));
 
-beforeEach(() => { vi.resetModules(); vi.clearAllMocks(); vi.stubEnv('CLAUDE_CONFIG_DIR', ''); fixture.token = 'synthetic-a'; fixture.expiresAt = undefined; });
+beforeEach(() => { vi.resetModules(); vi.clearAllMocks(); vi.stubEnv('CLAUDE_CONFIG_DIR', ''); fixture.account = undefined; fixture.token = 'synthetic-a'; fixture.expiresAt = undefined; });
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); vi.unstubAllEnvs(); });
 const response = () => new Response(JSON.stringify({ five_hour: null, seven_day: { utilization: 88, resets_at: '2026-11-06T16:00:00Z' } }));
 describe('Claude subscription usage', () => {
@@ -105,4 +105,33 @@ it('negative utilization does not become a fresh unused allowance', async () => 
   vi.stubGlobal('fetch',vi.fn().mockResolvedValue(new Response(JSON.stringify({seven_day:{utilization:-1}}))));
   const api=await import('../../src/handlers/cost.js');
   expect((await api.readClaudeSubscriptionUsage()).source).toBe('unavailable');
+});
+
+it('uses the exact CLI Keychain account and preserves quota through same-account token renewal', async () => {
+  fixture.account='account-a';
+  const fetch=vi.fn().mockResolvedValueOnce(response()).mockRejectedValue(new Error('offline')); vi.stubGlobal('fetch',fetch);
+  const api=await import('../../src/handlers/cost.js');
+  await api.readClaudeSubscriptionUsage(); fixture.token='renewed-token';
+  const result=await api.readClaudeSubscriptionUsage();
+  expect(result.sevenDay?.pct).toBe(.88); expect(result.stale).toBe(true);
+  if(process.platform==='darwin') expect(fixture.keychain.mock.calls[0]![0]).toEqual(expect.arrayContaining(['-a',process.env.USER,'-s','Claude Code-credentials']));
+  fixture.account='account-b'; fixture.token='different-account-token';
+  expect((await api.readClaudeSubscriptionUsage()).sevenDay).toBeNull();
+});
+it('matches a custom CLI Keychain service rather than silently selecting the default account', async () => {
+  vi.stubEnv('CLAUDE_CONFIG_DIR','/tmp/synthetic-claude-profile');
+  vi.stubGlobal('fetch',vi.fn().mockResolvedValue(response()));
+  const api=await import('../../src/handlers/cost.js'); await api.readClaudeSubscriptionUsage();
+  if(process.platform==='darwin') expect(fixture.keychain.mock.calls[0]![0].join(' ')).toMatch(/Claude Code-credentials-[a-f0-9]{8}/);
+});
+
+it('retains account quota across both restart and token rotation during an outage', async()=>{
+ const root=mkdtempSync(join(tmpdir(),'kanborg-renewal-')); fixture.account='same-account';
+ try {
+  const path=join(root,'quota.json'); vi.stubGlobal('fetch',vi.fn().mockResolvedValueOnce(response()).mockRejectedValue(new Error('offline')));
+  let api=await import('../../src/handlers/cost.js'); api.configureClaudeUsageSnapshot(path); await api.readClaudeSubscriptionUsage();
+  fixture.token='new-after-restart'; vi.resetModules(); api=await import('../../src/handlers/cost.js'); api.configureClaudeUsageSnapshot(path);
+  const result=await api.readClaudeSubscriptionUsage();expect(result.sevenDay?.pct).toBe(.88);expect(result.stale).toBe(true);
+  expect(readFileSync(path,'utf8')).not.toContain(fixture.token);
+ }finally{rmSync(root,{recursive:true,force:true});}
 });

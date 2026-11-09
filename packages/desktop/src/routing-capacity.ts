@@ -26,6 +26,14 @@ export async function collectCapacity(hasWork=false,force=false):Promise<{snapsh
   const value=await pending;
   return started===revision?value:collectCapacity(hasWork,force);
 }
+/** Historical readings remain useful, with a growing safety margin and lower priority.
+ * Never infer a reset or spend from a reading whose account cannot be verified. */
+export function historicalQuotaUsable(used: number | null, checkedAt: string | undefined, resets: Array<number | null>, now: number): boolean {
+  const age = checkedAt ? now - Date.parse(checkedAt) : NaN;
+  return used !== null && Number.isFinite(used) && used >= 0 && Number.isFinite(age) && age >= 0 && age < 24 * 3600000
+    && resets.every(reset => reset === null || reset > now)
+    && used + Math.max(5, age / 3600000 * 2) < 95;
+}
 async function load(hasWork:boolean){
   let now=Date.now();const enabled=new Set(configuration().filter(p=>p.enabled).map(p=>p.id));
   // A successful OAuth quota response already verifies subscription access.
@@ -42,27 +50,28 @@ async function load(hasWork:boolean){
     const windows=quota?.windows??[];
     const fresh=quota?.source==='oauth'&&!quota.stale&&!!quota.checkedAt&&now-Date.parse(quota.checkedAt)>=0&&now-Date.parse(quota.checkedAt)<=6*60000&&windows.every(w=>!w.resetsAt||Date.parse(w.resetsAt)>now);
     const used=windows.length?Math.max(...windows.map(w=>w.pct*100)):null;
-    const cli = !fresh && quota?.source==='unauthorized' ? await getClaudeDetails().catch(()=>null) : null;
+    const cli = !fresh ? await getClaudeDetails().catch(()=>null) : null;
     // A renewable access token is not a revoked CLI login. Let Claude Code own
     // renewal on the next authorized run; never label the old quota as fresh.
-    const renewable=cli?.cliAvailable===true&&cli.hasKey&&cli.authenticationLabel==='Claude subscription'&&used!==null&&used<95;
+    const renewable=cli?.cliAvailable===true&&cli.hasKey&&cli.authenticationLabel==='Claude subscription'&&historicalQuotaUsable(used,quota?.checkedAt,windows.map(w=>w.resetsAt?Date.parse(w.resetsAt):null),now);
     const usable=(fresh&&used!==null&&used<95)||renewable;
     if(state.config.claudeResetExpiresAt)rows.push({id:'claude-reset',label:'Claude reset offer',kind:'unknown',usedPercent:null,remaining:null,spent:null,available:false,detail:`Manually tracked · ${Date.parse(state.config.claudeResetExpiresAt)>now?'expires':'expired'} ${new Date(state.config.claudeResetExpiresAt).toLocaleString()} · redeem in Claude Usage`});
     const resetSoon=state.config.claudeResetExpiresAt&&Date.parse(state.config.claudeResetExpiresAt)>now&&Date.parse(state.config.claudeResetExpiresAt)-now<48*3600000;
-    rows.push({id:'claude-sub',label:'Claude subscription',kind:'subscription',needsAttention:quota?.source==='unauthorized'&&!renewable,stale:!fresh&&used!==null,usedPercent:used,remaining:used!==null?100-used:null,spent:null,available:!!usable,detail:!fresh?`${used!==null?'Last reported quota · ':''}${renewable?'Claude Code is signed in; usage-token renewal is pending. The next eligible subscription run will let the CLI renew it.':quota?.message??'Quota unavailable; retrying automatically.'}${quota?.checkedAt?` Last successful reading ${new Date(quota.checkedAt).toLocaleString()}.`:''}${quota?.retryAt?` Next check ${new Date(quota.retryAt).toLocaleTimeString()}.`:''}`:windows.map(w=>`${w.label}: ${Math.round(w.pct*100)}% used${w.resetsAt?` · resets ${new Date(w.resetsAt).toLocaleString()}`:''}`).join('; ')});
+    rows.push({id:'claude-sub',label:'Claude subscription',kind:'subscription',needsAttention:quota?.source==='unauthorized'&&!renewable,stale:!fresh&&used!==null,usedPercent:used,remaining:used!==null?100-used:null,spent:null,available:!!usable,detail:!fresh?`${used!==null?'Last reported quota · ':''}${renewable?'Claude Code is signed in. Using the saved reading with a growing safety margin while fresh usage is recovered.':quota?.message??'Quota unavailable; retrying automatically.'}${quota?.checkedAt?` Last successful reading ${new Date(quota.checkedAt).toLocaleString()}.`:''}${quota?.retryAt?` Next check ${new Date(quota.retryAt).toLocaleTimeString()}.`:''}`:windows.map(w=>`${w.label}: ${Math.round(w.pct*100)}% used${w.resetsAt?` · resets ${new Date(w.resetsAt).toLocaleString()}`:''}`).join('; ')});
     const resetHours=Math.min(...windows.filter(w=>w.resetsAt&&Date.parse(w.resetsAt)>now).map(w=>(Date.parse(w.resetsAt!)-now)/3600000));
-    if(usable)candidates.push({id:'claude-sub',provider:'claude-code',kind:'subscription',score:renewable?100:resetSoon?280:resetHours<24?270-resetHours:180-(used??0)/10,reason:renewable?'Authenticated Claude subscription; CLI-managed renewal pending (quota is last known)':resetSoon?'Use included capacity before the tracked Claude reset expires':resetHours<24?'Use subscription quota before its approaching reset':'Available Claude subscription quota'});
+    if(usable)candidates.push({id:'claude-sub',provider:'claude-code',kind:'subscription',score:renewable?100:resetSoon?280:resetHours<24?270-resetHours:180-(used??0)/10,reason:renewable?'Verified Claude login; recent saved quota with reduced confidence':resetSoon?'Use included capacity before the tracked Claude reset expires':resetHours<24?'Use subscription quota before its approaching reset':'Available Claude subscription quota'});
   }
   if(enabled.has('codex-cli')){
     const usage=codex?.subscriptionUsage;
     const used=usage?.windows.length?Math.max(...usage.windows.map(w=>w.usedPercent)):null;
     const fresh=!!usage?.checkedAt && now-Date.parse(usage.checkedAt)>=0&&now-Date.parse(usage.checkedAt)<=6*60000 && !codex?.subscriptionUsageError && usage.windows.every(w=>!w.resetsAt||w.resetsAt*1000>now);
-    const usable=fresh&&codex?.authenticationLabel==='ChatGPT subscription'&&usage?.ordinaryUsageAllowed!==false&&used!==null&&used<95;
+    const historical=!fresh&&!!codex?.accountIdentity&&historicalQuotaUsable(used,usage?.checkedAt,(usage?.windows??[]).map(w=>w.resetsAt?w.resetsAt*1000:null),now);
+    const usable=(fresh||historical)&&codex?.authenticationLabel==='ChatGPT subscription'&&usage?.ordinaryUsageAllowed!==false&&used!==null&&used<95;
     const resetSoon=usage?.resetCredits?.credits.some(c=>c.expiresAt!==null&&c.expiresAt*1000>now&&c.expiresAt*1000-now<48*3600000);
-    rows.push({id:'codex-sub',label:'ChatGPT subscription',kind:'subscription',stale:!fresh&&used!==null,usedPercent:used,remaining:used===null?null:100-used,spent:null,available:!!usable,detail:usage?`${!fresh?'Last reported quota · ':''}${codex?.subscriptionUsageError??''} ${usage.resetCredits?.availableCount??0} reset credits reported. `+usage.windows.map(w=>`${w.name}: ${Math.round(w.usedPercent)}% used${w.resetsAt?` · resets ${new Date(w.resetsAt*1000).toLocaleString()}`:''}`).join('; '):'Quota unavailable'});
+    rows.push({id:'codex-sub',label:'ChatGPT subscription',kind:'subscription',stale:!fresh&&used!==null,usedPercent:used,remaining:used===null?null:100-used,spent:null,available:!!usable,detail:usage?`${!fresh?'Last reported quota · ':''}${codex?.subscriptionUsageError??''}${!fresh&&usage.checkedAt?` Last successful reading ${new Date(usage.checkedAt).toLocaleString()}.`:''} ${usage.resetCredits?.availableCount??0} reset credits reported. `+usage.windows.map(w=>`${w.name}: ${Math.round(w.usedPercent)}% used${w.resetsAt?` · resets ${new Date(w.resetsAt*1000).toLocaleString()}`:''}`).join('; '):'Quota unavailable'});
     for(const [i,credit] of (usage?.credits??[]).entries())rows.push({id:`codex-credit-${i}`,label:`ChatGPT credits · ${credit.name}`,kind:'grant',usedPercent:null,remaining:credit.balance!==null&&Number.isFinite(Number(credit.balance))?Number(credit.balance):null,spent:null,available:false,detail:credit.unlimited?'Unlimited reported; paid fallback is not selected automatically':'Credit balance reported; preserved while included capacity is available. Not a dollar balance.'});
     const resetHours=Math.min(...(usage?.windows??[]).filter(w=>w.resetsAt&&w.resetsAt*1000>now).map(w=>(w.resetsAt!*1000-now)/3600000));
-    if(usable)candidates.push({id:'codex-sub',provider:'codex-cli',kind:'subscription',score:resetSoon?280:resetHours<24?270-resetHours:180-(used??0)/10,reason:resetSoon?'Use included capacity before the ChatGPT reset expires':resetHours<24?'Use subscription quota before its approaching reset':'Available ChatGPT subscription quota'});
+    if(usable)candidates.push({id:'codex-sub',provider:'codex-cli',kind:'subscription',score:historical?100:resetSoon?280:resetHours<24?270-resetHours:180-(used??0)/10,reason:historical?'Verified ChatGPT account; recent saved quota with reduced confidence':resetSoon?'Use included capacity before the ChatGPT reset expires':resetHours<24?'Use subscription quota before its approaching reset':'Available ChatGPT subscription quota'});
   }
   let reports=getAnthropicReportingAccounts();
   const refresh=reports.filter(a=>listApiConnections().some(k=>k.organizationId===a.organizationId&&k.grantBillingDay)&&(a.report.connected||a.report.eligibility==='supported'||!!a.report.attemptedAt||a.report.eligibility==='denied')&&(!a.report.retryAt||Date.parse(a.report.retryAt)<=now)&&now-(reportingAttempts.get(a.organizationId)??0)>15*60000&&(!a.report.checkedAt||now-Date.parse(a.report.checkedAt)>15*60000));
