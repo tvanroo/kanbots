@@ -200,7 +200,7 @@ function CardBody({
             title={`${issue.subIssueCount} sub-issue${issue.subIssueCount === 1 ? '' : 's'}`}
             aria-label={`Has ${issue.subIssueCount} sub-issue${issue.subIssueCount === 1 ? '' : 's'}`}
           >
-            ↳{issue.subIssueCount}
+            ↳ {issue.subIssueCount} related
           </span>
         ) : null}
         <span className="kb-assignees">

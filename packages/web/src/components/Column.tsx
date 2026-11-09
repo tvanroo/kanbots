@@ -2,6 +2,7 @@ import { useDroppable } from '@dnd-kit/core';
 import { useEffect, useState } from 'react';
 import type { Issue, StatusKey } from '../types.js';
 import { Card, type CardSelectModifiers } from './Card.js';
+import { ageString } from '../labels.js';
 import type { RunLiveMap } from '../hooks/useBoardAgentStreams.js';
 
 export function columnDropId(key: string | null): string {
@@ -79,6 +80,11 @@ export function Column({
   suggestingStartedAt = null,
 }: ColumnProps) {
   const { setNodeRef, isOver } = useDroppable({ id: columnDropId(columnKey) });
+  const [now, setNow] = useState(Date.now());
+  useEffect(() => {
+    const timer = window.setInterval(() => { if (!document.hidden) setNow(Date.now()); }, 60_000);
+    return () => window.clearInterval(timer);
+  }, []);
   return (
     <div ref={setNodeRef} className="kb-col" data-over={isOver ? 'true' : undefined}>
       <div className="kb-col-head" data-status={status}>
@@ -100,7 +106,7 @@ export function Column({
           <button
             type="button"
             className="kb-col-suggest"
-            title={suggesting ? 'Claude is thinking…' : 'Ask Claude to suggest a feature'}
+            title={suggesting ? 'Coordinator is thinking…' : 'Ask your coordinator to suggest a feature'}
             aria-label={`Suggest a feature for ${label}`}
             aria-busy={suggesting || undefined}
             disabled={suggesting}
@@ -111,7 +117,7 @@ export function Column({
           </button>
         ) : null}
       </div>
-      {purpose?<p className="wf-stage-purpose">{purpose}</p>:null}
+      {purpose?<details className="kb-lane-guidance"><summary>Stage guidance</summary><p>{purpose}</p></details>:null}
       <div className="kb-col-list">
         {suggesting ? (
           <SuggestingSkeletonCard
@@ -120,7 +126,7 @@ export function Column({
           />
         ) : null}
         {issues.length === 0 && !suggesting ? (
-          <div className="kb-col-empty">—</div>
+          <div className="kb-col-empty">No tasks in this stage</div>
         ) : (
           issues.map((issue) => {
             const live =
@@ -131,14 +137,31 @@ export function Column({
                   }
                 : null;
             return (
-              <div key={issue.number}><Card
-                issue={issue}
-                selected={selectedNumber === issue.number}
-                multiSelected={multiSelected?.has(issue.number) ?? false}
-                liveTool={live}
-                onSelect={onSelect ?? (() => undefined)}
-                onOpen={onOpen ?? (() => undefined)}
-              />{workflowCards?.[issue.number]?<button className="wf-card-context" onClick={()=>onWorkflowCard?.(issue.number)}>{workflowCards[issue.number].waiting?`Waiting: ${workflowCards[issue.number].waiting.reason} · ${workflowCards[issue.number].waiting.owner}`:`Next: ${workflowCards[issue.number].owner}`}<br/>{workflowCards[issue.number].waiting?.trigger??workflowCards[issue.number].nextAction}</button>:null}</div>
+              <article key={issue.number} className="kb-task-tile">
+                <Card
+                  issue={issue}
+                  selected={selectedNumber === issue.number}
+                  multiSelected={multiSelected?.has(issue.number) ?? false}
+                  liveTool={live}
+                  onSelect={onSelect ?? (() => undefined)}
+                  onOpen={onOpen ?? (() => undefined)}
+                />
+                {workflowCards?.[issue.number] ? (() => {
+                  const card = workflowCards[issue.number];
+                  const entered = Date.parse(card.enteredAt);
+                  const valid = Number.isFinite(entered) && entered <= now;
+                  return <div className="kb-task-context">
+                    <div className="kb-task-facts">
+                      <span className={card.waiting ? 'kb-task-waiting' : ''}>{card.waiting ? `Waiting · ${card.waiting.reason}` : `Next · ${card.owner}`}</span>
+                      <span title={valid ? `Entered ${new Date(entered).toLocaleString()}` : 'No recorded stage entry'}>{valid ? `${ageString(card.enteredAt)} in stage` : 'Stage age unknown'}</span>
+                    </div>
+                    <details><summary>Next step & details</summary>
+                      <p>{card.waiting ? `${card.waiting.owner}: ${card.waiting.trigger}` : card.nextAction}</p>
+                      <button className="kb-btn ghost" onClick={() => onWorkflowCard?.(issue.number)}>Workflow & evidence</button>
+                    </details>
+                  </div>;
+                })() : null}
+              </article>
             );
           })
         )}

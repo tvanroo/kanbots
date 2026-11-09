@@ -1,3 +1,4 @@
+import '../styles/board-focus.css';
 import { useWorkflow } from '../hooks/useWorkflow.js';
 import { WorkflowEditor } from '../components/modals/WorkflowEditor.js';
 import { getBridge } from '../desktop-bridge.js';
@@ -127,6 +128,8 @@ export function Board({ onOpenDetail, onOpenCreate, onOpenPalette, onOpenStats }
     api.costUsage(),
   );
   const workflow=useWorkflow(config?.repo);
+  const [focusedStage, setFocusedStage] = useState<string | null>(null);
+  const [relatedOnly, setRelatedOnly] = useState(false);
   const [workflowEditor,setWorkflowEditor]=useState<number|null>(null);
   const workflowIssues:Issue[]=workflow?workflow.issues.map((i:Issue)=>{const card=workflow.cards[i.number];const stage=workflow.config.stages.find((s:any)=>s.id===card?.stageId);return stage?{...i,status:stage.category,state:stage.category==='done'?'closed':'open'}:i;}):issues;
   const filterApi = useBoardFilters(workflowIssues, !!workflow);
@@ -676,14 +679,22 @@ export function Board({ onOpenDetail, onOpenCreate, onOpenPalette, onOpenStats }
       {workflow?<div className="kb-coordinator-strip"><button className="kb-btn ghost" onClick={()=>setWorkflowEditor(0)}>Workflow · {workflow.config.name}</button><span className="kb-provider-desc">Version {workflow.version}</span></div>:null}
       {workflowEditor!==null?<WorkflowEditor onClose={()=>setWorkflowEditor(null)} {...(workflowEditor?{cardNumber:workflowEditor}:{})}/>:null}
       <BoardErrorBanner message={moveError} onDismiss={() => setMoveError(null)} />
-      <div className="kb-board" onClick={handleBoardBackgroundClick}>
-        {(workflow?workflow.config.stages.map((s:any)=>({key:s.id,label:s.name,status:s.category,purpose:s.purpose})):COLUMNS.filter((col) => filterApi.includeBacklog || col.key !== 'backlog')).map((col:any) => (
+      <div className="kb-board-heading"><div><h1>Move the right work forward</h1><span>Plan, follow progress, and unblock your team.</span></div><button className="kb-btn" aria-pressed={relatedOnly} onClick={()=>setRelatedOnly(!relatedOnly)}>Related work{relatedOnly ? ' · On' : ''}</button></div>
+      <section className="kb-board-overview" aria-label="Visible task progress">
+        <div><strong>{list.filter(i => i.status === 'done').length} / {list.length}</strong><span> visible tasks complete</span></div>
+        <progress aria-label="Visible tasks complete" max={Math.max(1,list.length)} value={list.filter(i => i.status === 'done').length} />
+        <span>{list.filter(i => i.agent === 'running').length} running</span>
+        <span>{list.filter(i => workflow?.cards[i.number]?.waiting || i.agent === 'blocked').length} waiting</span>
+      </section>
+      <nav className="kb-stage-navigation" aria-label="Focus a stage"><button aria-pressed={focusedStage===null} onClick={()=>setFocusedStage(null)}>All stages</button>{(workflow?.config.stages ?? COLUMNS.map(c=>({id:String(c.key),name:c.label}))).map((stage:any)=><button key={stage.id} aria-pressed={focusedStage===stage.id} onClick={()=>setFocusedStage(stage.id)}>{stage.name}</button>)}</nav>
+      <div className="kb-board kb-board-focus" onClick={handleBoardBackgroundClick}>
+        {(workflow?workflow.config.stages.map((s:any)=>({key:s.id,label:s.name,status:s.category,purpose:s.purpose})):COLUMNS.filter((col) => filterApi.includeBacklog || col.key !== 'backlog')).filter((col:any)=>focusedStage===null||String(col.key)===focusedStage).map((col:any) => (
           <Column
             key={String(col.key)}
             columnKey={col.key}
             status={col.status}
             label={col.label}
-            issues={workflow?sortIssues(list.filter(i=>workflow.cards[i.number]?.stageId===col.key),sortMode):col.key === null ? grouped.untagged : grouped.byKey[col.key as StatusKey]}
+            issues={(workflow?sortIssues(list.filter(i=>workflow.cards[i.number]?.stageId===col.key),sortMode):col.key === null ? grouped.untagged : grouped.byKey[col.key as StatusKey]).filter(i=>!relatedOnly||(i.subIssueCount??0)>0)}
             {...(workflow?{purpose:col.purpose,workflowCards:workflow.cards,onWorkflowCard:setWorkflowEditor}:{})}
             selectedNumber={selectedNumber}
             multiSelected={cardSelection.selected}
