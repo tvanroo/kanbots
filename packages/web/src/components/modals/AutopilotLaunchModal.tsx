@@ -2,7 +2,7 @@ import { getBridge } from '../../desktop-bridge.js';
 import { Logo } from '../Logo.js';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../../api.js';
-import { listPersonas, type Persona } from '../../personas.js';
+import { listPersonas, mergeAutopilotPersonas, type Persona } from '../../personas.js';
 import { ModelPicker, type ModelPickerValue } from '../forms/ModelPicker.js';
 
 export interface AutopilotLaunchModalProps {
@@ -40,10 +40,15 @@ export function AutopilotLaunchModal({ onClose, onStarted }: AutopilotLaunchModa
     const saved=workspace.autopilot;
     if(!saved)return;
     setSelectedIds(new Set(saved.personas.map((p:Persona)=>p.id)));
-    setPersonas(current=>[...current.filter(p=>!saved.personas.some((s:Persona)=>s.id===p.id)),...saved.personas.map((p:Persona)=>({...current.find(c=>c.id===p.id),...p}))]);
+    setPersonas(mergeAutopilotPersonas(mergeAutopilotPersonas(listPersonas(), workspace.personas?.items??[]), saved.personas));
     setEffort(saved.effort);setParallelism(saved.parallelism);
     setTab(saved.personas.length===1&&saved.personas[0].id==='qa'?'qa':'feature-dev');
   },[coordinator]);
+
+  useEffect(()=>{
+    const items=coordinator?.workspace?.personas?.items;
+    if(items)setPersonas(current=>mergeAutopilotPersonas(current,items));
+  },[coordinator?.workspace?.personas?.version]);
 
   const selected = useMemo(
     () => personas.filter((p) => selectedIds.has(p.id)),
@@ -59,7 +64,8 @@ export function AutopilotLaunchModal({ onClose, onStarted }: AutopilotLaunchModa
   }, [onClose, submitting]);
 
   function refreshPersonas(): void {
-    setPersonas(listPersonas());
+    // Keep edited selections and saved coordinator instructions on refresh.
+    setPersonas(current=>mergeAutopilotPersonas(mergeAutopilotPersonas(listPersonas(), coordinator?.workspace?.personas?.items??[]), current.filter(p=>selectedIds.has(p.id))));
   }
 
   function toggle(id: string): void {

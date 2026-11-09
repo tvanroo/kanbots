@@ -1,3 +1,4 @@
+import { getBridge } from './desktop-bridge.js';
 export interface Persona {
   id: string;
   name: string;
@@ -56,6 +57,29 @@ export const BUILTIN_PERSONAS: readonly Persona[] = [
 ];
 
 const STORAGE_KEY = 'kanbots:personas:custom-v1';
+
+type SavedPersona = Pick<Persona, 'id' | 'name' | 'prompt'>;
+
+// Coordinator clients historically used unprefixed IDs for built-in roles.
+// Match only known aliases: custom personas may legitimately share a name.
+function personaIdentity(id: string): string {
+  if (id === 'reliability') return 'builtin:reliability-engineer';
+  return BUILTIN_PERSONAS.some(p => p.id === `builtin:${id}`) ? `builtin:${id}` : id;
+}
+
+export function mergeAutopilotPersonas(available: Persona[], saved: SavedPersona[]): Persona[] {
+  const merged = new Map(available.map(p => [personaIdentity(p.id), p]));
+  for (const persona of saved) {
+    const key = personaIdentity(persona.id);
+    const existing = merged.get(key);
+    merged.set(key, {
+      tagline: '', emoji: '✨', builtIn: false,
+      ...existing,
+      ...persona,
+    });
+  }
+  return [...merged.values()];
+}
 
 interface StoredPersona {
   id: string;
@@ -136,4 +160,28 @@ export function createPersona(input: CreatePersonaInput): Persona {
 export function deletePersona(id: string): void {
   if (id.startsWith('builtin:')) return;
   writeStored(readStored().filter((p) => p.id !== id));
+}
+
+/** Desktop library is authoritative; browser-only builds retain local storage. */
+export async function loadPersonas(): Promise<Persona[]> {
+ const bridge=getBridge();
+ if(!bridge?.coordinatorState)return listPersonas();
+ const state=await bridge.coordinatorState();
+ const items=state.workspace?.personas?.items;
+ if(!items)return listPersonas();
+ return mergeAutopilotPersonas(listPersonas(),items);
+}
+export async function savePersona(input:CreatePersonaInput & {id?:string}):Promise<Persona> {
+ const bridge=getBridge();
+ if(!bridge?.coordinatorAction)return createPersona(input);
+ const persona={id:input.id??`custom:${crypto.randomUUID()}`,name:input.name.trim(),tagline:input.tagline.trim(),prompt:input.prompt.trim(),emoji:input.emoji||'✨'};
+ const state=await bridge.coordinatorAction('upsert-persona',{persona,reason:'Owner created a custom persona in the app'});
+ return state.workspace.personas.items.find((p:Persona)=>p.id===persona.id);
+}
+export async function removePersona(id:string):Promise<void> {
+ const bridge=getBridge();
+ const state=await bridge?.coordinatorState?.();
+ if(state?.workspace?.personas?.items?.some((p:Persona)=>p.id===id)) {
+  await bridge!.coordinatorAction!('remove-persona',{id,reason:'Owner removed a custom persona in the app'});
+ } else deletePersona(id);
 }

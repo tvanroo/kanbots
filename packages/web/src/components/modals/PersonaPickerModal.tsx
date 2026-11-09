@@ -1,6 +1,6 @@
 import { Logo } from '../Logo.js';
 import { useEffect, useMemo, useState } from 'react';
-import { createPersona, deletePersona, listPersonas, type Persona } from '../../personas.js';
+import { savePersona, removePersona, loadPersonas, listPersonas, type Persona } from '../../personas.js';
 import type { ProviderId } from '../../types.js';
 
 export interface PersonaPickerModalProps {
@@ -28,6 +28,7 @@ export function PersonaPickerModal({
   subtitle,
 }: PersonaPickerModalProps) {
   const [personas, setPersonas] = useState<Persona[]>(() => listPersonas());
+  const [editingId,setEditingId]=useState<string|undefined>();
   const [creating, setCreating] = useState(false);
   const [draftName, setDraftName] = useState('');
   const [draftEmoji, setDraftEmoji] = useState('');
@@ -53,11 +54,13 @@ export function PersonaPickerModal({
     return () => window.removeEventListener('keydown', onKey);
   }, [onClose]);
 
-  function reload(): void {
-    setPersonas(listPersonas());
+  async function reload(): Promise<void> {
+    try { setPersonas(await loadPersonas()); } catch(e) {setError(String(e));}
   }
+  useEffect(()=>{void reload();const timer=setInterval(()=>void reload(),2000);return()=>clearInterval(timer);},[]);
 
   function resetDraft(): void {
+    setEditingId(undefined);
     setDraftName('');
     setDraftEmoji('');
     setDraftTagline('');
@@ -65,7 +68,7 @@ export function PersonaPickerModal({
     setError(null);
   }
 
-  function saveDraft(): void {
+  async function saveDraft(useNow = true): Promise<void> {
     const name = draftName.trim();
     const tagline = draftTagline.trim();
     const prompt = draftPrompt.trim();
@@ -78,13 +81,14 @@ export function PersonaPickerModal({
       return;
     }
     const emoji = draftEmoji.trim();
-    const created = createPersona({
+    const created = await savePersona({
+      ...(editingId?{id:editingId}:{}),
       name,
       tagline,
       prompt,
       ...(emoji ? { emoji } : {}),
     });
-    reload();
+    await reload();
     resetDraft();
     setCreating(false);
     if (multiSelect) {
@@ -93,7 +97,7 @@ export function PersonaPickerModal({
         next.add(created.id);
         return next;
       });
-    } else {
+    } else if(useNow) {
       onPick(created, undefined, notesArg);
     }
   }
@@ -124,9 +128,9 @@ export function PersonaPickerModal({
     }
   }
 
-  function removeCustom(id: string): void {
-    deletePersona(id);
-    reload();
+  async function removeCustom(id: string): Promise<void> {
+    await removePersona(id);
+    await reload();
   }
 
   return (
@@ -209,6 +213,7 @@ export function PersonaPickerModal({
                       ✓
                     </span>
                   ) : null}
+                  {!p.builtIn ? <span role="button" tabIndex={0} aria-label={`Edit ${p.name}`} style={{display:'block',marginTop:12}} onClick={e=>{e.stopPropagation();setEditingId(p.id);setDraftName(p.name);setDraftTagline(p.tagline);setDraftEmoji(p.emoji);setDraftPrompt(p.prompt);setCreating(true);}} onKeyDown={e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();e.stopPropagation();setEditingId(p.id);setDraftName(p.name);setDraftTagline(p.tagline);setDraftEmoji(p.emoji);setDraftPrompt(p.prompt);setCreating(true);}}}>Edit instructions</span>:null}
                   {!p.builtIn ? (
                     <span
                       className="kb-persona-del"
@@ -217,13 +222,13 @@ export function PersonaPickerModal({
                       tabIndex={0}
                       onClick={(e) => {
                         e.stopPropagation();
-                        removeCustom(p.id);
+                        void removeCustom(p.id).catch(e=>setError(String(e)));
                       }}
                       onKeyDown={(e) => {
                         if (e.key === 'Enter' || e.key === ' ') {
                           e.stopPropagation();
                           e.preventDefault();
-                          removeCustom(p.id);
+                          void removeCustom(p.id).catch(e=>setError(String(e)));
                         }
                       }}
                     >
@@ -322,7 +327,8 @@ export function PersonaPickerModal({
                   >
                     Cancel
                   </button>
-                  <button type="button" className="kb-btn primary" onClick={saveDraft}>
+                  <button type="button" className="kb-btn" onClick={()=>void saveDraft(false).catch(e=>setError(String(e)))}>Save persona</button>
+                  <button type="button" className="kb-btn primary" onClick={()=>void saveDraft().catch(e=>setError(String(e)))}>
                     Save and use
                   </button>
                 </div>
@@ -333,7 +339,7 @@ export function PersonaPickerModal({
 
         <div className="kb-modal-foot">
           <span className="hint">
-            Custom personas are stored locally on this machine.
+            Custom personas are saved in the workspace library and available to your coordinator.
           </span>
           <span className="grow" />
           <button type="button" className="kb-btn ghost" onClick={onClose}>
