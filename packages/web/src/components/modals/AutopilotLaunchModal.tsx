@@ -33,10 +33,12 @@ export function AutopilotLaunchModal({ onClose, onStarted }: AutopilotLaunchModa
   const [error, setError] = useState<string | null>(null);
 
   const restoredSettings=useRef<string|null>(null);
+  const restoredLibraryVersion=useRef<number|undefined>(undefined);
   useEffect(()=>{
     const workspace=coordinator?.workspace;
     if(!workspace||restoredSettings.current===workspace.workspaceId)return;
     restoredSettings.current=workspace.workspaceId;
+    restoredLibraryVersion.current=workspace.personas?.version;
     const saved=workspace.autopilot;
     if(!saved)return;
     setSelectedIds(new Set(saved.personas.map((p:Persona)=>p.id)));
@@ -47,7 +49,10 @@ export function AutopilotLaunchModal({ onClose, onStarted }: AutopilotLaunchModa
 
   useEffect(()=>{
     const items=coordinator?.workspace?.personas?.items;
-    if(items)setPersonas(current=>mergeAutopilotPersonas(mergeAutopilotPersonas(listPersonas().filter(p=>!p.builtIn),current.filter(p=>selectedIds.has(p.id))),items));
+    const version=coordinator?.workspace?.personas?.version;
+    if(!items||version===restoredLibraryVersion.current)return;
+    restoredLibraryVersion.current=version;
+    setPersonas(current=>mergeAutopilotPersonas(mergeAutopilotPersonas(listPersonas().filter(p=>!p.builtIn),items),current.filter(p=>selectedIds.has(p.id))));
   },[coordinator?.workspace?.personas?.version]);
 
   const selected = useMemo(
