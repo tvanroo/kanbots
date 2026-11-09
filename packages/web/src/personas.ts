@@ -169,7 +169,7 @@ export async function loadPersonas(): Promise<Persona[]> {
  const state=await bridge.coordinatorState();
  const items=state.workspace?.personas?.items;
  if(!items)return listPersonas();
- return mergeAutopilotPersonas(listPersonas(),items);
+ return mergeAutopilotPersonas(listPersonas().filter(p=>!p.builtIn),items);
 }
 export async function savePersona(input:CreatePersonaInput & {id?:string}):Promise<Persona> {
  const bridge=getBridge();

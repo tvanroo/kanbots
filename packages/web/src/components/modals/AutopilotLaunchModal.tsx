@@ -40,14 +40,14 @@ export function AutopilotLaunchModal({ onClose, onStarted }: AutopilotLaunchModa
     const saved=workspace.autopilot;
     if(!saved)return;
     setSelectedIds(new Set(saved.personas.map((p:Persona)=>p.id)));
-    setPersonas(mergeAutopilotPersonas(mergeAutopilotPersonas(listPersonas(), workspace.personas?.items??[]), saved.personas));
+    setPersonas(mergeAutopilotPersonas(mergeAutopilotPersonas(listPersonas().filter(p=>!workspace.personas||!p.builtIn), workspace.personas?.items??[]), saved.personas));
     setEffort(saved.effort);setParallelism(saved.parallelism);
     setTab(saved.personas.length===1&&saved.personas[0].id==='qa'?'qa':'feature-dev');
   },[coordinator]);
 
   useEffect(()=>{
     const items=coordinator?.workspace?.personas?.items;
-    if(items)setPersonas(current=>mergeAutopilotPersonas(mergeAutopilotPersonas(listPersonas(),current.filter(p=>selectedIds.has(p.id))),items));
+    if(items)setPersonas(current=>mergeAutopilotPersonas(mergeAutopilotPersonas(listPersonas().filter(p=>!p.builtIn),current.filter(p=>selectedIds.has(p.id))),items));
   },[coordinator?.workspace?.personas?.version]);
 
   const selected = useMemo(
@@ -65,7 +65,7 @@ export function AutopilotLaunchModal({ onClose, onStarted }: AutopilotLaunchModa
 
   function refreshPersonas(): void {
     // Keep edited selections and saved coordinator instructions on refresh.
-    setPersonas(current=>mergeAutopilotPersonas(mergeAutopilotPersonas(listPersonas(), coordinator?.workspace?.personas?.items??[]), current.filter(p=>selectedIds.has(p.id))));
+    setPersonas(current=>mergeAutopilotPersonas(mergeAutopilotPersonas(listPersonas().filter(p=>!coordinator?.workspace?.personas||!p.builtIn), coordinator?.workspace?.personas?.items??[]), current.filter(p=>selectedIds.has(p.id))));
   }
 
   function toggle(id: string): void {
