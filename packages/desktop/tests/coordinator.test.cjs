@@ -204,3 +204,113 @@ test('run results distinguish working from awaiting input and terminal recovery'
   }
  } finally { f.cleanup(); }
 });
+
+test('stale question records cannot hide actionable questions or accept another answer', async () => {
+ const f = fixture();
+ try {
+  const cards = [601, 602, 603].map(id => ({
+   id, type:'decision', status:'pending', payload:{question:`Question ${id}?`,options:[]},
+  }));
+  for (const card of cards) f.runs.set(card.id, {id:card.id,threadId:card.id,status:'awaiting_input',worktreePath:f.root});
+  f.svc.context.store.cards = {
+   listAllPending:()=>cards.filter(card=>card.status==='pending').map(card=>({card,agentRunId:card.id})),
+   findById:id=>cards.find(card=>card.id===id),
+   resolve:id=>{cards.find(card=>card.id===id).status='resolved';},
+  };
+  assert.equal((await f.svc.uiAction('questions-list')).length,3);
+  cards[0].status = 'resolved';
+  await assert.rejects(f.svc.uiAction('question-reply',{id:601,reply:'Yes'}),/no longer/);
+  f.runs.delete(602);
+  assert.deepEqual((await f.svc.uiAction('questions-list')).map(q=>q.id),[603]);
+  await f.svc.uiAction('question-reply',{id:603,reply:'Yes'});
+  assert.equal(cards[2].status,'resolved');
+ } finally {
+  f.cleanup();
+ }
+});
+
+test('slow delivery blocks only its originating thread, and failure allows retry', async () => {
+ const f = fixture();
+ let release;
+ try {
+  const cards = [611, 612, 613].map(id => ({
+   id, type:'decision', status:'pending', payload:{question:`Question ${id}?`,options:[]},
+  }));
+  for (const card of cards) f.runs.set(card.id, {
+   id:card.id,threadId:card.id===612?612:611,status:'awaiting_input',worktreePath:f.root,
+  });
+  f.svc.context.store.cards = {
+   listAllPending:()=>cards.filter(card=>card.status==='pending').map(card=>({card,agentRunId:card.id})),
+   findById:id=>cards.find(card=>card.id===id),
+   resolve:id=>{cards.find(card=>card.id===id).status='resolved';},
+  };
+  f.svc.context.supervisor.resume = async ({runId}) => {
+   if(runId===611) await new Promise((_,reject)=>{release=()=>reject(Error('Delivery failed'));});
+   return f.runs.get(runId);
+  };
+  await f.svc.uiAction('questions-list');
+  const first = assert.rejects(f.svc.uiAction('question-reply',{id:611,reply:'First'}),/Delivery failed/);
+  const rows = await f.svc.uiAction('questions-list');
+  assert.equal(rows.find(q=>q.id===611).state,'sending');
+  assert.equal(rows.find(q=>q.id===613).busy,true);
+  await assert.rejects(f.svc.uiAction('question-reply',{id:613,reply:'Same thread'}),/already being sent/);
+  await f.svc.uiAction('question-reply',{id:612,reply:'Other thread'});
+  assert.equal(cards[1].status,'resolved');
+  release();
+  await first;
+  assert.equal((await f.svc.uiAction('questions-list')).find(q=>q.id===611).state,'pending');
+  f.svc.context.supervisor.resume = async ({runId})=>f.runs.get(runId);
+  await f.svc.uiAction('question-reply',{id:611,reply:'Retry'});
+  assert.equal(cards[0].status,'resolved');
+ } finally {
+  f.cleanup();
+ }
+});
+
+test('successful follow-up clears worker recovery waiting only after resume and on every continuation', async () => {
+ const f = fixture();
+ try {
+  const c = await control(f);
+  await write(f,c,'dispatchTask',{number:1,qa:false});
+  const w = f.svc.state.workspaces[0];
+  f.runs.get(1).status = 'failed';
+  await f.svc.tick();
+  assert.equal(w.workflow.cards[1].waiting.reason,'Worker recovery');
+  const resume = f.svc.context.supervisor.resume;
+  f.svc.context.supervisor.resume = async args => {
+   assert.equal(w.workflow.cards[1].waiting.reason,'Worker recovery');
+   return resume(args);
+  };
+  await write(f,c,'followUpRun',{runId:1,message:'Recover using the saved checkpoint'});
+  assert.equal(w.workflow.cards[1].waiting,undefined);
+  assert.equal(w.workflow.cards[1].owner,'worker');
+  assert.equal(w.jobs[0].state,'implementing');
+  assert.equal(w.jobs[0].error,undefined);
+  const firstControl = w.jobs[0].controlId;
+  f.runs.get(1).status = 'failed';
+  // A second failed exit may share a run id, so explicitly record its new wait.
+  w.workflow.cards[1].waiting={reason:'Worker recovery',owner:'coordinator',trigger:'Recover again'};
+  await write(f,c,'followUpRun',{runId:1,message:'Continue the next bounded step'});
+  assert.notEqual(w.jobs[0].controlId,firstControl);
+  assert.equal(w.workflow.cards[1].waiting,undefined);
+ } finally { f.cleanup(); }
+});
+
+test('rejected follow-up preserves failed job and recovery waiting evidence', async () => {
+ const f = fixture();
+ try {
+  const c = await control(f);
+  await write(f,c,'dispatchTask',{number:1,qa:false});
+  f.runs.get(1).status = 'failed';
+  await f.svc.tick();
+  const w=f.svc.state.workspaces[0];
+  const beforeJob=structuredClone(w.jobs[0]);
+  const beforeCard=structuredClone(w.workflow.cards[1]);
+  f.svc.context.supervisor.resume=async()=>{throw Error('Provider unavailable');};
+  await assert.rejects(write(f,c,'followUpRun',{runId:1,message:'Try recovering'}),/Provider unavailable/);
+  assert.deepEqual(w.jobs[0],beforeJob);
+  assert.deepEqual(w.workflow.cards[1],beforeCard);
+  const saved=JSON.parse(fs.readFileSync(path.join(f.root,'coordinators.json'),'utf8'));
+  assert.deepEqual(saved.workspaces[0].jobs[0],beforeJob);
+ } finally { f.cleanup(); }
+});

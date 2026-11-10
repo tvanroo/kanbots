@@ -313,26 +313,86 @@ export class CoordinatorService{
       if(!Number.isInteger(args.parallelism)||args.parallelism<1||args.parallelism>8||!Number.isFinite(args.budgetUsd)||args.budgetUsd<=0||args.budgetUsd>1000)throw Error('Choose 1–8 workers and a positive budget up to $1,000.');
       w.parallelism=args.parallelism;w.budgetUsd=args.budgetUsd;w.qaDefault=!!args.qaDefault;w.maxReworks=Math.min(2,Math.max(0,Number(args.maxReworks)||0));w.revision++;this.save();return this.ui();
     }
-    if(action==='questions-list'){
-      w.questions??=[];
-      for(const {card,agentRunId} of this.context!.store.cards.listAllPending()){
-        const p=card.payload as any;if(card.type!=='decision'||!p?.question||w.questions.some(q=>q.id===card.id))continue;
-        const run=this.run(agentRunId);w.questions.push({id:card.id,runId:agentRunId,threadId:run.threadId,question:p.question,options:p.options??[],state:'pending'});this.event(w,'decision-needed',{cardId:card.id});
+    if (action === 'questions-list') {
+      const { store } = this.context!;
+      const pending = store.cards.listAllPending();
+      const previous = w.questions ?? [];
+      // A worker can dismiss its run's cards on exit. Keep questions already
+      // surfaced in this queue so the owner can still answer and resume it.
+      const canReplyToCard = (id: number) => {
+        const card = store.cards.findById(id);
+        return card && card.status !== 'resolved';
+      };
+      w.questions = previous.filter(q => q.state === 'sending' || canReplyToCard(q.id));
+      const changed = w.questions.length !== previous.length;
+      for (const { card, agentRunId } of pending) {
+        const payload = card.payload as { question?: string; options?: UserQuestion['options'] };
+        if (card.type !== 'decision' || !payload?.question || w.questions.some(q => q.id === card.id)) continue;
+        const run = store.agentRuns.findById(agentRunId);
+        if (!run) continue;
+        w.questions.push({ id: card.id, runId: agentRunId, threadId: run.threadId,
+          question: payload.question, options: payload.options ?? [], state: 'pending' });
+        this.event(w, 'decision-needed', { cardId: card.id });
       }
-      for(const q of w.questions){if(this.context!.store.cards.findById(q.id)?.status==='resolved')q.state='answered';}
-      this.save();return w.questions.filter(q=>q.state!=='answered').map(q=>({...q,busy:active(this.run(q.responseRunId??q.runId).status)&&this.run(q.responseRunId??q.runId).status!=='awaiting_input',explanation:q.explanationAfter===undefined?'':this.context!.store.events.list(q.responseRunId??q.runId).filter(e=>e.seq>q.explanationAfter!&&e.type==='text').map(e=>(e.payload as any)?.text??'').join('\n').slice(-8000)}));
+      if (changed) this.save();
+      return w.questions.flatMap(q => {
+        if (q.state === 'answered' || (q.state === 'sending' && !canReplyToCard(q.id))) return [];
+        const run = store.agentRuns.findById(q.responseRunId ?? q.runId) ?? store.agentRuns.findById(q.runId);
+        if (!run) return [];
+        const busy = w.questions!.some(other => other.id !== q.id && other.threadId === q.threadId && other.state === 'sending')
+          || (active(run.status) && run.status !== 'awaiting_input');
+        const explanation = q.explanationAfter === undefined ? '' : store.events.list(run.id)
+          .filter(e => e.seq > q.explanationAfter! && e.type === 'text')
+          .map(e => (e.payload as { text?: string })?.text ?? '').join('\n').slice(-8000);
+        return [{ ...q, busy, explanation }];
+      });
     }
-    if(action==='question-reply'){
-      const q=w.questions?.find(q=>q.id===args.id&&q.state==='pending');if(!q)throw Error('This question is no longer awaiting an answer.');
-      const explaining=args.explain===true;const reply=String(args.reply??'').trim();if(!explaining&&(!reply||reply.length>4000))throw Error('Enter an answer up to 4,000 characters.');
-      const run=this.run(q.responseRunId??q.runId);if(active(run.status)&&run.status!=='awaiting_input')throw Error('This thread is still working. Wait for its explanation before replying.');
-      const prompt=explaining?`Explain this pending question and the implications and tradeoffs of each option: ${q.question}. Do not treat this as an answer, implement a choice, or create a replacement question card. Explain, then wait for the user.`:`The user answered the pending question: ${q.question}\nAnswer: ${reply}\nContinue within the authorized scope.`;
-      q.state='sending';if(explaining)q.explanationAfter=this.context!.store.events.list(run.id).at(-1)?.seq??-1;this.save();
-      try{const conversation=w.conversationId?this.context!.store.chatConversations.findById(w.conversationId):null;
-        if(conversation?.threadId===q.threadId){const result=await this.uiAction('chat-send',{body:prompt});if(result?.dispatchError)throw Error(result.dispatchError);const response=result?.activeRun??result?.latestRun;if(response){q.responseRunId=response.id;if(explaining)q.explanationAfter=-1;}}
-        else if(run.worktreePath)await this.context!.supervisor.resume({runId:run.id,prompt});else await this.context!.supervisor.resumeChat({runId:run.id,prompt});
-        q.state=explaining?'pending':'answered';if(!explaining){q.reply=reply;const card=this.context!.store.cards.findById(q.id);if(card?.status==='pending')this.context!.store.cards.resolve(q.id,{value:reply,label:reply,source:'questions-for-user'});}this.event(w,'question-response',{id:q.id,explaining});return {ok:true};
-      }catch(e){q.state='pending';this.save();throw e;}
+    if (action === 'question-reply') {
+      const { store, supervisor } = this.context!;
+      const q = w.questions?.find(q => q.id === args.id && q.state === 'pending');
+      const card = q && store.cards.findById(q.id);
+      if (!q || !card || card.status === 'resolved') throw Error('This question is no longer awaiting an answer.');
+      if (w.questions?.some(other => other.threadId === q.threadId && other.state === 'sending')) {
+        throw Error('A response is already being sent to this thread.');
+      }
+      const explaining = args.explain === true;
+      const reply = String(args.reply ?? '').trim();
+      if (!explaining && (!reply || reply.length > 4000)) throw Error('Enter an answer up to 4,000 characters.');
+      const run = store.agentRuns.findById(q.responseRunId ?? q.runId) ?? this.run(q.runId);
+      if (active(run.status) && run.status !== 'awaiting_input') throw Error('This thread is still working. Wait for its explanation before replying.');
+      const prompt = explaining
+        ? `Explain this pending question and the implications and tradeoffs of each option: ${q.question}. Do not treat this as an answer, implement a choice, or create a replacement question card. Explain, then wait for the user.`
+        : `The user answered the pending question: ${q.question}\nAnswer: ${reply}\nContinue within the authorized scope.`;
+      const explanationAfter = explaining ? store.events.list(run.id).at(-1)?.seq ?? -1 : undefined;
+      q.state = 'sending';
+      try {
+        this.save();
+        const conversation = w.conversationId ? store.chatConversations.findById(w.conversationId) : null;
+        if (conversation?.threadId === q.threadId) {
+          const result = await this.uiAction('chat-send', { body: prompt });
+          if (result?.dispatchError) throw Error(result.dispatchError);
+          const response = result?.activeRun ?? result?.latestRun;
+          if (response) q.responseRunId = response.id;
+          if (explaining) q.explanationAfter = response && response.id !== run.id ? -1 : explanationAfter!;
+        } else {
+          if (run.worktreePath) await supervisor.resume({ runId: run.id, prompt });
+          else await supervisor.resumeChat({ runId: run.id, prompt });
+          if (explaining) q.explanationAfter = explanationAfter!;
+        }
+      } catch (error) {
+        q.state = 'pending';
+        this.save();
+        throw error;
+      }
+      q.state = explaining ? 'pending' : 'answered';
+      if (!explaining) {
+        q.reply = reply;
+        if (store.cards.findById(q.id)?.status === 'pending') {
+          store.cards.resolve(q.id, { value: reply, label: reply, source: 'questions-for-user' });
+        }
+      }
+      this.event(w, 'question-response', { id: q.id, explaining });
+      return { ok: true };
     }
     if(action==='chat-submit'){
       if(w.mode!=='internal')throw Error('Switch to built-in coordination to send a message here.');
@@ -565,12 +625,6 @@ Never approve your own pairing. No provider API keys are needed.\n\nClaude Deskt
           ? 'Phase checkpoint (historical evidence; current request follows):\n' + JSON.stringify(j.phaseCheckpoint) + '\n'
           : '';
         const control = createCheckpoint(this.root);
-        j.controlId = control.id;
-        j.state = 'implementing';
-        delete j.sha;
-        delete j.checkIds;
-        delete j.reviewRunId;
-        this.save();
         const resumed = await this.context!.supervisor.resume({
           freshContext,
           appendSystemPrompt: control.prompt,
@@ -580,7 +634,14 @@ Never approve your own pairing. No provider API keys are needed.\n\nClaude Deskt
             + '\n' + workerDeliveryInstructions(j.readOnly === true || j.role === 'discovery'),
           costBudgetUsd: j.budgetUsd,
         });
+        j.controlId = control.id;
+        j.state = 'implementing';
+        delete j.sha;
+        delete j.checkIds;
+        delete j.reviewRunId;
+        delete j.error;
         j.phaseContextPending = false;
+        await this.workflowSignal(w, j.number, 'worker-started', `Worker run ${run.id} resumed`, control.id);
         this.save();
         return resumed;
       }

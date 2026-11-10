@@ -5,9 +5,9 @@ import { readClaudeSubscriptionUsage } from '@kanborg/api';
 import { listApiConnections } from './api-connections.js';
 import { getAnthropicReportingAccounts,updateAnthropicReporting } from './anthropic-reporting.js';
 import { manageCodexResets } from './subscription-resets.js';
-import { readRouting,routingState,charged } from './routing-state.js';
+import { readRouting,routingState,charged,type Charge } from './routing-state.js';
 import { modelCatalogue,selectApiModel,type PricedModel } from './routing-models.js';
-export type Candidate={id:string;provider:'claude-code'|'codex-cli';kind:'api'|'subscription';score:number;reason:string;row?:ApiConnection;model?:PricedModel;pool?:string;available?:number;since?:number;funding?:'grant'|'paid';deadline?:number};
+export type Candidate={id:string;provider:'claude-code'|'codex-cli';kind:'api'|'subscription';score:number;reason:string;row?:ApiConnection;model?:PricedModel;pool?:string;available?:number;since?:number;funding?:'grant'|'paid';deadline?:number;resetAt?:number};
 let configuration:()=>Array<{id:string;enabled:boolean}>=()=>[];
 export function configureRoutingProviders(fn:typeof configuration){configuration=fn;}
 const reportingAttempts = new Map<string, number>();
@@ -19,7 +19,9 @@ export function invalidateCapacity(){revision++;cached=undefined;}
 export async function collectCapacity(hasWork=false,force=false):Promise<{snapshot:CapacitySnapshot;candidates:Candidate[]}>{
   const nextKey=JSON.stringify([configuration(),listApiConnections(),readRouting().config]);
   if(nextKey!==settingsKey){settingsKey=nextKey;invalidateCapacity();}
-  if(!force&&cached&&Date.now()-cached.at<60000)return cached;
+  const now = Date.now();
+  const nextReset = cached?.candidates[0]?.resetAt;
+  if (!force && cached && now - cached.at < 60000 && (nextReset === undefined || nextReset > now)) return cached;
   if(pending){const value=await pending;if(cached)return value;return collectCapacity(hasWork,force);}
   const started=revision;
   pending=load(hasWork).then(value=>{if(started===revision)cached={...value,at:Date.now()};return value;}).finally(()=>{pending=undefined;});
@@ -34,6 +36,25 @@ export function historicalQuotaUsable(used: number | null, checkedAt: string | u
     && resets.every(reset => reset === null || reset > now)
     && used + Math.max(5, age / 3600000 * 2) < 95;
 }
+const HOUR = 3600000;
+const DAY = 24 * HOUR;
+
+// Forecast only from actual settled grant charges. A quiet day is evidence
+// against deferring the grant, and pending reservations are not spending pace.
+function canDeferGrant(pool: string, remaining: number, deadline: number, resetAt: number, now: number, charges: Charge[]): boolean {
+  const daysAfterReset = (deadline - resetAt - DAY) / DAY;
+  if (daysAfterReset <= 0) return false;
+
+  const dailySpend = [0, 0, 0];
+  for (const charge of charges) {
+    if (charge.pool !== pool || charge.funding !== 'grant' || charge.pending || !Number.isFinite(charge.usd) || charge.usd <= 0) continue;
+    const age = now - Date.parse(charge.at);
+    if (age >= 0 && age < dailySpend.length * DAY) dailySpend[Math.floor(age / DAY)]! += charge.usd;
+  }
+  // Leave a full day of slack and assume only half of the slowest day's pace.
+  return Math.min(...dailySpend) * 0.5 * daysAfterReset >= remaining;
+}
+
 async function load(hasWork:boolean){
   let now=Date.now();const enabled=new Set(configuration().filter(p=>p.enabled).map(p=>p.id));
   // A successful OAuth quota response already verifies subscription access.
@@ -59,7 +80,7 @@ async function load(hasWork:boolean){
     const resetSoon=state.config.claudeResetExpiresAt&&Date.parse(state.config.claudeResetExpiresAt)>now&&Date.parse(state.config.claudeResetExpiresAt)-now<48*3600000;
     rows.push({id:'claude-sub',label:'Claude subscription',kind:'subscription',needsAttention:quota?.source==='unauthorized'&&!renewable,stale:!fresh&&used!==null,usedPercent:used,remaining:used!==null?100-used:null,spent:null,available:!!usable,detail:!fresh?`${used!==null?'Last reported quota · ':''}${renewable?'Claude Code is signed in. Using the saved reading with a growing safety margin while fresh usage is recovered.':quota?.message??'Quota unavailable; retrying automatically.'}${quota?.checkedAt?` Last successful reading ${new Date(quota.checkedAt).toLocaleString()}.`:''}${quota?.retryAt?` Next check ${new Date(quota.retryAt).toLocaleTimeString()}.`:''}`:windows.map(w=>`${w.label}: ${Math.round(w.pct*100)}% used${w.resetsAt?` · resets ${new Date(w.resetsAt).toLocaleString()}`:''}`).join('; ')});
     const resetHours=Math.min(...windows.filter(w=>w.resetsAt&&Date.parse(w.resetsAt)>now).map(w=>(Date.parse(w.resetsAt!)-now)/3600000));
-    if(usable)candidates.push({id:'claude-sub',provider:'claude-code',kind:'subscription',score:renewable?100:resetSoon?280:resetHours<24?270-resetHours:180-(used??0)/10,reason:renewable?'Verified Claude login; recent saved quota with reduced confidence':resetSoon?'Use included capacity before the tracked Claude reset expires':resetHours<24?'Use subscription quota before its approaching reset':'Available Claude subscription quota'});
+    if(usable)candidates.push({id:'claude-sub',provider:'claude-code',kind:'subscription',...(fresh&&resetHours<=6?{resetAt:now+resetHours*HOUR}:{}),score:renewable?100:resetSoon?280:resetHours<24?270-resetHours:180-(used??0)/10,reason:renewable?'Verified Claude login; recent saved quota with reduced confidence':resetSoon?'Use included capacity before the tracked Claude reset expires':resetHours<24?'Use subscription quota before its approaching reset':'Available Claude subscription quota'});
   }
   if(enabled.has('codex-cli')){
     const usage=codex?.subscriptionUsage;
@@ -71,7 +92,7 @@ async function load(hasWork:boolean){
     rows.push({id:'codex-sub',label:'ChatGPT subscription',kind:'subscription',stale:!fresh&&used!==null,usedPercent:used,remaining:used===null?null:100-used,spent:null,available:!!usable,detail:usage?`${!fresh?'Last reported quota · ':''}${codex?.subscriptionUsageError??''}${!fresh&&usage.checkedAt?` Last successful reading ${new Date(usage.checkedAt).toLocaleString()}.`:''} ${usage.resetCredits?.availableCount??0} reset credits reported. `+usage.windows.map(w=>`${w.name}: ${Math.round(w.usedPercent)}% used${w.resetsAt?` · resets ${new Date(w.resetsAt*1000).toLocaleString()}`:''}`).join('; '):'Quota unavailable'});
     for(const [i,credit] of (usage?.credits??[]).entries())rows.push({id:`codex-credit-${i}`,label:`ChatGPT credits · ${credit.name}`,kind:'grant',usedPercent:null,remaining:credit.balance!==null&&Number.isFinite(Number(credit.balance))?Number(credit.balance):null,spent:null,available:false,detail:credit.unlimited?'Unlimited reported; paid fallback is not selected automatically':'Credit balance reported; preserved while included capacity is available. Not a dollar balance.'});
     const resetHours=Math.min(...(usage?.windows??[]).filter(w=>w.resetsAt&&w.resetsAt*1000>now).map(w=>(w.resetsAt!*1000-now)/3600000));
-    if(usable)candidates.push({id:'codex-sub',provider:'codex-cli',kind:'subscription',score:historical?100:resetSoon?280:resetHours<24?270-resetHours:180-(used??0)/10,reason:historical?'Verified ChatGPT account; recent saved quota with reduced confidence':resetSoon?'Use included capacity before the ChatGPT reset expires':resetHours<24?'Use subscription quota before its approaching reset':'Available ChatGPT subscription quota'});
+    if(usable)candidates.push({id:'codex-sub',provider:'codex-cli',kind:'subscription',...(fresh&&resetHours<=6?{resetAt:now+resetHours*HOUR}:{}),score:historical?100:resetSoon?280:resetHours<24?270-resetHours:180-(used??0)/10,reason:historical?'Verified ChatGPT account; recent saved quota with reduced confidence':resetSoon?'Use included capacity before the ChatGPT reset expires':resetHours<24?'Use subscription quota before its approaching reset':'Available ChatGPT subscription quota'});
   }
   let reports=getAnthropicReportingAccounts();
   const refresh=reports.filter(a=>listApiConnections().some(k=>k.organizationId===a.organizationId&&k.grantBillingDay)&&(a.report.connected||a.report.eligibility==='supported'||!!a.report.attemptedAt||a.report.eligibility==='denied')&&(!a.report.retryAt||Date.parse(a.report.retryAt)<=now)&&now-(reportingAttempts.get(a.organizationId)??0)>15*60000&&(!a.report.checkedAt||now-Date.parse(a.report.checkedAt)>15*60000));
@@ -80,6 +101,7 @@ async function load(hasWork:boolean){
   now=Date.now();
   const month=new Date();month.setUTCDate(1);month.setUTCHours(0,0,0,0);
   const displayed=new Set<string>();
+  const grantBalances = new Map<Candidate, number>();
   for(const row of listApiConnections().filter(r=>r.enabled)){
     const pool=`${row.provider}:${row.organizationId??row.id}`;
     const model=selectApiModel(row,catalogue);
@@ -97,13 +119,35 @@ async function load(hasWork:boolean){
     }
     if(available){
       const score=eligibleGrant?250+Math.max(0,100-(useBy-now)/3600000):10-(model!.input+model!.output)/100;
-      candidates.push({id:row.id,provider:row.provider==='anthropic'?'claude-code':'codex-cli',kind:'api',row,model:model!,pool,available:eligibleGrant?amount!:(grant?Infinity:row.budget??Infinity),since:eligibleGrant?since:month.getTime(),funding:eligibleGrant?'grant':'paid',...(eligibleGrant&&Number.isFinite(useBy)?{deadline:useBy}:{}),score,reason:eligibleGrant?(Number.isFinite(useBy)?'Use available grant ahead of its six-hour safety deadline':'Use available grant before paid capacity; expiry is not configured'):grant?'Grant unavailable; explicitly permitted pay-go fallback':'Paid API fallback after included capacity'});
+      const candidate: Candidate = {id:row.id,provider:row.provider==='anthropic'?'claude-code':'codex-cli',kind:'api',row,model:model!,pool,available:eligibleGrant?amount!:(grant?Infinity:row.budget??Infinity),since:eligibleGrant?since:month.getTime(),funding:eligibleGrant?'grant':'paid',...(eligibleGrant&&Number.isFinite(useBy)?{deadline:useBy}:{}),score,reason:eligibleGrant?(Number.isFinite(useBy)?'Use available grant ahead of its six-hour safety deadline':'Use available grant before paid capacity; expiry is not configured'):grant?'Grant unavailable; explicitly permitted pay-go fallback':'Paid API fallback after included capacity'};
+      candidates.push(candidate);
+      if (eligibleGrant && remaining !== null) grantBalances.set(candidate, remaining);
     }
   }
   for(const id of enabled)if(!['claude-code','codex-cli'].includes(id))rows.push({id,label:id,kind:'unknown',usedPercent:null,remaining:null,spent:null,available:false,detail:'Capacity reporting not supported yet; manual provider selection remains available.'});
-  const ordered=candidates.sort((a,b)=>b.score-a.score);
+  const promoted = new Set<Candidate>();
+  if (grantBalances.size > 0) {
+    for (const candidate of candidates) {
+      const resetAt = candidate.resetAt;
+      if (resetAt === undefined || resetAt <= now) continue;
+      const safeToDefer = [...grantBalances].every(([grant, remaining]) =>
+        grant.pool !== undefined && grant.deadline !== undefined
+        && canDeferGrant(grant.pool, remaining, grant.deadline, resetAt, now, state.charges ?? []));
+      if (safeToDefer) {
+        promoted.add(candidate);
+        candidate.reason = 'Use included capacity before its imminent reset; recent spending leaves time to use the grants';
+      }
+    }
+  }
+  const tier = (candidate: Candidate) => {
+    if (promoted.has(candidate)) return 0;
+    if (candidate.funding === 'grant') return 1;
+    return candidate.kind === 'subscription' ? 2 : 4;
+  };
+  const ordered = candidates.sort((a, b) => tier(a) - tier(b)
+    || (tier(a) === 0 ? a.resetAt! - b.resetAt! : b.score - a.score));
   for(const row of rows){const candidate=ordered.find(c=>c.id===row.id||c.pool===row.id);
-    if(candidate){row.routingOrder=candidate.score>=250?1:candidate.score>=100?2:4;row.routingTier=row.routingOrder===1?'Time-sensitive / grants':row.routingOrder===2?'Included capacity':'Pay-as-you-go';row.preferredNow=candidate===ordered[0];row.routingReason=candidate.reason;}
+    if(candidate){row.routingOrder=tier(candidate);row.routingTier=row.routingOrder===0?'Imminent subscription reset':row.routingOrder===1?'Time-sensitive / grants':row.routingOrder===2?'Included capacity':'Pay-as-you-go';row.preferredNow=candidate===ordered[0];row.routingReason=candidate.reason;}
     else{row.routingOrder=3;row.routingTier=row.id.startsWith('codex-credit')?'Held in reserve':'Unavailable for automatic routing';row.routingReason=row.id.startsWith('codex-credit')?'Provider-managed credit fallback; expiry not reported by this connection.':'';}
   }
   rows.sort((a,b)=>(a.routingOrder??9)-(b.routingOrder??9)||Number(!!b.preferredNow)-Number(!!a.preferredNow));

@@ -161,3 +161,46 @@ test('renewable Claude CLI subscription can recover without presenting stale quo
  });service.configureRoutingProviders(()=>[{id:'claude-code',enabled:true}]);const r=await service.collectCapacity();assert.equal(r.candidates.some(c=>c.id==='claude-sub'),hasKey);assert.equal(r.snapshot.rows[0].stale,true);if(hasKey)assert.match(r.snapshot.rows[0].detail,/growing safety margin/);
  }
 });
+
+test('grant routing defers only for an imminent natural reset with conservative spending headroom', async () => {
+ const hour = 3600000;
+ const date = Date.now();
+ const pool = 'anthropic:grant';
+ const settled = [1, 25, 49].map(hours => ({
+  pool, at: new Date(date - hours * hour).toISOString(), usd: 20, funding: 'grant', pending: false,
+ }));
+ const model = {id:'claude-test',input:1,output:5,context:64000,maxOutput:4096};
+ async function preferred({charges = settled, remaining = 100, expiryHours = 14 * 24, resetHours = 2, stale = false} = {}) {
+  const row = {id:'grant',provider:'anthropic',name:'Grant',enabled:true,funding:'grant',remaining,
+   renewal:'none',afterGrant:'stop',expiresAt:new Date(date + expiryHours * hour).toISOString()};
+  const service = load('routing-capacity', {
+   './grant-capacity.js':load('grant-capacity',{'./grant-estimate.js':load('grant-estimate')}),
+   '@kanborg/api':{readClaudeSubscriptionUsage:async()=>null},
+   './api-connections.js':{listApiConnections:()=>[row]},
+   './anthropic-reporting.js':{getAnthropicReportingAccounts:()=>[]},
+   './claude-auth.js':{getClaudeDetails:async()=>null},
+   './subscription-resets.js':{manageCodexResets:async()=>({
+    authenticationLabel:'ChatGPT subscription',accountIdentity:'account',
+    ...(stale?{subscriptionUsageError:'Last reported usage'}:{}),
+    subscriptionUsage:{checkedAt:new Date(date).toISOString(),
+     windows:[{usedPercent:25,resetsAt:(date + resetHours * hour)/1000}],
+     resetCredits:{credits:[{expiresAt:(date + hour)/1000}]}},
+   })},
+   './routing-state.js':{readRouting:()=>({config:{},charges}),routingState:()=>({}),charged:()=>0},
+   './routing-models.js':{modelCatalogue:async()=>({}),selectApiModel:()=>model},
+  });
+  service.configureRoutingProviders(()=>[{id:'codex-cli',enabled:true}]);
+  const {candidates,snapshot} = await service.collectCapacity();
+  assert.equal(snapshot.rows[0].preferredNow,true);
+  return candidates[0].id;
+ }
+ assert.equal(await preferred(), 'codex-sub');
+ assert.equal(await preferred({charges:[]}), 'grant');
+ assert.equal(await preferred({charges:settled.map(c=>({...c,pending:true}))}), 'grant');
+ assert.equal(await preferred({charges:settled.map(c=>({...c,pool:'anthropic:other'}))}), 'grant');
+ assert.equal(await preferred({charges:settled.slice(0,2)}), 'grant');
+ assert.equal(await preferred({expiryHours:48}), 'grant');
+ assert.equal(await preferred({resetHours:8}), 'grant');
+ assert.equal(await preferred({stale:true}), 'grant');
+ assert.equal(await preferred({remaining:0}), 'codex-sub');
+});
