@@ -288,8 +288,9 @@ test('successful follow-up clears worker recovery waiting only after resume and 
   assert.equal(w.jobs[0].error,undefined);
   const firstControl = w.jobs[0].controlId;
   f.runs.get(1).status = 'failed';
-  // A second failed exit may share a run id, so explicitly record its new wait.
-  w.workflow.cards[1].waiting={reason:'Worker recovery',owner:'coordinator',trigger:'Recover again'};
+  await f.svc.tick();
+  assert.equal(w.workflow.cards[1].waiting.reason,'Worker recovery');
+  assert.equal(w.workflow.cards[1].waiting.owner,'coordinator');
   await write(f,c,'followUpRun',{runId:1,message:'Continue the next bounded step'});
   assert.notEqual(w.jobs[0].controlId,firstControl);
   assert.equal(w.workflow.cards[1].waiting,undefined);
