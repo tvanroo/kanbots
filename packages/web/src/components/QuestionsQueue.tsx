@@ -25,7 +25,7 @@ export function QuestionsQueue({ inline = false }: { inline?: boolean }) {
   const [refreshError, setRefreshError] = useState('');
   const [refreshing, setRefreshing] = useState(false);
   const [sending, setSending] = useState<Record<number, 'sending' | 'slow'>>({});
-  const sendingThreads = useRef(new Set<number>());
+  const sendingThreads = useRef(new Map<number, { questionId: number }>());
   const refreshSequence = useRef(0);
   const refreshPending = useRef(false);
   const action = getBridge()?.coordinatorAction;
@@ -44,7 +44,19 @@ export function QuestionsQueue({ inline = false }: { inline?: boolean }) {
         }),
       ]);
       if (sequence !== refreshSequence.current) return;
-      setItems(rows ?? []);
+      const questions: Question[] = rows ?? [];
+      for (const [threadId, delivery] of sendingThreads.current) {
+        if (questions.some(question => question.id === delivery.questionId)) continue;
+        // Authoritative refresh confirms this question has left the queue.
+        // Release a lost IPC wait without replaying the answer.
+        sendingThreads.current.delete(threadId);
+        setSending(current => {
+          const next = { ...current };
+          delete next[threadId];
+          return next;
+        });
+      }
+      setItems(questions);
       setRefreshError('');
     } catch (error) {
       if (sequence === refreshSequence.current) setRefreshError(errorMessage(error));
@@ -72,10 +84,15 @@ export function QuestionsQueue({ inline = false }: { inline?: boolean }) {
     const { id, threadId } = question;
     if (!action || question.busy || question.state !== 'pending' || sendingThreads.current.has(threadId)) return;
     if (!explain && !reply?.trim()) return;
-    sendingThreads.current.add(threadId);
+    const delivery = { questionId: id };
+    sendingThreads.current.set(threadId, delivery);
     setSending(current => ({ ...current, [threadId]: 'sending' }));
     setErrors(current => ({ ...current, [id]: '' }));
-    const timer = setTimeout(() => setSending(current => ({ ...current, [threadId]: 'slow' })), 8000);
+    const timer = setTimeout(() => {
+      if (sendingThreads.current.get(threadId) === delivery) {
+        setSending(current => ({ ...current, [threadId]: 'slow' }));
+      }
+    }, 8000);
     try {
       await action('question-reply', { id, reply, explain });
       if (!explain) {
@@ -87,15 +104,19 @@ export function QuestionsQueue({ inline = false }: { inline?: boolean }) {
         });
       }
     } catch (error) {
-      setErrors(current => ({ ...current, [id]: errorMessage(error) }));
+      if (sendingThreads.current.get(threadId) === delivery) {
+        setErrors(current => ({ ...current, [id]: errorMessage(error) }));
+      }
     } finally {
       clearTimeout(timer);
-      sendingThreads.current.delete(threadId);
-      setSending(current => {
-        const next = { ...current };
-        delete next[threadId];
-        return next;
-      });
+      if (sendingThreads.current.get(threadId) === delivery) {
+        sendingThreads.current.delete(threadId);
+        setSending(current => {
+          const next = { ...current };
+          delete next[threadId];
+          return next;
+        });
+      }
       // Refresh independently. A delayed list request cannot keep answers locked.
       void refresh(true);
     }

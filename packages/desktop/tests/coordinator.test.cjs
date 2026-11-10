@@ -314,3 +314,53 @@ test('rejected follow-up preserves failed job and recovery waiting evidence', as
   assert.deepEqual(saved.workspaces[0].jobs[0],beforeJob);
  } finally { f.cleanup(); }
 });
+
+test('accepted resume persists before workflow read failure and reconciles after restart', async () => {
+ const f=fixture();
+ try {
+  const c=await control(f);
+  await write(f,c,'dispatchTask',{number:1,qa:false});
+  f.runs.get(1).status='failed';
+  await f.svc.tick();
+  const getIssue=f.handlers['issues:get'];
+  f.handlers['issues:get']=async()=>{throw Error('Issue source unavailable');};
+  const result=await write(f,c,'followUpRun',{runId:1,message:'Resume authorized work'});
+  assert.equal(result.data.status,'running');
+  const saved=JSON.parse(fs.readFileSync(path.join(f.root,'coordinators.json'),'utf8')).workspaces[0];
+  assert.equal(saved.jobs[0].state,'implementing');
+  assert.equal(saved.jobs[0].workflowStartPending,saved.jobs[0].controlId);
+  assert.equal(saved.workflow.cards[1].waiting.reason,'Worker recovery');
+  f.handlers['issues:get']=getIssue;
+  const restored=f.reload();
+  await restored.tick();
+  const w=restored.state.workspaces[0];
+  assert.equal(w.jobs[0].workflowStartPending,undefined);
+  assert.equal(w.workflow.cards[1].waiting,undefined);
+  assert.equal(f.resumes.length,1);
+ }finally{f.cleanup();}
+});
+
+test('delivered answer survives card resolution failure and restart without resending',async()=>{
+ const f=fixture();
+ try{
+  const card={id:620,type:'decision',status:'pending',payload:{question:'Proceed?',options:[]}};
+  f.runs.set(620,{id:620,threadId:620,status:'awaiting_input',worktreePath:f.root});
+  let fail=true;
+  f.svc.context.store.cards={
+   listAllPending:()=>card.status==='pending'?[{card,agentRunId:620}]:[],
+   findById:()=>card,
+   resolve:()=>{if(fail)throw Error('Card write failed');card.status='resolved';},
+  };
+  await f.svc.uiAction('questions-list');
+  assert.deepEqual(await f.svc.uiAction('question-reply',{id:620,reply:'Proceed within scope'}),{ok:true});
+  const saved=JSON.parse(fs.readFileSync(path.join(f.root,'coordinators.json'),'utf8'));
+  assert.equal(saved.workspaces[0].questions[0].state,'answered');
+  assert.equal(saved.workspaces[0].questions[0].reply,'Proceed within scope');
+  fail=false;
+  const restored=f.reload();
+  assert.deepEqual(await restored.uiAction('questions-list'),[]);
+  assert.equal(card.status,'resolved');
+  assert.equal(f.resumes.length,1);
+  await assert.rejects(restored.uiAction('question-reply',{id:620,reply:'Again'}),/no longer/);
+ }finally{f.cleanup();}
+});

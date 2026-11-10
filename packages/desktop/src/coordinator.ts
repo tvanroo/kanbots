@@ -43,7 +43,7 @@ function runNextAction(status: string): string {
   return 'Inspect the stopped or failed run and saved evidence before deciding how to recover.';
 }
 
-type Job={readOnly?:boolean;phaseContextPending?:boolean;phaseCheckpoint?:unknown;manualQA?:boolean;controlId?:string;reviewControlId?:string;checkpoint?:unknown;autopilot?:boolean;runId:number;number:number;role:string;qa:boolean;maxReworks:number;reworks:number;budgetUsd:number;state:string;sha?:string;reviewRunId?:number;checkIds?:number[];error?:string};
+type Job={workflowStartPending?:string;readOnly?:boolean;phaseContextPending?:boolean;phaseCheckpoint?:unknown;manualQA?:boolean;controlId?:string;reviewControlId?:string;checkpoint?:unknown;autopilot?:boolean;runId:number;number:number;role:string;qa:boolean;maxReworks:number;reworks:number;budgetUsd:number;state:string;sha?:string;reviewRunId?:number;checkIds?:number[];error?:string};
 type Release={id:string;runId:number;sha:string;targetBranch:string;targetSha:string;action:'merge'|'draft-pr';title?:string;body?:string;state:string;result?:unknown};
 type Handoff={delivery?:'waiting'|'sending'|'sent'|'failed';deliveryError?:string;deliveryRunId?:number;id:string;from:string|null;to:string;mode:'internal'|'external';state:'requested'|'ready'|'completed';requestedAt:string;summary:string;checkpoint:unknown;receivedBy?:string};
 type CoordinatorRequest={id:string;kind:'discovery'|'resume-workflows'|'workflow-change'|'workflow-action'|'autopilot';prompt:string;state:'queued'|'received'|'completed';createdAt:string;receivedBy?:string;error?:string};
@@ -315,8 +315,15 @@ export class CoordinatorService{
     }
     if (action === 'questions-list') {
       const { store } = this.context!;
-      const pending = store.cards.listAllPending();
       const previous = w.questions ?? [];
+      for (const question of previous) {
+        if (question.state === 'answered' && question.reply && store.cards.findById(question.id)?.status === 'pending') {
+          try {
+            store.cards.resolve(question.id, { value: question.reply, label: question.reply, source: 'questions-for-user' });
+          } catch { /* Delivery is already recorded. Retry card reconciliation without resending. */ }
+        }
+      }
+      const pending = store.cards.listAllPending();
       // A worker can dismiss its run's cards on exit. Keep questions already
       // surfaced in this queue so the owner can still answer and resume it.
       const canReplyToCard = (id: number) => {
@@ -387,8 +394,15 @@ export class CoordinatorService{
       q.state = explaining ? 'pending' : 'answered';
       if (!explaining) {
         q.reply = reply;
+        this.save();
         if (store.cards.findById(q.id)?.status === 'pending') {
-          store.cards.resolve(q.id, { value: reply, label: reply, source: 'questions-for-user' });
+          try {
+            store.cards.resolve(q.id, { value: reply, label: reply, source: 'questions-for-user' });
+          } catch (error) {
+            this.event(w, 'question-card-sync-pending', {
+              id: q.id, error: clip(error instanceof Error ? error.message : 'Card synchronization failed'),
+            });
+          }
         }
       }
       this.event(w, 'question-response', { id: q.id, explaining });
@@ -641,8 +655,17 @@ Never approve your own pairing. No provider API keys are needed.\n\nClaude Deskt
         delete j.reviewRunId;
         delete j.error;
         j.phaseContextPending = false;
-        await this.workflowSignal(w, j.number, 'worker-started', `Worker run ${run.id} resumed`, control.id);
+        j.workflowStartPending = control.id;
         this.save();
+        try {
+          await this.workflowSignal(w, j.number, 'worker-started', `Worker run ${run.id} resumed`, control.id);
+          delete j.workflowStartPending;
+          this.save();
+        } catch (error) {
+          this.event(w, 'worker-workflow-sync-pending', {
+            runId: run.id, error: clip(error instanceof Error ? error.message : 'Workflow synchronization failed'),
+          });
+        }
         return resumed;
       }
       case 'stopRun':{const j=w.jobs.find(j=>j.runId===a.runId||j.reviewRunId===a.runId);if(j){j.state='interrupted';j.error='Interrupted—recovery needed';this.save();}return h['agent-runs:stop']({runId:a.runId});}
@@ -776,6 +799,13 @@ Never approve your own pairing. No provider API keys are needed.\n\nClaude Deskt
     }
     const state=w.jobs.map(j=>({run:this.compactRun(j.runId),review:j.reviewRunId?this.compactRun(j.reviewRunId):null}));const snap=JSON.stringify(state);if(w.snapshot!==snap){w.snapshot=snap;this.event(w,'runs-changed',state);}
     for(const j of w.jobs){try{
+      if (j.workflowStartPending) {
+        try {
+          await this.workflowSignal(w, j.number, 'worker-started', `Worker run ${j.runId} resumed`, j.workflowStartPending);
+          delete j.workflowStartPending;
+          this.save();
+        } catch { /* Resume is durable; retry workflow synchronization on the next tick. */ }
+      }
       const checkpoint=j.controlId?readCheckpoint(this.root,j.controlId):null;if(checkpoint?.state==='checkpointed'&&!active(this.run(j.runId).status)){j.checkpoint=checkpoint;if(j.state==='implementing'){j.state='checkpointed';j.error='Checkpoint saved; implementation or validation remains. Coordinator review required.';this.event(w,'worker-checkpointed',{runId:j.runId,checkpoint});continue;}}
 
       if(j.state==='implementing'){const r=this.run(j.runId);if(active(r.status))continue;if(r.status!=='complete'){j.state='blocked';j.error=r.exitReason??r.status;this.event(w,'blocked',{runId:r.id,reason:j.error});await this.workflowSignal(w,j.number,'worker-failed',`Run ${r.id}: ${j.error}`,String(r.id));continue;}if(j.autopilot&&w.autopilot?.status!=='active'){j.state='awaiting-review';j.error=j.qa?'Implementation finished; QA remains pending.':'Coordinator review remains pending.';this.event(w,'wind-down-checkpoint',{runId:r.id,remaining:j.error??'Coordinator review'});continue;}if(!j.qa){j.state='completed';this.event(w,'implementation-completed',{runId:r.id});await this.workflowSignal(w,j.number,'worker-completed',`Deliverable from run ${r.id}; inspect getRunResult for evidence and limitations`,String(r.id));continue;}await this.startQA(w,j);}
