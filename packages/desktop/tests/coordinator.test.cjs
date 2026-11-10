@@ -1,15 +1,15 @@
 const {test}=require('node:test');const assert=require('node:assert/strict');const fs=require('node:fs');const path=require('node:path');const Module=require('node:module');const ts=require('typescript');
 function load(file,mocks={}){const mod=new Module(file);mod.paths=Module._nodeModulePaths(path.dirname(file));const original=mod.require.bind(mod);mod.require=id=>Object.hasOwn(mocks,id)?mocks[id]:original(id);mod._compile(ts.transpileModule(fs.readFileSync(file,'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText,file);return mod.exports;}
 const manifest={...load(path.resolve(__dirname,'../../mcp/src/app-controls.ts')),...load(path.resolve(__dirname,'../../mcp/src/coordinator.ts'),{'./app-controls.js':load(path.resolve(__dirname,'../../mcp/src/app-controls.ts')),'./workflow-schema.js':load(path.resolve(__dirname,'../../mcp/src/workflow-schema.ts'))}),...load(path.resolve(__dirname,'../../mcp/src/onboarding.ts'))};
-function fixture(){const root=fs.mkdtempSync('/private/tmp/kanbots-coordinator-test-');const {CoordinatorService}=load(path.resolve(__dirname,'../src/coordinator.ts'),{'./providers-ipc.js':{getProviderHandlers:()=>({'providers:get':async()=>({source:'app-store'})})},'./routing-state.js':{routingState:()=>({}),saveRouting:c=>c},'./persona-library.js':load(path.resolve(__dirname,'../src/persona-library.ts')),'./coordinator-outbound.js':load(path.resolve(__dirname,'../src/coordinator-outbound.ts')),electron:{app:{getPath:()=>root,getVersion:()=>"test"}},'@kanborg/mcp':manifest,'./worker-checkpoint.js':load(path.resolve(__dirname,'../src/worker-checkpoint.ts')),'./workflow.js':load(path.resolve(__dirname,'../src/workflow.ts')),'@kanborg/core':load(path.resolve(__dirname,'../../core/src/labels.ts')), './routing-capacity.js':{collectCapacity:async()=>({snapshot:{rows:[]}})}});const svc=new CoordinatorService(root);let starts=0;const resumes=[];let issues=[{number:1,title:'Test task',body:'Acceptance: works',labels:[]}];const runs=new Map();let checks=[];const handlers={
+function fixture(){const root=fs.mkdtempSync('/private/tmp/kanbots-coordinator-test-');const {CoordinatorService}=load(path.resolve(__dirname,'../src/coordinator.ts'),{'./providers-ipc.js':{getProviderHandlers:()=>({'providers:get':async()=>({source:'app-store'})})},'./routing-state.js':{routingState:()=>({}),saveRouting:c=>c},'./persona-library.js':load(path.resolve(__dirname,'../src/persona-library.ts')),'./coordinator-outbound.js':load(path.resolve(__dirname,'../src/coordinator-outbound.ts')),electron:{app:{getPath:()=>root,getVersion:()=>"test"}},'@kanborg/mcp':manifest,'./worker-checkpoint.js':load(path.resolve(__dirname,'../src/worker-checkpoint.ts')),'./workflow.js':load(path.resolve(__dirname,'../src/workflow.ts')),'@kanborg/core':load(path.resolve(__dirname,'../../core/src/labels.ts')), './routing-capacity.js':{collectCapacity:async()=>({snapshot:{rows:[]}})}});const svc=new CoordinatorService(root);let starts=0;const resumes=[];const startInputs=[];let issues=[{number:1,title:'Test task',body:'Acceptance: works',labels:[]}];const runs=new Map();let checks=[];const handlers={
  'workspace:get':async()=>({id:'test-board'}),'autopilot:list-active':async()=>[], 'issues:list':async()=>issues,'issues:get':async a=>({issue:issues.find(i=>i.number===a.number)}),'issues:create':async a=>{const i={number:issues.length+1,...a};issues.push(i);return i;},'issues:patch':async a=>Object.assign(issues.find(i=>i.number===a.number),a.patch),
  'config:get':async()=>({owner:'local',repo:'test'}),'decisions:pending':async()=>[],
  'agent-runs:checks:run':async()=>{checks=[{id:1,kind:'tests',status:'running'}];return checks;},'agent-runs:checks:list':async()=>checks,
  'chat:post-message':async a=>({body:a.body}), 'chat:create':async()=>({conversation:{id:99}}),'chat:get':async()=>({activeRun:null,messages:[],events:[]}),
  'agent-runs:diff':async()=>({files:[],empty:true}),
  };
- const context={repoPath:root,source:{},handlers,store:{chatConversations:{findById:()=>({threadId:1})},threads:{getOrCreate:()=>({id:1}),findById:()=>({issueNumber:1})},agentRuns:{findById:id=>runs.get(id)},events:{list:id=>[{seq:0,type:'text',payload:{text:id===2?'Reviewed tests and implementation. KANBOTS_QA_PASS':'Implementation complete'}}]}},supervisor:{start:async a=>{starts++;const r={id:starts,threadId:1,status:starts===1?'running':'complete',worktreePath:root,branchName:'kanbots/test',totalCostUsd:0};runs.set(r.id,r);return r;},resume:async a=>{resumes.push(a);runs.get(a.runId).status='running';return runs.get(a.runId);},stop:async id=>{runs.get(id).status='stopped';return runs.get(id);}}};svc.attach(context);let sha='a'.repeat(40);svc.git=async(cwd,args)=>args[0]==='status'?'':args[0]==='worktree'?`worktree ${root}\nbranch refs/heads/main`:args[0]==='merge'?'':args.at(-1)==='refs/heads/main'?'b'.repeat(40):sha;
- return {svc,root,runs,handlers,resumes,reload:()=>{const restored=new CoordinatorService(root);restored.attach(context);return restored;},get starts(){return starts;},get checks(){return checks;},setSha:s=>sha=s,cleanup:()=>fs.rmSync(root,{recursive:true,force:true})};}
+ const context={repoPath:root,source:{},handlers,store:{chatConversations:{findById:()=>({threadId:1})},threads:{getOrCreate:()=>({id:1}),findById:()=>({issueNumber:1})},agentRuns:{findById:id=>runs.get(id)},events:{list:id=>[{seq:0,type:'text',payload:{text:id===2?'Reviewed tests and implementation. KANBOTS_QA_PASS':'Implementation complete'}}]}},supervisor:{start:async a=>{startInputs.push(a);starts++;const r={id:starts,threadId:1,status:starts===1?'running':'complete',worktreePath:root,branchName:'kanbots/test',totalCostUsd:0};runs.set(r.id,r);return r;},resume:async a=>{resumes.push(a);runs.get(a.runId).status='running';return runs.get(a.runId);},stop:async id=>{runs.get(id).status='stopped';return runs.get(id);}}};svc.attach(context);let sha='a'.repeat(40);svc.git=async(cwd,args)=>args[0]==='status'?'':args[0]==='worktree'?`worktree ${root}\nbranch refs/heads/main`:args[0]==='merge'?'':args.at(-1)==='refs/heads/main'?'b'.repeat(40):sha;
+ return {svc,root,runs,handlers,resumes,startInputs,reload:()=>{const restored=new CoordinatorService(root);restored.attach(context);return restored;},get starts(){return starts;},get checks(){return checks;},setSha:s=>sha=s,cleanup:()=>fs.rmSync(root,{recursive:true,force:true})};}
 async function control(f){await f.svc.uiAction('handoff',{mode:'internal'});const w=f.svc.ui().workspace;return {id:w.workspaceId,actor:w.controller};}
 async function write(f,c,name,args={},id='request-'+Math.random()){const w=f.svc.ui().workspace;return f.svc.call(c.actor,c.id,name,{workspaceId:c.id,revision:w.revision,requestId:id,...args});}
 test('shared schema rejects invalid fields, unbounded inputs and unknown tools',()=>{assert.throws(()=>manifest.validateCoordinatorArgs('dispatchTask',{workspaceId:'x',number:1,requestId:'12345678',revision:0,budgetUsd:-1}));assert.throws(()=>manifest.validateCoordinatorArgs('getCapacity',{workspaceId:'x',secret:'x'}));assert.throws(()=>manifest.validateCoordinatorArgs('executeShell',{}));});
@@ -129,3 +129,78 @@ test('Autopilot continuously reconciles deficits with one durable request across
  }finally{f.cleanup();}});
 test('Autopilot target maintenance stops for Off, update drain, and handoff and resumes after',async()=>{const f=fixture();try{await control(f);const w=f.svc.state.workspaces[0];w.mode='external';w.autopilot={status:'active',parallelism:4,personas:[],effort:'medium',objective:'Useful',updatedAt:'now',legacyWork:[]};await f.svc.tick();assert.ok(w.replenishment);w.autopilot.status='paused';await f.svc.tick();assert.equal(w.replenishment,undefined);assert.equal(f.svc.ui().workspace.autopilot.capacity.suspended,true);w.autopilot.status='active';w.handoff={state:'requested',from:w.controller,to:'other'};await f.svc.tick();assert.equal(w.replenishment,undefined);delete w.handoff;w.updateDrain={priorStatus:'active',at:new Date().toISOString()};f.svc.maintainAutopilot(w);assert.equal(w.replenishment,undefined);delete w.updateDrain;await f.svc.tick();assert.ok(w.replenishment);assert.equal(f.starts,0);}finally{f.cleanup();}});
 test('Autopilot refills approved queued assignments before asking for new work',async()=>{const f=fixture();try{const c=await control(f);const w=f.svc.state.workspaces[0];w.mode='external';w.parallelism=1;w.autopilot={status:'active',parallelism:1,personas:[],effort:'medium',objective:'Useful',updatedAt:'now',legacyWork:[]};await write(f,c,'dispatchTask',{number:1,qa:false});const issue=(await write(f,c,'createIssue',{title:'Second bounded task'})).data;await write(f,c,'dispatchTask',{number:issue.number,qa:false});assert.equal(w.queue.length,1);f.runs.get(1).status='complete';const start=f.svc.context.supervisor.start;f.svc.context.supervisor.start=async a=>{const r=await start(a);r.status='running';return r;};await f.svc.tick();assert.equal(f.starts,2);assert.equal(w.queue.length,0);assert.equal(f.svc.ui().workspace.autopilot.capacity.active,1);assert.equal(w.replenishment,undefined);}finally{f.cleanup();}});
+
+test('authorized publication is supported through initial dispatch and checkpoint follow-up', async () => {
+ const f = fixture();
+ try {
+  const c = await control(f);
+  f.handlers['issues:patch']({number:1,patch:{body:'Owner authorizes pushing the owned branch and publishing its PR. Release manager retains merge and deployment.'}});
+  await write(f,c,'dispatchTask',{number:1,qa:false});
+  const initial = f.startInputs[0].prompt;
+  assert.match(initial,/explicitly authorizes publication/);
+  assert.match(initial,/push only your own assigned branch/);
+  assert.match(initial,/Do not self-merge/);
+  assert.match(initial,/separately assigned release manager/);
+  assert.doesNotMatch(initial,/do not merge, push or deploy/i);
+  f.runs.get(1).status = 'complete';
+  await f.svc.tick();
+  await write(f,c,'followUpRun',{runId:1,message:'Owner authorizes publication of the reviewed branch and PR.'});
+  const followUp = f.resumes[0].prompt;
+  assert.match(followUp,/Owner authorizes publication/);
+  assert.match(followUp,/push only your own assigned branch/);
+  assert.match(followUp,/Preserve explicit task-specific read-only, no-push and publication holds/);
+  assert.doesNotMatch(followUp,/Commit the completed implementation locally; do not merge or push/);
+ } finally { f.cleanup(); }
+});
+
+test('read-only assignment remains read-only after restart and a follow-up', async () => {
+ const f = fixture();
+ try {
+  const c = await control(f);
+  await write(f,c,'dispatchTask',{number:1,readOnly:true,qa:false});
+  assert.match(f.startInputs[0].prompt,/Read-only assignment/);
+  f.runs.get(1).status = 'complete';
+  const restored = f.reload();
+  const state = restored.ui().workspace;
+  await restored.call(c.actor,c.id,'followUpRun',{workspaceId:c.id,revision:state.revision,
+   requestId:'readonly-followup',runId:1,message:'Continue the inventory'});
+  assert.match(f.resumes[0].prompt,/Read-only assignment/);
+  assert.match(f.resumes[0].prompt,/Do not modify source files, commit, push, merge or deploy/);
+  assert.doesNotMatch(f.resumes[0].prompt,/push only your own assigned branch/);
+ } finally { f.cleanup(); }
+});
+
+test('legacy discovery jobs retain read-only follow-up restrictions', async () => {
+ const f = fixture();
+ try {
+  const c = await control(f);
+  await write(f,c,'dispatchTask',{number:1,readOnly:true,qa:false});
+  f.runs.get(1).status = 'complete';
+  const stateFile = path.join(f.root,'coordinators.json');
+  const state = JSON.parse(fs.readFileSync(stateFile,'utf8'));
+  delete state.workspaces[0].jobs[0].readOnly;
+  fs.writeFileSync(stateFile,JSON.stringify(state));
+  const restored = f.reload();
+  await restored.call(c.actor,c.id,'followUpRun',{workspaceId:c.id,revision:restored.ui().workspace.revision,
+   requestId:'legacy-readonly-followup',runId:1,message:'Continue read-only research'});
+  assert.match(f.resumes[0].prompt,/Read-only assignment/);
+ } finally { f.cleanup(); }
+});
+
+test('run results distinguish working from awaiting input and terminal recovery', async () => {
+ const f = fixture();
+ try {
+  const c = await control(f);
+  await write(f,c,'dispatchTask',{number:1,qa:false});
+  for (const [status,waiting,expected] of [
+   ['starting',false,/Worker is starting/],['running',false,/Worker is running/],
+   ['awaiting_input',true,/Worker is awaiting input/],['complete',false,/Review outcome/],
+   ['failed',false,/how to recover/],['stopped',false,/how to recover/],
+  ]) {
+   f.runs.get(1).status = status;
+   const result = await f.svc.call(c.actor,c.id,'getRunResult',{workspaceId:c.id,runId:1});
+   assert.equal(result.waitingForInput,waiting);
+   assert.match(result.nextAction,expected);
+  }
+ } finally { f.cleanup(); }
+});

@@ -28,7 +28,22 @@ const redact=(s:string)=>s.replace(/\bsk-[A-Za-z0-9_-]{12,}/g,'[redacted]').repl
 const clip=(v:unknown,n=4000)=>redact(typeof v==='string'?v:JSON.stringify(v)??'').slice(0,n);
 export type CoordinatorContext={repoPath:string;source:IssueSource;handlers:Handlers;store:Store;supervisor:AgentSupervisor};
 type Client={id:string;name:string;workspaceId:string;role:'observer'|'coordinator';tokenHash:string;status:'pending'|'approved'|'revoked';code:string;lastSeen?:string};
-type Job={phaseContextPending?:boolean;phaseCheckpoint?:unknown;manualQA?:boolean;controlId?:string;reviewControlId?:string;checkpoint?:unknown;autopilot?:boolean;runId:number;number:number;role:string;qa:boolean;maxReworks:number;reworks:number;budgetUsd:number;state:string;sha?:string;reviewRunId?:number;checkIds?:number[];error?:string};
+function workerDeliveryInstructions(readOnly: boolean): string {
+  if (readOnly) {
+    return 'Read-only assignment. Inspect and report evidence only. Do not modify source files, commit, push, merge or deploy. This restriction continues through follow-ups.';
+  }
+  return 'Work within the assigned task and repository instructions. Commit completed implementation in your own worktree. When the owner or active coordinator explicitly authorizes publication, push only your own assigned branch and create or update its pull request, then report the exact commit and checks. Preserve explicit task-specific read-only, no-push and publication holds until an authorized instruction explicitly supersedes them. Do not self-merge your implementation. Merging and deployment belong to the separately assigned release manager under its verified authority.';
+}
+
+function runNextAction(status: string): string {
+  if (status === 'awaiting_input') return 'Worker is awaiting input; inspect and answer its pending question.';
+  if (status === 'starting') return 'Worker is starting; observe startup progress.';
+  if (status === 'running') return 'Worker is running; follow progress or send authorized steering.';
+  if (status === 'complete') return 'Review outcome and QA evidence; completion is not release approval.';
+  return 'Inspect the stopped or failed run and saved evidence before deciding how to recover.';
+}
+
+type Job={readOnly?:boolean;phaseContextPending?:boolean;phaseCheckpoint?:unknown;manualQA?:boolean;controlId?:string;reviewControlId?:string;checkpoint?:unknown;autopilot?:boolean;runId:number;number:number;role:string;qa:boolean;maxReworks:number;reworks:number;budgetUsd:number;state:string;sha?:string;reviewRunId?:number;checkIds?:number[];error?:string};
 type Release={id:string;runId:number;sha:string;targetBranch:string;targetSha:string;action:'merge'|'draft-pr';title?:string;body?:string;state:string;result?:unknown};
 type Handoff={delivery?:'waiting'|'sending'|'sent'|'failed';deliveryError?:string;deliveryRunId?:number;id:string;from:string|null;to:string;mode:'internal'|'external';state:'requested'|'ready'|'completed';requestedAt:string;summary:string;checkpoint:unknown;receivedBy?:string};
 type CoordinatorRequest={id:string;kind:'discovery'|'resume-workflows'|'workflow-change'|'workflow-action'|'autopilot';prompt:string;state:'queued'|'received'|'completed';createdAt:string;receivedBy?:string;error?:string};
@@ -494,7 +509,7 @@ Never approve your own pairing. No provider API keys are needed.\n\nClaude Deskt
       case 'getWorkspaceSummary':{const issues=await this.read(w,'listIssues',{});return {session:this.session(w),issues,jobs:w.jobs.slice(-20).map(j=>({...j,run:this.compactRun(j.runId)})),decisions:await h['decisions:pending'](),onboarding:!w.onboardedAt||issues.items.length===0?{needed:true,nextAction:'Call getOnboardingBrief to discover existing work.'}:null,cursor:w.nextCursor-1,releases:w.releases.slice(-10)};}
       case 'listIssues':{const rows=await h['issues:list']({state:'all'});w.workflow??=newWorkflow();materialize(w.workflow,rows);const offset=a.offset??0;return {items:rows.slice(offset,offset+(a.limit??30)).map((i:any)=>({number:i.number,title:i.title,status:i.status,state:i.state,labels:i.labels,workflow:w.workflow!.cards[i.number]})),nextOffset:offset+(a.limit??30)<rows.length?offset+(a.limit??30):null};}
       case 'getIssue':{const d=await h['issues:get']({number:a.number});w.workflow??=newWorkflow();materialize(w.workflow,[d.issue]);return {issue:d.issue,workflow:workflowGuidance(w.workflow,a.number),dependencies:w.dependencies[a.number]??[]};}
-      case 'getRunResult':{const r=this.run(a.runId);const events=this.context!.store.events.list(r.id);const text=events.filter(e=>['text','result'].includes(e.type)).map(e=>clip(e.payload,3000)).slice(-3).join('\n');let sha=null;try{sha=await this.revision(r.id);}catch{}return {...this.compactRun(r.id),summary:clip(text,4000),commit:sha,qa:w.jobs.find(j=>j.runId===r.id)??null,checks:await h['agent-runs:checks:list']({runId:r.id}),evidence:{logs:{tool:'readRunLog',runId:r.id},diff:{tool:'getDiffSummary',runId:r.id}},nextAction:active(r.status)?'Wait for changes; answer pending decisions if blocked':'Review outcome and QA evidence; completion is not release approval'};}
+      case 'getRunResult':{const r=this.run(a.runId);const events=this.context!.store.events.list(r.id);const text=events.filter(e=>['text','result'].includes(e.type)).map(e=>clip(e.payload,3000)).slice(-3).join('\n');let sha=null;try{sha=await this.revision(r.id);}catch{}return {...this.compactRun(r.id),summary:clip(text,4000),commit:sha,qa:w.jobs.find(j=>j.runId===r.id)??null,checks:await h['agent-runs:checks:list']({runId:r.id}),evidence:{logs:{tool:'readRunLog',runId:r.id},diff:{tool:'getDiffSummary',runId:r.id}},waitingForInput:r.status==='awaiting_input',nextAction:runNextAction(r.status)};}
       case 'readRunLog':{this.run(a.runId);const rows=this.context!.store.events.list(a.runId).filter(e=>e.seq>(a.offset??-1));const items=rows.slice(0,a.limit??10).map(e=>({seq:e.seq,type:e.type,content:clip(e.payload,2000)}));return {items,nextCursor:items.at(-1)?.seq??a.offset??0,hasMore:rows.length>items.length};}
       case 'getDiffSummary':{const d=await h['agent-runs:diff']({runId:a.runId});if(a.file){const f=d.files.find(f=>f.path===a.file);return {file:a.file,patch:f?.patch.slice(a.offset??0,(a.offset??0)+8000),truncated:(f?.patch.length??0)>(a.offset??0)+8000};}return {files:d.files.map(f=>({path:f.path,status:f.status}))};}
 
@@ -535,7 +550,40 @@ Never approve your own pairing. No provider API keys are needed.\n\nClaude Deskt
       case 'addComment':return h['issues:add-comment']({number:a.number,body:a.body});
       case 'setDependencies':{await h['issues:get']({number:a.number});for(const id of a.dependsOn)await h['issues:get']({number:id});const graph:Record<string,number[]>={...w.dependencies,[a.number]:a.dependsOn};const walk=(id:number,path:number[]):void=>{if(path.includes(id))throw Error('Dependency cycle');for(const next of graph[id]??[])walk(next,[...path,id]);};walk(a.number,[]);w.dependencies=graph;return graph[a.number];}
       case 'dispatchTask':if(a.origin!=='manual'&&w.autopilot&&w.autopilot.status!=='active')throw Error('Autopilot is Off. Resume it before assigning new work; review and release remain available.');return this.dispatch(w,a.number,a.budgetUsd??w.budgetUsd,a.qa??w.qaDefault,a.maxReworks??w.maxReworks,a.readOnly===true,false,a.origin!=='manual'&&!!w.autopilot);
-      case 'followUpRun':{if(a.origin!=='manual'&&w.jobs.some(j=>j.runId===a.runId&&j.autopilot)&&w.autopilot?.status!=='active')throw Error('Autopilot is Off. Resume it before continuing implementation.');if(active(this.run(a.runId).status)&&this.run(a.runId).status!=='awaiting_input')throw Error('Wait for this worker or stop it before following up.');const j=w.jobs.find(j=>j.runId===a.runId);if(!j)throw Error('Run is not a delegated implementation');const freshContext=j.phaseContextPending===true;const background=freshContext?'Phase checkpoint (historical evidence; current request follows):\n'+JSON.stringify(j.phaseCheckpoint)+'\n':'';const control=createCheckpoint(this.root);j.controlId=control.id;j.state='implementing';delete j.sha;delete j.checkIds;delete j.reviewRunId;this.save();const resumed=await this.context!.supervisor.resume({freshContext,appendSystemPrompt:control.prompt,runId:a.runId,prompt:background+a.message+'\nWorkflow: '+JSON.stringify(workflowGuidance(w.workflow??newWorkflow(),j.number))+'\nCommit the completed implementation locally; do not merge or push.',costBudgetUsd:j.budgetUsd});j.phaseContextPending=false;this.save();return resumed;}
+      case 'followUpRun': {
+        const j = w.jobs.find(job => job.runId === a.runId);
+        if (!j) throw Error('Run is not a delegated implementation');
+        if (a.origin !== 'manual' && j.autopilot && w.autopilot?.status !== 'active') {
+          throw Error('Autopilot is Off. Resume it before continuing implementation.');
+        }
+        const run = this.run(a.runId);
+        if (active(run.status) && run.status !== 'awaiting_input') {
+          throw Error('Wait for this worker or stop it before following up.');
+        }
+        const freshContext = j.phaseContextPending === true;
+        const background = freshContext
+          ? 'Phase checkpoint (historical evidence; current request follows):\n' + JSON.stringify(j.phaseCheckpoint) + '\n'
+          : '';
+        const control = createCheckpoint(this.root);
+        j.controlId = control.id;
+        j.state = 'implementing';
+        delete j.sha;
+        delete j.checkIds;
+        delete j.reviewRunId;
+        this.save();
+        const resumed = await this.context!.supervisor.resume({
+          freshContext,
+          appendSystemPrompt: control.prompt,
+          runId: a.runId,
+          prompt: background + a.message
+            + '\nWorkflow: ' + JSON.stringify(workflowGuidance(w.workflow ?? newWorkflow(), j.number))
+            + '\n' + workerDeliveryInstructions(j.readOnly === true || j.role === 'discovery'),
+          costBudgetUsd: j.budgetUsd,
+        });
+        j.phaseContextPending = false;
+        this.save();
+        return resumed;
+      }
       case 'stopRun':{const j=w.jobs.find(j=>j.runId===a.runId||j.reviewRunId===a.runId);if(j){j.state='interrupted';j.error='Interrupted—recovery needed';this.save();}return h['agent-runs:stop']({runId:a.runId});}
       case 'answerDecision':{const pending=await h['decisions:pending']();const original=pending.find(d=>d.cardId===a.cardId&&d.options.some(o=>o.value===a.value));if(!original)throw Error('Pending decision/option not found');const d={id:randomUUID(),cardId:a.cardId,value:a.value,question:original.question,label:original.options.find(o=>o.value===a.value)!.label,state:'executing'};w.decisions.push(d);this.save();try{const result=await h['cards:resolve']({cardId:a.cardId,value:a.value});d.state='answered';return {...d,result};}catch(e){d.state='failed';throw e;}}
       case 'configureWorkflow':return this.uiAction('settings',{parallelism:a.parallelism??w.parallelism,budgetUsd:a.budgetUsd??w.budgetUsd,qaDefault:a.qaDefault??w.qaDefault,maxReworks:a.maxReworks??w.maxReworks});
@@ -612,8 +660,8 @@ Never approve your own pairing. No provider API keys are needed.\n\nClaude Deskt
     const guidance='\nWorkflow contract: '+JSON.stringify(workflowGuidance(w.workflow,number))+(autopilot&&w.autopilot?`\nAutopilot effort: ${w.autopilot.effort}. Objective: ${w.autopilot.objective}. Stay within this task and its acceptance criteria.\n`:'');
     if((autopilot&&w.autopilot?.status!=='active')||w.updateDrain||this.updater?.pending())throw Error('New assignments are paused.');
     const control=createCheckpoint(this.root);
-    const run=await this.context!.supervisor.start({appendSystemPrompt:control.prompt,threadId:thread.id,issueNumber:number,prompt:guidance+(readOnly?`Read-only discovery task. Do not modify source files, commit, merge, push or deploy. Return concise evidence and an inventory that the coordinator can use.\n${issue.title}\n${issue.body??''}`:`Implement this task, observing repository instructions and acceptance criteria. Do not expand scope. Commit the completed implementation locally in your worktree; do not merge, push or deploy.\n\n${issue.title}\n${issue.body??''}`),costBudgetUsd:budgetUsd,provider:'claude-code',personaId:'implementation'});
-    const j:Job={controlId:control.id,autopilot,runId:run.id,number,role:readOnly?'discovery':'implementation',qa:readOnly?false:qa,maxReworks,reworks:0,budgetUsd,state:'implementing'};w.jobs.push(j);await this.workflowSignal(w,number,'worker-started',`Worker run ${run.id} started`,String(run.id));this.save();return {runId:run.id,number,status:run.status,qa,prerequisites:w.dependencies[number]??[],nextAction:'Use waitForChanges'};
+    const run=await this.context!.supervisor.start({appendSystemPrompt:control.prompt,threadId:thread.id,issueNumber:number,prompt:guidance+workerDeliveryInstructions(readOnly)+'\n\n'+issue.title+'\n'+(issue.body??''),costBudgetUsd:budgetUsd,provider:'claude-code',personaId:'implementation'});
+    const j:Job={readOnly,controlId:control.id,autopilot,runId:run.id,number,role:readOnly?'discovery':'implementation',qa:readOnly?false:qa,maxReworks,reworks:0,budgetUsd,state:'implementing'};w.jobs.push(j);await this.workflowSignal(w,number,'worker-started',`Worker run ${run.id} started`,String(run.id));this.save();return {runId:run.id,number,status:run.status,qa,prerequisites:w.dependencies[number]??[],nextAction:'Use waitForChanges'};
   }
   private async phaseContext(w:Workspace,j:Job,phase:string,nextAction:string){
     const issue=(await this.h()['issues:get']({number:j.number})).issue;
