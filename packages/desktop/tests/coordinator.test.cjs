@@ -365,3 +365,88 @@ test('delivered answer survives card resolution failure and restart without rese
   await assert.rejects(restored.uiAction('question-reply',{id:620,reply:'Again'}),/no longer/);
  }finally{f.cleanup();}
 });
+
+test('explicit assignment transition preserves task/run evidence and survives restart for authorized follow-up',async()=>{
+ const f=fixture();
+ try{
+  const c=await control(f);
+  await write(f,c,'dispatchTask',{number:1,readOnly:true,qa:false});
+  f.runs.get(1).status='complete';
+  const w=f.svc.state.workspaces[0];
+  const job=w.jobs[0];
+  job.phaseCheckpoint={commit:'9a24',evidence:'Independent UI review'};
+  job.sha='a'.repeat(40);job.checkIds=[123];job.state='completed';
+  const before=structuredClone(job);
+  await write(f,c,'updateWorkflowCard',{number:1,taskType:'implementation',reason:'Accepted implementation',evidence:'Owner accepted UI delivery'});
+  assert.equal(job.role,'discovery');
+  const initialAssignment=await f.svc.call(c.actor,c.id,'getRunResult',{workspaceId:c.id,runId:1});
+  assert.deepEqual(initialAssignment.assignment,{role:'discovery',readOnly:true,lastChange:null});
+  assert.match(f.startInputs[0].prompt,/Read-only assignment/);
+  const args={workspaceId:c.id,revision:f.svc.ui().workspace.revision,requestId:'promote-same-worker',runId:1,
+   expectedRole:'discovery',expectedReadOnly:true,role:'implementation',
+   reason:'Owner accepted implementation and publication',evidence:'Owner authorization to publish assigned branch and PR, existing release manager retains merge.'};
+  const result=await f.svc.call(c.actor,c.id,'setWorkerAssignment',args);
+  assert.equal(result.data.assignment.readOnly,false);
+  assert.equal(job.role,'implementation');
+  for(const key of ['runId','number','phaseCheckpoint','sha','checkIds','state','controlId','budgetUsd','qa'])assert.deepEqual(job[key],before[key]);
+  assert.equal(job.assignmentHistory.length,1);
+  assert.equal(job.assignmentHistory[0].actor,c.actor);
+  assert.equal(job.assignmentHistory[0].requestId,'promote-same-worker');
+  assert.equal(f.starts,1);assert.equal(f.resumes.length,0);
+  const restored=f.reload();
+  assert.deepEqual(await restored.call(c.actor,c.id,'setWorkerAssignment',args),result);
+  const savedJob=restored.state.workspaces[0].jobs[0];
+  assert.equal(savedJob.assignmentHistory.length,1);
+  await restored.call(c.actor,c.id,'followUpRun',{workspaceId:c.id,revision:restored.ui().workspace.revision,
+   requestId:'resume-promoted-worker',runId:1,message:'Publish the authorized reviewed branch and PR'});
+  assert.equal(f.resumes[0].runId,1);
+  assert.match(f.resumes[0].prompt,/Explicit saved assignment transition/);
+  assert.match(f.resumes[0].prompt,/Owner authorization to publish/);
+  assert.match(f.resumes[0].prompt,/push only your own assigned branch/);
+  assert.doesNotMatch(f.resumes[0].prompt,/Read-only assignment\. Inspect/);
+  assert.equal(f.starts,1);
+ }finally{f.cleanup();}
+});
+
+test('assignment transition rejects active workers, stale expected state, mismatched tasks and missing authorization evidence',async()=>{
+ const f=fixture();
+ try{
+  const c=await control(f);
+  await write(f,c,'dispatchTask',{number:1,readOnly:true,qa:false});
+  const promote=overrides=>write(f,c,'setWorkerAssignment',{runId:1,expectedRole:'discovery',expectedReadOnly:true,role:'implementation',reason:'Accepted work',evidence:'Owner publication instruction',...overrides});
+  await assert.rejects(promote(),/Wait for this worker/);
+  f.runs.get(1).status='starting';
+  await assert.rejects(promote(),/Wait for this worker/);
+  f.runs.get(1).status='complete';
+  await assert.rejects(promote({expectedReadOnly:false}),/assignment changed/);
+  await assert.rejects(promote({evidence:'  '}),/authorization evidence/);
+  const w=f.svc.state.workspaces[0];
+  w.jobs[0].number=999;
+  await assert.rejects(promote(),/identity/);
+  w.jobs[0].number=1;
+  w.jobs[0].reviewRunId=5;f.runs.set(5,{id:5,status:'running'});
+  await assert.rejects(promote(),/reviewer/);
+  delete w.jobs[0].reviewRunId;
+  await assert.rejects(f.svc.call('other',c.id,'setWorkerAssignment',{workspaceId:c.id,revision:w.revision,requestId:'unauthorized-promotion',runId:1,expectedRole:'discovery',expectedReadOnly:true,role:'implementation',reason:'x',evidence:'x'}),/controlled elsewhere/);
+  assert.equal(w.jobs[0].role,'discovery');
+  assert.equal(w.jobs[0].assignmentHistory,undefined);
+  assert.equal(f.resumes.length,0);
+ }finally{f.cleanup();}
+});
+
+test('awaiting-input legacy discovery assignment supports explicit promotion and reversible demotion',async()=>{
+ const f=fixture();
+ try{
+  const c=await control(f);
+  await write(f,c,'dispatchTask',{number:1,readOnly:true,qa:false});
+  const job=f.svc.state.workspaces[0].jobs[0];
+  delete job.readOnly;
+  f.runs.get(1).status='awaiting_input';
+  await write(f,c,'setWorkerAssignment',{runId:1,expectedRole:'discovery',expectedReadOnly:true,role:'implementation',reason:'Accepted implementation scope',evidence:'Owner directive'});
+  await write(f,c,'setWorkerAssignment',{runId:1,expectedRole:'implementation',expectedReadOnly:false,role:'discovery',reason:'Return to inspection',evidence:'Coordinator narrows scope'});
+  assert.equal(job.readOnly,true);
+  assert.equal(job.assignmentHistory.length,2);
+  await write(f,c,'followUpRun',{runId:1,message:'Inspect only'});
+  assert.match(f.resumes[0].prompt,/Read-only assignment/);
+ }finally{f.cleanup();}
+});
