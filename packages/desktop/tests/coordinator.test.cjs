@@ -450,3 +450,50 @@ test('awaiting-input legacy discovery assignment supports explicit promotion and
   assert.match(f.resumes[0].prompt,/Read-only assignment/);
  }finally{f.cleanup();}
 });
+
+test('demotion preserves QA evidence but blocks automatic correction after a failed reviewer',async()=>{
+ const f=fixture();
+ try{
+  const c=await control(f);
+  await write(f,c,'dispatchTask',{number:1,qa:true,maxReworks:1});
+  f.runs.get(1).status='complete';
+  await f.svc.tick();
+  f.checks[0].status='pass';
+  const start=f.svc.context.supervisor.start;
+  f.svc.context.supervisor.start=async args=>{const run=await start(args);run.status='running';return run;};
+  await f.svc.tick();
+  const job=f.svc.state.workspaces[0].jobs[0];
+  const reviewer=f.runs.get(job.reviewRunId);
+  assert.equal(job.state,'reviewing');
+  reviewer.status='complete';
+  f.svc.context.store.events.list=id=>[{seq:0,type:'text',payload:{text:id===reviewer.id?'Review failed. KANBOTS_QA_FAIL':'Implementation complete'}}];
+  const evidence={sha:job.sha,reviewRunId:job.reviewRunId,checkIds:structuredClone(job.checkIds)};
+  await write(f,c,'setWorkerAssignment',{runId:1,expectedRole:'implementation',expectedReadOnly:false,role:'discovery',reason:'Restrict to inspection',evidence:'Coordinator read-only scope'});
+  await f.svc.tick();
+  assert.equal(job.state,'needs-changes');
+  assert.equal(job.readOnly,true);
+  assert.equal(f.resumes.length,0);
+  assert.equal(job.sha,evidence.sha);
+  assert.equal(job.reviewRunId,evidence.reviewRunId);
+  assert.deepEqual(job.checkIds,evidence.checkIds);
+ }finally{f.cleanup();}
+});
+
+test('completed demoted discovery does not restart its inherited automatic QA pipeline',async()=>{
+ const f=fixture();
+ try{
+  const c=await control(f);
+  await write(f,c,'dispatchTask',{number:1,qa:true,maxReworks:1});
+  f.runs.get(1).status='complete';
+  await write(f,c,'setWorkerAssignment',{runId:1,expectedRole:'implementation',expectedReadOnly:false,role:'discovery',reason:'Inspection only',evidence:'Owner narrowed scope'});
+  await write(f,c,'followUpRun',{runId:1,message:'Report findings only'});
+  f.runs.get(1).status='complete';
+  await f.svc.tick();
+  const job=f.svc.state.workspaces[0].jobs[0];
+  assert.equal(job.state,'completed');
+  assert.equal(job.qa,true);
+  assert.equal(f.checks.length,0);
+  assert.equal(f.starts,1);
+  assert.equal(f.resumes.length,1);
+ }finally{f.cleanup();}
+});

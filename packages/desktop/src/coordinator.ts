@@ -817,9 +817,16 @@ Never approve your own pairing. No provider API keys are needed.\n\nClaude Deskt
   }
   private async startQA(w:Workspace,j:Job){j.sha=await this.revision(j.runId);const checks=await this.h()['agent-runs:checks:run']({runId:j.runId});j.checkIds=checks.map(c=>c.id);j.state='checks';delete j.error;this.event(w,'qa-started',{runId:j.runId,sha:j.sha});}
   private async repair(w:Workspace,j:Job,reason:string){
+    if (j.readOnly === true || j.role === 'discovery') {
+      j.state = 'needs-changes';
+      j.error = reason;
+      await this.workflowSignal(w, j.number, 'worker-failed', reason, `${j.controlId??j.runId}:readonly-review`);
+      this.event(w, 'read-only-findings', { runId: j.runId, reason });
+      return;
+    }
     if(j.autopilot&&w.autopilot?.status!=='active'){j.state='needs-changes';j.error=reason;this.event(w,'wind-down-checkpoint',{runId:j.runId,remaining:reason});return;}
     if(j.reworks>=j.maxReworks){j.state='needs-changes';j.error=reason;await this.workflowSignal(w,j.number,'worker-failed',reason,`${j.controlId??j.runId}:${j.reworks}`);this.event(w,'needs-changes',{runId:j.runId,reason});return;}
-    const checkpoint=await this.phaseContext(w,j,'QA correction',reason);const control=createCheckpoint(this.root);j.controlId=control.id;j.reworks++;j.state='implementing';delete j.reviewRunId;delete j.sha;this.save();await this.context!.supervisor.resume({freshContext:true,appendSystemPrompt:control.prompt,runId:j.runId,prompt:checkpoint+'\nFix only the reported findings, rerun relevant checks, and commit locally. Do not merge or push.',costBudgetUsd:j.budgetUsd});j.phaseContextPending=false;this.event(w,'rework-started',{runId:j.runId,attempt:j.reworks});
+    const checkpoint=await this.phaseContext(w,j,'QA correction',reason);const control=createCheckpoint(this.root);j.controlId=control.id;j.reworks++;j.state='implementing';delete j.reviewRunId;delete j.sha;this.save();await this.context!.supervisor.resume({freshContext:true,appendSystemPrompt:control.prompt,runId:j.runId,prompt:checkpoint+'\nFix only the reported findings, rerun relevant checks, and commit locally.\n'+workerDeliveryInstructions(false),costBudgetUsd:j.budgetUsd});j.phaseContextPending=false;this.event(w,'rework-started',{runId:j.runId,attempt:j.reworks});
   }
   private async deliverHandoff(w:Workspace){
     const h=w.handoff;if(!h||h.state!=='requested'||w.mode!=='internal'||!w.conversationId)return;
@@ -864,7 +871,7 @@ Never approve your own pairing. No provider API keys are needed.\n\nClaude Deskt
       }
       const checkpoint=j.controlId?readCheckpoint(this.root,j.controlId):null;if(checkpoint?.state==='checkpointed'&&!active(this.run(j.runId).status)){j.checkpoint=checkpoint;if(j.state==='implementing'){j.state='checkpointed';j.error='Checkpoint saved; implementation or validation remains. Coordinator review required.';this.event(w,'worker-checkpointed',{runId:j.runId,checkpoint});continue;}}
 
-      if(j.state==='implementing'){const r=this.run(j.runId);if(active(r.status))continue;if(r.status!=='complete'){j.state='blocked';j.error=r.exitReason??r.status;this.event(w,'blocked',{runId:r.id,reason:j.error});await this.workflowSignal(w,j.number,'worker-failed',`Run ${r.id}: ${j.error}`,j.controlId??String(r.id));continue;}if(j.autopilot&&w.autopilot?.status!=='active'){j.state='awaiting-review';j.error=j.qa?'Implementation finished; QA remains pending.':'Coordinator review remains pending.';this.event(w,'wind-down-checkpoint',{runId:r.id,remaining:j.error??'Coordinator review'});continue;}if(!j.qa){j.state='completed';this.event(w,'implementation-completed',{runId:r.id});await this.workflowSignal(w,j.number,'worker-completed',`Deliverable from run ${r.id}; inspect getRunResult for evidence and limitations`,String(r.id));continue;}await this.startQA(w,j);}
+      if(j.state==='implementing'){const r=this.run(j.runId);if(active(r.status))continue;if(r.status!=='complete'){j.state='blocked';j.error=r.exitReason??r.status;this.event(w,'blocked',{runId:r.id,reason:j.error});await this.workflowSignal(w,j.number,'worker-failed',`Run ${r.id}: ${j.error}`,j.controlId??String(r.id));continue;}if(j.autopilot&&w.autopilot?.status!=='active'){j.state='awaiting-review';j.error=j.qa?'Implementation finished; QA remains pending.':'Coordinator review remains pending.';this.event(w,'wind-down-checkpoint',{runId:r.id,remaining:j.error??'Coordinator review'});continue;}if(!j.qa||j.readOnly===true||j.role==='discovery'){j.state='completed';this.event(w,'implementation-completed',{runId:r.id});await this.workflowSignal(w,j.number,'worker-completed',`Deliverable from run ${r.id}; inspect getRunResult for evidence and limitations`,String(r.id));continue;}await this.startQA(w,j);}
       if(j.state==='checks'){
         const checks=(await this.h()['agent-runs:checks:list']({runId:j.runId})).filter(c=>j.checkIds?.includes(c.id));if(!checks.length||checks.some(c=>!['pass','fail'].includes(c.status)))continue;
         if(await this.revision(j.runId)!==j.sha)throw Error('Implementation changed during QA. Run QA again.');
