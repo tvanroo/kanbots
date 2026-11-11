@@ -623,6 +623,15 @@ test('independent reviewer external wait never triggers implementation rework an
   assert.equal(pending.qa.reworks,0);assert.equal(f.resumes.length,0);assert.equal(f.starts,2);assert.equal(f.checks.length,1);
   assert.equal(f.svc.ui().workspace.requests.filter(r=>r.id.startsWith(`worker-wait:${job.reviewRunId}:`)).length,1);
   const restored=f.reload();await restored.tick();assert.equal(restored.ui().jobs[0].state,'review-checkpointed');
+  f.setSha('b'.repeat(40));
+  await assert.rejects(write(f,c,'followUpRun',{runId:job.reviewRunId,message:'Continue review',origin:'manual'}),/Review revision changed/);
+  assert.equal(f.resumes.length,0);assert.equal(f.svc.ui().jobs[0].state,'review-checkpointed');
+  f.setSha('a'.repeat(40));
+  const resume=f.svc.context.supervisor.resume;
+  f.svc.context.supervisor.resume=async()=>{throw Error('Provider unavailable');};
+  await assert.rejects(write(f,c,'followUpRun',{runId:job.reviewRunId,message:'Continue review',origin:'manual'}),/Provider unavailable/);
+  assert.equal(f.svc.ui().jobs[0].state,'review-checkpointed');assert.equal(f.svc.ui().jobs[0].reviewControlId,job.reviewControlId);
+  f.svc.context.supervisor.resume=resume;
   await write(f,c,'followUpRun',{runId:job.reviewRunId,message:'Hosted evidence is now available; complete the remaining independent assessment',origin:'manual'});
   assert.equal(f.resumes.length,1);assert.equal(f.resumes[0].runId,job.reviewRunId);
   assert.match(f.resumes[0].prompt,/Do not edit files/);assert.equal(f.svc.ui().jobs[0].reworks,0);assert.equal(f.starts,2);
