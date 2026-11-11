@@ -14,7 +14,6 @@ import {
   waitForChildSettled,
 } from './orchestrator.js';
 
-const MAX_PARALLELISM = 4;
 const SLOT_PAUSE_MS = 500;
 
 interface PersonaClaim {
@@ -36,7 +35,7 @@ export async function runFeatureDevLoop(
     throw new Error('feature-dev autopilot requires at least one persona');
   }
 
-  const parallelism = clampParallelism(config.parallelism);
+  const parallelism = configuredParallelism(config.parallelism);
   const model = config.model;
   const provider = config.provider;
   const effort = config.effort;
@@ -65,9 +64,10 @@ function log(msg: string): void {
   console.log(`[autopilot/feature-dev] ${msg}`);
 }
 
-function clampParallelism(value: number | undefined): number {
-  const raw = typeof value === 'number' && Number.isFinite(value) ? Math.floor(value) : 1;
-  return Math.min(Math.max(raw, 1), MAX_PARALLELISM);
+export function configuredParallelism(value: number | undefined): number {
+  if(value === undefined) return 1;
+  if(!Number.isSafeInteger(value)||value<1) throw new Error('Parallel workers must be a positive whole number.');
+  return value;
 }
 
 function doClaim(
