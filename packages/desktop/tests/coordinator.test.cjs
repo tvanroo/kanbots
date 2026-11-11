@@ -568,3 +568,38 @@ test('question save failure leaves no successful receipt or orphaned answer requ
   assert.equal(receipt.queued,true);assert.equal(f.svc.ui().workspace.requests.filter(r=>r.id===receipt.requestId).length,1);
  }finally{f.cleanup();}
 });
+
+test('external wait checkpoint returns responsibility to current coordinator without QA, completion, duplicate worker or update',async()=>{
+ const f=fixture();try{
+  const c=await control(f);await write(f,c,'dispatchTask',{number:1,qa:true});
+  const job=f.svc.ui().jobs[0];
+  const {checkpointDirectory}=load(path.resolve(__dirname,'../src/worker-checkpoint.ts'));
+  const dir=checkpointDirectory(f.root,job.controlId);
+  const waiting={kind:'external',reason:'Hosted CI is pending',nextTrigger:'Exact CI run 123 reaches a terminal status',checkedAt:'2026-11-11T00:00:00Z',references:['https://example.test/actions/runs/123']};
+  fs.writeFileSync(path.join(dir,'response.json'),JSON.stringify({id:job.controlId,state:'checkpointed',summary:'Implementation preserved; hosted evidence pending',remainingValidation:'Read exact CI result; do not repeat local tests',artifacts:['review.json'],waiting}));
+  f.runs.get(1).status='complete';
+  await f.svc.tick();await f.svc.tick();
+  const result=await f.svc.call(c.actor,c.id,'getRunResult',{workspaceId:c.id,runId:1});
+  assert.equal(result.qa.state,'checkpointed');assert.deepEqual(result.qa.checkpoint.waiting,waiting);
+  assert.equal(result.waitingForInput,false);assert.match(result.nextAction,/unfinished work/);
+  assert.equal(f.checks.length,0);assert.equal(f.starts,1);assert.equal(f.resumes.length,0);
+  assert.equal(f.svc.ui().workspace.requests.filter(r=>r.id.startsWith('worker-wait:')).length,1);
+  assert.equal(f.svc.ui().workspace.updateDrain,undefined);
+  const restored=f.reload();await restored.tick();
+  assert.deepEqual(restored.ui().jobs[0].checkpoint.waiting,waiting);
+  assert.equal(restored.ui().workspace.requests.filter(r=>r.id.startsWith('worker-wait:')).length,1);
+  assert.equal(f.starts,1);
+ }finally{f.cleanup();}
+});
+
+test('invalid external wait metadata does not invent a next trigger or bypass checkpoint state',()=>{
+ const root=fs.mkdtempSync('/private/tmp/kanborg-wait-test-');
+ const {createCheckpoint,checkpointDirectory,readCheckpoint}=load(path.resolve(__dirname,'../src/worker-checkpoint.ts'));
+ const control=createCheckpoint(root);const dir=checkpointDirectory(root,control.id);
+ try{
+  for(const waiting of [{kind:'external',reason:'Pending',checkedAt:'2026-11-11T00:00:00Z',references:[]},{kind:'external',reason:'Pending',nextTrigger:'CI',checkedAt:'not a date',references:[]}]){
+   fs.writeFileSync(path.join(dir,'response.json'),JSON.stringify({id:control.id,state:'checkpointed',remainingValidation:'Unverified external result',waiting}));
+   const result=readCheckpoint(root,control.id);assert.equal(result.state,'checkpointed');assert.equal(result.waiting,undefined);assert.equal(result.remainingValidation,'Unverified external result');
+  }
+ }finally{fs.rmSync(root,{recursive:true,force:true});fs.rmSync(dir,{recursive:true,force:true});}
+});

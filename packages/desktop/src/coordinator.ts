@@ -610,7 +610,10 @@ Never approve your own pairing. No provider API keys are needed.\n\nClaude Deskt
             lastChange: job.assignmentHistory?.at(-1) ?? null } : null,
           checks: await h['agent-runs:checks:list']({ runId: run.id }),
           evidence: { logs: { tool: 'readRunLog', runId: run.id }, diff: { tool: 'getDiffSummary', runId: run.id } },
-          waitingForInput: run.status === 'awaiting_input', nextAction: runNextAction(run.status),
+          waitingForInput: run.status === 'awaiting_input',
+          nextAction: job?.state === 'checkpointed'
+            ? 'Worker checkpointed with unfinished work. Read qa.checkpoint and its next trigger; the current coordinator decides when to continue the same run.'
+            : runNextAction(run.status),
         };
       }
       case 'readRunLog':{this.run(a.runId);const rows=this.context!.store.events.list(a.runId).filter(e=>e.seq>(a.offset??-1));const items=rows.slice(0,a.limit??10).map(e=>({seq:e.seq,type:e.type,content:clip(e.payload,2000)}));return {items,nextCursor:items.at(-1)?.seq??a.offset??0,hasMore:rows.length>items.length};}
@@ -890,7 +893,15 @@ Never approve your own pairing. No provider API keys are needed.\n\nClaude Deskt
           this.save();
         } catch { /* Resume is durable; retry workflow synchronization on the next tick. */ }
       }
-      const checkpoint=j.controlId?readCheckpoint(this.root,j.controlId):null;if(checkpoint?.state==='checkpointed'&&!active(this.run(j.runId).status)){j.checkpoint=checkpoint;if(j.state==='implementing'){j.state='checkpointed';j.error='Checkpoint saved; implementation or validation remains. Coordinator review required.';this.event(w,'worker-checkpointed',{runId:j.runId,checkpoint});continue;}}
+      const checkpoint=j.controlId?readCheckpoint(this.root,j.controlId):null;if(checkpoint?.state==='checkpointed'&&!active(this.run(j.runId).status)){j.checkpoint=checkpoint;if(j.state==='implementing'){
+        j.state='checkpointed';j.error='Checkpoint saved; implementation or validation remains. Coordinator review required.';
+        if(checkpoint.waiting){
+          const id=`worker-wait:${j.runId}:${j.controlId}`;w.requests??=[];
+          if(!w.requests.some(r=>r.id===id))w.requests.push({id,kind:'workflow-action',state:'queued',createdAt:new Date().toISOString(),
+            prompt:`Run ${j.runId} / task ${j.number} returned an external-wait checkpoint, not task completion. ${JSON.stringify(checkpoint.waiting)}. Read getRunResult and preserve exact evidence. You own the next bounded check and any eligible continuation of the SAME run. Do not start a replacement watcher, repeat completed tests, infer success from missing status, turn Autopilot On, or install an update just because this worker is idle.`});
+        }
+        this.event(w,'worker-checkpointed',{runId:j.runId,checkpoint});continue;
+      }}
 
       if(j.state==='implementing'){const r=this.run(j.runId);if(active(r.status))continue;if(r.status!=='complete'){j.state='blocked';j.error=r.exitReason??r.status;this.event(w,'blocked',{runId:r.id,reason:j.error});await this.workflowSignal(w,j.number,'worker-failed',`Run ${r.id}: ${j.error}`,j.controlId??String(r.id));continue;}if(j.autopilot&&w.autopilot?.status!=='active'){j.state='awaiting-review';j.error=j.qa?'Implementation finished; QA remains pending.':'Coordinator review remains pending.';this.event(w,'wind-down-checkpoint',{runId:r.id,remaining:j.error??'Coordinator review'});continue;}if(!j.qa||j.readOnly===true||j.role==='discovery'){j.state='completed';this.event(w,'implementation-completed',{runId:r.id});await this.workflowSignal(w,j.number,'worker-completed',`Deliverable from run ${r.id}; inspect getRunResult for evidence and limitations`,String(r.id));continue;}await this.startQA(w,j);}
       if(j.state==='checks'){
