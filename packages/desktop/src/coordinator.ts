@@ -1,3 +1,5 @@
+import { recordPerformanceTiming } from './performance-diagnostics.js';
+import { questionCommands, questionExplanation, fencedQuestionCommands, type QuestionCommand } from './question-presentation.js';
 import { reorderWorkflowCard, prioritizeWorkflowQueue } from './workflow.js';
 import {getProviderHandlers} from './providers-ipc.js';
 import {routingState,saveRouting} from './routing-state.js';
@@ -51,8 +53,8 @@ type Handoff={delivery?:'waiting'|'sending'|'sent'|'failed';deliveryError?:strin
 type CoordinatorRequest={id:string;kind:'discovery'|'resume-workflows'|'workflow-change'|'workflow-action'|'autopilot';prompt:string;state:'queued'|'received'|'completed';createdAt:string;receivedBy?:string;error?:string};
 type ScheduleReceipt={id?:string;status:'active'|'paused'|'unsupported';cadenceMinutes?:number;cursor?:number;confirmedAt:string};
 type ChatDraft={id:string;body:string;steer:boolean;state:'queued'|'sending'|'sent'|'failed';createdAt:string;error?:string};
-type UserQuestion={id:number;runId:number;threadId:number;question:string;options:Array<{value:string;label:string}>;state:string;reply?:string;responseRunId?:number;explanationAfter?:number;explanation?:string;explanationRequestId?:string;answerRequestId?:string;closedReason?:string};
-type Workspace={replenishment?:{requestId:string;epoch:number;lastAttemptAt:number};sharedChats?:number[];ownerActions?:Array<{id:string;action:string;target:string;reason:string;epoch:number;state:string;result?:unknown;error?:string}>;uiPreferences?:{version:number;value:Record<string,any>};personas?:PersonaLibrary;outbound?:Outbound;questions?:UserQuestion[];chatOutbox?:ChatDraft[];updateDrain?:{priorStatus:string;at:string;requestId?:string};expediting?:boolean;autopilot?:{status:string;personas:Array<{id:string;name:string;prompt:string}>;effort:string;parallelism:number;objective:string;updatedAt:string;legacyWork:unknown[]};workflow?:WorkflowState;workflowSignals?:Record<string,string>;schedules?:Record<string,ScheduleReceipt>;requests?:CoordinatorRequest[];handoff?:Handoff;queue?:Array<{autopilot?:boolean;id:string;number:number;budgetUsd:number;qa:boolean;maxReworks:number;readOnly:boolean}>;onboardedAt?:string;inventory?:Record<string,{number:number;kind:string;evidence:string;verifiedAt:string;sourceHash?:string}>;id:string;path:string;revision:number;mode:'internal'|'external'|'off';controller:string|null;leaseUntil:number;epoch:number;conversationId?:number;objective:string;summary:string;parallelism:number;qaDefault:boolean;maxReworks:number;budgetUsd:number;dependencies:Record<string,number[]>;jobs:Job[];releases:Release[];decisions:Array<{id:string;cardId:number;value:string;question?:string;label?:string;state:string}>;events:Array<{cursor:number;at:string;type:string;data:unknown}>;nextCursor:number;snapshot?:string;receipts:Record<string,{digest:string;state:string;result?:unknown;error?:string}>};
+type UserQuestion={commands?:QuestionCommand[];id:number;runId:number;threadId:number;question:string;options:Array<{value:string;label:string}>;state:string;reply?:string;responseRunId?:number;explanationAfter?:number;explanation?:string;explanationRequestId?:string;answerRequestId?:string;closedReason?:string};
+type Workspace={replenishment?:{requestId:string;epoch:number;lastAttemptAt:number};sharedChats?:number[];ownerActions?:Array<{id:string;action:string;target:string;reason:string;epoch:number;state:string;result?:unknown;error?:string}>;uiPreferences?:{version:number;value:Record<string,any>};personas?:PersonaLibrary;outbound?:Outbound;questions?:UserQuestion[];chatOutbox?:ChatDraft[];updateDrain?:{priorStatus:string;at:string;requestId?:string};expediting?:boolean;autopilot?:{status:string;personas:Array<{id:string;name:string;prompt:string}>;effort:string;parallelism:number;objective:string;updatedAt:string;legacyWork:unknown[]};workflow?:WorkflowState;workflowSignals?:Record<string,string>;schedules?:Record<string,ScheduleReceipt>;requests?:CoordinatorRequest[];handoff?:Handoff;queue?:Array<{autopilot?:boolean;id:string;number:number;budgetUsd:number;qa:boolean;maxReworks:number;readOnly:boolean}>;onboardedAt?:string;inventory?:Record<string,{number:number;kind:string;evidence:string;verifiedAt:string;sourceHash?:string}>;id:string;path:string;revision:number;mode:'internal'|'external'|'off';controller:string|null;leaseUntil:number;epoch:number;conversationId?:number;objective:string;summary:string;parallelism:number;qaDefault:boolean;maxReworks:number;budgetUsd:number;dependencies:Record<string,number[]>;jobs:Job[];releases:Release[];decisions:Array<{id:string;cardId:number;value:string;question?:string;label?:string;state:string}>;events:Array<{cursor:number;at:string;type:string;data:unknown}>;nextCursor:number;snapshot?:string;receipts:Record<string,{digest:string;state:string;result?:unknown;resultFile?:string;error?:string}>};
 type Registry={templates?:Record<string,{id:string;name:string;version:number;config:WorkflowConfig;updatedAt:string;actor:string}>;clients:Client[];workspaces:Workspace[]};
 export class CoordinatorService{
   private appRuntime?: (action:string,args:Record<string,any>,path:string)=>Promise<any>;
@@ -174,7 +176,30 @@ export class CoordinatorService{
   private state:Registry;private context:CoordinatorContext|null=null;private url='';private inFlight=new Map<string,Promise<any>>();private polling=false;private closing=false;private internalTokens=new Map<string,{workspaceId:string;actor:string;epoch:number;expires:number;clientId?:string}>();private launcher='';private entry='';
   constructor(private root=app.getPath('userData')){mkdirSync(root,{recursive:true,mode:0o700});this.state=existsSync(this.file())?JSON.parse(readFileSync(this.file(),'utf8')):{clients:[],workspaces:[]};for(const w of this.state.workspaces)for(const m of w.chatOutbox??[])if(m.state==='sending'){m.state='failed';m.error='Delivery was interrupted by restart. Check the transcript before resending.';}for(const w of this.state.workspaces){if(w.handoff?.delivery==='sending'){w.handoff.delivery='failed';w.handoff.deliveryError='Wrap-up delivery was interrupted. Review the conversation before retrying.';}}for(const w of this.state.workspaces)for(const q of w.questions??[])if(q.state==='sending')q.state='pending';for(const w of this.state.workspaces)for(const r of w.ownerActions??[])if(r.state==='executing'){r.state='uncertain';r.error='Restart interrupted this action. Verify its actual state before requesting it again; it will not be replayed.';}this.save();}
   private file(){return join(this.root,'coordinators.json');}
-  private save(){writeFileSync(this.file()+'.tmp',JSON.stringify(this.state),{mode:0o600});renameSync(this.file()+'.tmp',this.file());}
+  private save(){
+    const started=performance.now();
+    // Completed mutation results can contain full snapshots. Keep immutable retry
+    // evidence outside the hot registry; a missing receipt must never replay work.
+    for(const w of this.state.workspaces) for(const [key,receipt] of Object.entries(w.receipts)) {
+      if(receipt.state!=='done'||receipt.result===undefined) continue;
+      const serialized=JSON.stringify(receipt.result);
+      if(serialized.length<16000) continue;
+      const directory=join(this.root,'coordinator-receipts',hash(w.id));
+      mkdirSync(directory,{recursive:true,mode:0o700});
+      const filename=hash(key)+'.json';
+      writeFileSync(join(directory,filename)+'.tmp',serialized,{mode:0o600});
+      renameSync(join(directory,filename)+'.tmp',join(directory,filename));
+      receipt.resultFile=filename;delete receipt.result;
+    }
+    writeFileSync(this.file()+'.tmp',JSON.stringify(this.state),{mode:0o600});renameSync(this.file()+'.tmp',this.file());
+    recordPerformanceTiming('coordinator-state-save',performance.now()-started);
+  }
+  private receiptResult(w:Workspace,receipt:Workspace['receipts'][string]){
+    if(!receipt.resultFile)return receipt.result;
+    if(!/^[a-f0-9]{64}\.json$/.test(receipt.resultFile))throw Error('Invalid saved receipt. Inspect outcome before retrying.');
+    try{return JSON.parse(readFileSync(join(this.root,'coordinator-receipts',hash(w.id),receipt.resultFile),'utf8'));}
+    catch{throw Error('Saved outcome receipt is unavailable. Inspect the existing work; this request will not be replayed.');}
+  }
   private event(w:Workspace,type:string,data:unknown){w.events.push({cursor:w.nextCursor++,at:new Date().toISOString(),type,data});if(w.events.length>2000)w.events.splice(0,w.events.length-2000);
     const out=this.outbound(w);reconcileAuthority(out,e=>this.wakeValid(w,e));
     if(w.mode==='external'&&w.controller&&!['wake-acknowledged','binding-proposed'].includes(type))enqueueWake(out,{workspaceId:w.id,clientId:w.controller,epoch:w.epoch,kind:['coordinator-request','handoff-requested','question-response','decision-needed'].includes(type)?type:'changes',cursor:w.nextCursor-1,...(type==='handoff-requested'&&w.handoff?{handoffId:w.handoff.id}:{})});this.save();if(type.startsWith('workflow'))this.workflowNotifier?.();}
@@ -312,8 +337,8 @@ export class CoordinatorService{
       w.leaseUntil=Date.now()+30*60000;w.epoch++;w.revision++;if(typeof args.summary==='string')w.summary=args.summary.slice(0,16000);this.event(w,'handoff',this.session(w));return this.ui();
     }
     if(action==='settings'){
-      if(!Number.isInteger(args.parallelism)||args.parallelism<1||args.parallelism>8||!Number.isFinite(args.budgetUsd)||args.budgetUsd<=0||args.budgetUsd>1000)throw Error('Choose 1–8 workers and a positive budget up to $1,000.');
-      w.parallelism=args.parallelism;w.budgetUsd=args.budgetUsd;w.qaDefault=!!args.qaDefault;w.maxReworks=Math.min(2,Math.max(0,Number(args.maxReworks)||0));w.revision++;this.save();return this.ui();
+      if(!Number.isSafeInteger(args.parallelism)||args.parallelism<1||!Number.isFinite(args.budgetUsd)||args.budgetUsd<=0||args.budgetUsd>1000)throw Error('Choose a positive whole number of workers and a positive budget up to $1,000.');
+      w.parallelism=args.parallelism;if(w.autopilot)w.autopilot.parallelism=args.parallelism;w.budgetUsd=args.budgetUsd;w.qaDefault=!!args.qaDefault;w.maxReworks=Math.min(2,Math.max(0,Number(args.maxReworks)||0));w.revision++;this.save();return this.ui();
     }
     if (action === 'questions-list') {
       const { store } = this.context!;
@@ -330,12 +355,12 @@ export class CoordinatorService{
         }
       }
       for (const { card, agentRunId } of store.cards.listAllPending()) {
-        const payload = card.payload as { question?: string; options?: UserQuestion['options'] };
+        const payload = card.payload as { question?: string; options?: UserQuestion['options']; commands?:QuestionCommand[] };
         if (card.type !== 'decision' || !payload?.question || w.questions.some(q => q.id === card.id)) continue;
         const run = store.agentRuns.findById(agentRunId);
         if (!run) continue;
         w.questions.push({ id: card.id, runId: agentRunId, threadId: run.threadId,
-          question: payload.question, options: payload.options ?? [], state: 'pending' });
+          question: payload.question, options: payload.options ?? [], commands: questionCommands(payload.commands), state: 'pending' });
         this.event(w, 'decision-needed', { cardId: card.id });
       }
       for (const q of w.questions) {
@@ -352,14 +377,29 @@ export class CoordinatorService{
         if (q.state === 'answered' || q.state === 'closed' || !card || card.status === 'resolved') return [];
         const run = store.agentRuns.findById(q.responseRunId ?? q.runId) ?? store.agentRuns.findById(q.runId);
         if (!run) return [];
-        const explanation = q.explanation ?? (q.explanationAfter === undefined ? '' : store.events.list(run.id)
-          .filter(e => e.seq > q.explanationAfter! && e.type === 'text')
-          .map(e => (e.payload as { text?: string })?.text ?? '').join('\n').slice(-8000));
+        const explanation = questionExplanation(q.explanation ?? '');
+        const origin = store.threads.findById(q.threadId);
+        const commands = q.commands?.length ? q.commands : fencedQuestionCommands(q.question + '\n' + explanation);
         // A running origin is informational. Answers are durably queued to the
         // CURRENT coordinator, so worker activity must never disable the inbox.
-        return [{ ...q, busy: q.state === 'sending', originBusy: active(run.status) && run.status !== 'awaiting_input',
+        return [{ ...q, commands, issueNumber: origin?.issueNumber, busy: q.state === 'sending', originBusy: active(run.status) && run.status !== 'awaiting_input',
           explanation, explanationPending: !!q.explanationRequestId && w.requests?.find(r => r.id === q.explanationRequestId)?.state !== 'completed' }];
       });
+    }
+    if (action === 'question-context') {
+      const q = w.questions?.find(q => q.id === args.id);
+      if (!q) throw Error('Question not found in this workspace.');
+      const {store} = this.context!;
+      const runs = store.agentRuns.listByThread(q.threadId);
+      const selected = args.runId ?? q.runId;
+      if (!runs.some(run => run.id === selected)) throw Error('Run does not belong to this question thread.');
+      const offset = Math.max(0, Number(args.offset) || 0);
+      const events = store.events.list(selected);
+      return {threadId:q.threadId, runId:selected, issueNumber:store.threads.findById(q.threadId)?.issueNumber,
+        runs:runs.map(run=>({id:run.id,status:run.status})),
+        messages:offset===0?store.messages.list(q.threadId).map(m=>({role:m.role,body:m.body,runId:m.agentRunId})):[],
+        events:events.slice(offset,offset+100).map(e=>({seq:e.seq,type:e.type,payload:e.payload})),
+        nextOffset:offset+100<events.length?offset+100:null};
     }
     if (action === 'question-reply') {
       const { store } = this.context!;
@@ -379,7 +419,7 @@ export class CoordinatorService{
       const before = structuredClone(w);
       const requestId = explaining ? `question-explanation:${q.id}:${randomUUID()}` : `question-answer:${q.id}`;
       const prompt = `Question ${q.id}, originating thread ${q.threadId}, run ${q.runId}.\n${q.question}\nOptions: ${JSON.stringify(q.options)}\n` + (explaining
-        ? `The owner requested an explanation. Explain the implications and tradeoffs without choosing an answer. Save the explanation with recordUserQuestionExplanation (id ${q.id}) so it appears in Questions. Do not create a replacement question or interrupt an active worker.`
+        ? `The owner requested an explanation. Provide a short, owner-facing explanation: what is needed, why it matters, and the consequences of each option. Do not include sibling briefings, routing notices or internal instructions. If a command or snippet is requested, retrieve the exact artifact from the originating thread and include it in the commands field, with where to run it and the expected result. A file path or paraphrase is not a substitute. If unavailable, clearly state that and recover the artifact before asking the owner to run it. Do not choose an answer. Save the explanation with recordUserQuestionExplanation (id ${q.id}) so it appears in Questions. Do not create a replacement question or interrupt an active worker.`
         : `The owner answered: ${reply}\nThis answer is saved. Reconcile it with the originating thread using its existing work and current authority; do not duplicate workers or interrupt active work. Acknowledge this request as received before acting and completed after applying the answer or recording its blocker.`);
       w.requests.push({ id: requestId, kind: 'workflow-action', prompt, state: 'queued', createdAt: new Date().toISOString() });
       if (explaining) q.explanationRequestId = requestId;
@@ -405,11 +445,13 @@ export class CoordinatorService{
       if (!q) throw Error('Question is no longer pending.');
       const explanation = String(args.explanation ?? '').trim();
       if (!explanation || explanation.length > 16000) throw Error('Provide an explanation up to 16,000 characters.');
-      q.explanation = explanation;
+      const commands = args.commands === undefined ? q.commands : questionCommands(args.commands);
+      q.explanation = questionExplanation(explanation);
+      if(commands !== undefined) q.commands = commands;
       const request = w.requests?.find(r => r.id === q.explanationRequestId);
       if (request) request.state = 'completed';
       this.event(w, 'question-explained', { id: q.id });
-      return { id: q.id, explanation };
+      return { id: q.id, explanation: q.explanation, commands: q.commands };
     }
     if (action === 'question-close') {
       const q = w.questions?.find(q => q.id === args.id && q.state === 'pending');
@@ -532,7 +574,7 @@ Never approve your own pairing. No provider API keys are needed.\n\nClaude Deskt
     this.assertControl(w,actor);
     if(this.updater?.pending()&&['dispatchTask','followUpRun','runQA','executeRelease','prepareExternalCoordinator'].includes(name))throw Error('An application update is waiting. Existing runs can finish; new work resumes after restart.');
     const key=actor+':'+args.requestId;const digest=hash(JSON.stringify({name,args}));const existing=w.receipts[key];
-    if(existing){if(existing.digest!==digest)throw Error('Request ID was already used with different arguments');const running=this.inFlight.get(key);if(running)return running;if(existing.state==='done')return existing.result;throw Error(existing.error??'Request outcome is uncertain. Inspect workspace and run history; do not blindly repeat.');}
+    if(existing){if(existing.digest!==digest)throw Error('Request ID was already used with different arguments');const running=this.inFlight.get(key);if(running)return running;if(existing.state==='done')return this.receiptResult(w,existing);throw Error(existing.error??'Request outcome is uncertain. Inspect workspace and run history; do not blindly repeat.');}
     if(args.revision!==w.revision)throw Error(`Stale revision. Current revision is ${w.revision}; refresh session.`);
     // Reserve synchronously before any await. Unknown outcomes are never replayed.
     w.receipts[key]={digest,state:'pending'};w.revision++;w.leaseUntil=Date.now()+30*60000;this.save();

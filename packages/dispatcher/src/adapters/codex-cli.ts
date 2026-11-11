@@ -1,5 +1,6 @@
 import {
   detectRateLimit as detectRateLimitFromText,
+  parseDecisionCommands,
   type StreamEvent,
 } from '../stream-parser.js';
 import type {
@@ -420,7 +421,7 @@ function parseDecisionBody(body: string): StreamEvent | null {
     if (value && label) options.push({ value, label });
   }
   if (options.length === 0) return null;
-  return { kind: 'decision', question, options };
+  return { kind: 'decision', question, options, commands: parseDecisionCommands(obj.commands) };
 }
 
 function tokenUsageFrom(usage: CodexUsage | undefined): { input: number; output: number } | null {

@@ -40,7 +40,7 @@ const DEFAULT_DECISION_PROMPT = `When you need a decision from the user before c
 }
 \`\`\`
 
-After emitting the block, end your turn (do not continue working). The question is saved in Questions for you. Include the full context and implications in the question, not a reference to earlier conversation. The user may choose an option, give a free-text answer, or request an explanation. An explanation request is not a decision: explain and wait without taking a choice.`;
+After emitting the block, end your turn (do not continue working). The question is saved in Questions for you. Include the full context and implications in the question, not a reference to earlier conversation. The user may choose an option, give a free-text answer, or request an explanation. If the user must run a command or snippet, include a commands array in the decision JSON. Each entry has title, code (the exact complete snippet), language, where (app/site/console and prerequisites), and expected (output to return). Never provide only a file path or refer to an earlier snippet; never include credentials. Copying does not execute code. An explanation request is not a decision: explain and wait without taking a choice.`;
 
 export type ContainmentMode = 'off' | 'warn' | 'pause';
 
@@ -649,6 +649,7 @@ export async function createSupervisor(
           payload: {
             question: streamEvent.question,
             options: streamEvent.options,
+            ...(streamEvent.commands ? {commands: streamEvent.commands} : {}),
           },
         });
         entry.hasDecision = true;

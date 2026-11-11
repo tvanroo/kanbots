@@ -305,3 +305,10 @@ describe('diff_hunk synthesis from tool_use', () => {
     expect(events).toHaveLength(1);
   });
 });
+
+it('retains exact command artifacts on a user decision',()=>{
+ const command={title:'Check status',code:'console.log("status");\n',language:'javascript',where:'Browser console',expected:'Status only'};
+ const text='```kanbots-decision\n'+JSON.stringify({question:'Run the snippet?',options:[{value:'yes',label:'Done'}],commands:[command]})+'\n```';
+ const events=parseStreamLine(JSON.stringify({type:'assistant',message:{content:[{type:'text',text}]}}));
+ expect(events.find(e=>e.kind==='decision')).toMatchObject({commands:[command]});
+});

@@ -12,6 +12,7 @@ export type StreamEvent =
   | { kind: 'session'; sessionId: string; model: string | null; provider?: 'claude-code' | 'codex-cli' }
   | {
       kind: 'decision';
+      commands?: Array<{title:string;code:string;language:string;where:string;expected:string}>;
       question: string;
       options: Array<{ value: string; label: string }>;
       /**
@@ -412,6 +413,8 @@ function parseDecisionBody(body: string): StreamEvent | null {
     question,
     options,
   };
+  const commands = parseDecisionCommands(parsed.commands);
+  if(commands.length) out.commands = commands;
   const ttl = parsed.timeout_seconds;
   if (typeof ttl === 'number' && Number.isFinite(ttl) && ttl > 0) {
     out.timeoutSeconds = Math.floor(ttl);
@@ -472,4 +475,13 @@ export function makeLineSplitter(): (chunk: string) => string[] {
     buffer = parts.pop() ?? '';
     return parts.filter((p) => p.length > 0);
   };
+}
+
+export function parseDecisionCommands(value: unknown): Array<{title:string;code:string;language:string;where:string;expected:string}> {
+ if(!Array.isArray(value))return [];
+ return value.slice(0,8).flatMap(item=>{
+  if(!item||typeof item!=='object')return [];
+  if(!['title','code','language','where','expected'].every(key=>typeof item[key]==='string'&&item[key].trim()&&item[key].length<=(key==='code'?40000:1000)))return [];
+  return [{title:item.title,code:item.code,language:item.language,where:item.where,expected:item.expected}];
+ });
 }

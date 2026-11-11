@@ -1,7 +1,7 @@
 const {test}=require('node:test');const assert=require('node:assert/strict');const fs=require('node:fs');const path=require('node:path');const Module=require('node:module');const ts=require('typescript');
 function load(file,mocks={}){const mod=new Module(file);mod.paths=Module._nodeModulePaths(path.dirname(file));const original=mod.require.bind(mod);mod.require=id=>Object.hasOwn(mocks,id)?mocks[id]:original(id);mod._compile(ts.transpileModule(fs.readFileSync(file,'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText,file);return mod.exports;}
 const manifest={...load(path.resolve(__dirname,'../../mcp/src/app-controls.ts')),...load(path.resolve(__dirname,'../../mcp/src/coordinator.ts'),{'./app-controls.js':load(path.resolve(__dirname,'../../mcp/src/app-controls.ts')),'./workflow-schema.js':load(path.resolve(__dirname,'../../mcp/src/workflow-schema.ts'))}),...load(path.resolve(__dirname,'../../mcp/src/onboarding.ts'))};
-function fixture(){const root=fs.mkdtempSync('/private/tmp/kanbots-coordinator-test-');const {CoordinatorService}=load(path.resolve(__dirname,'../src/coordinator.ts'),{'./providers-ipc.js':{getProviderHandlers:()=>({'providers:get':async()=>({source:'app-store'})})},'./routing-state.js':{routingState:()=>({}),saveRouting:c=>c},'./persona-library.js':load(path.resolve(__dirname,'../src/persona-library.ts')),'./coordinator-outbound.js':load(path.resolve(__dirname,'../src/coordinator-outbound.ts')),electron:{app:{getPath:()=>root,getVersion:()=>"test"}},'@kanborg/mcp':manifest,'./worker-checkpoint.js':load(path.resolve(__dirname,'../src/worker-checkpoint.ts')),'./workflow.js':load(path.resolve(__dirname,'../src/workflow.ts')),'@kanborg/core':load(path.resolve(__dirname,'../../core/src/labels.ts')), './routing-capacity.js':{collectCapacity:async()=>({snapshot:{rows:[]}})}});const svc=new CoordinatorService(root);let starts=0;const resumes=[];const startInputs=[];let issues=[{number:1,title:'Test task',body:'Acceptance: works',labels:[]}];const runs=new Map();let checks=[];const handlers={
+function fixture(){const root=fs.mkdtempSync('/private/tmp/kanbots-coordinator-test-');const {CoordinatorService}=load(path.resolve(__dirname,'../src/coordinator.ts'),{'./performance-diagnostics.js':{recordPerformanceTiming:()=>{}},'./question-presentation.js':load(path.resolve(__dirname,'../src/question-presentation.ts')),'./providers-ipc.js':{getProviderHandlers:()=>({'providers:get':async()=>({source:'app-store'})})},'./routing-state.js':{routingState:()=>({}),saveRouting:c=>c},'./persona-library.js':load(path.resolve(__dirname,'../src/persona-library.ts')),'./coordinator-outbound.js':load(path.resolve(__dirname,'../src/coordinator-outbound.ts')),electron:{app:{getPath:()=>root,getVersion:()=>"test"}},'@kanborg/mcp':manifest,'./worker-checkpoint.js':load(path.resolve(__dirname,'../src/worker-checkpoint.ts')),'./workflow.js':load(path.resolve(__dirname,'../src/workflow.ts')),'@kanborg/core':load(path.resolve(__dirname,'../../core/src/labels.ts')), './routing-capacity.js':{collectCapacity:async()=>({snapshot:{rows:[]}})}});const svc=new CoordinatorService(root);let starts=0;const resumes=[];const startInputs=[];let issues=[{number:1,title:'Test task',body:'Acceptance: works',labels:[]}];const runs=new Map();let checks=[];const handlers={
  'workspace:get':async()=>({id:'test-board'}),'autopilot:list-active':async()=>[], 'issues:list':async()=>issues,'issues:get':async a=>({issue:issues.find(i=>i.number===a.number)}),'issues:create':async a=>{const i={number:issues.length+1,...a};issues.push(i);return i;},'issues:patch':async a=>Object.assign(issues.find(i=>i.number===a.number),a.patch),
  'config:get':async()=>({owner:'local',repo:'test'}),'decisions:pending':async()=>[],
  'agent-runs:checks:run':async()=>{checks=[{id:1,kind:'tests',status:'running'}];return checks;},'agent-runs:checks:list':async()=>checks,
@@ -648,5 +648,40 @@ test('priority edit shares app and MCP persistence, validates null and protects 
  assert.deepEqual((await f.svc.uiAction('workflow:get')).stageOrder[stage],[1]);
  await write(f,c,'dispatchTask',{number:1,qa:false});
  await assert.rejects(f.svc.uiAction('workflow:card',{number:1,priorityStage:(await f.svc.uiAction('workflow:get')).cards[1].stageId,beforeNumber:null,reason:'Move running',evidence:'Test'}),/pinned/);
+ }finally{f.cleanup();}
+});
+
+test('question context is scoped to the original thread and commands survive restart',async()=>{
+ const f=fixture();try{const c=await control(f);const card={id:801,type:'decision',status:'pending',payload:{question:'Run the exact snippet?',options:[]}};
+ f.runs.set(77,{id:77,threadId:22,status:'complete'});
+ f.svc.context.store.cards={listAllPending:()=>[{card,agentRunId:77}],findById:()=>card};
+ f.svc.context.store.agentRuns.listByThread=id=>id===22?[f.runs.get(77)]:[];
+ f.svc.context.store.messages={list:()=>[{role:'user',body:'Original request',agentRunId:null}]};
+ await f.svc.uiAction('questions-list');
+ const code='const result = await fetch("/status");\nconsole.log(await result.json());';
+ await write(f,c,'recordUserQuestionExplanation',{id:801,explanation:'Routing: hidden\nThis checks status only.',commands:[{title:'Check status',code,language:'javascript',where:'Browser console on your signed-in site',expected:'Status JSON'}]});
+ const q=(await f.reload().uiAction('questions-list'))[0];assert.equal(q.commands[0].code,code);assert.equal(q.explanation,'This checks status only.');
+ const context=await f.svc.call(c.actor,c.id,'getUserQuestionContext',{workspaceId:c.id,id:801});assert.equal(context.threadId,22);assert.equal(context.messages[0].body,'Original request');
+ await assert.rejects(f.svc.uiAction('question-context',{id:801,runId:999}),/does not belong/);
+ await assert.rejects(f.svc.uiAction('question-explanation-record',{id:801,explanation:'Bad',commands:[{code:'x'}]}),/Invalid/);
+ assert.equal((await f.svc.uiAction('questions-list'))[0].commands[0].code,code);
+ }finally{f.cleanup();}
+});
+test('large durable receipts are externalized and replay exactly across restart without re-execution',async()=>{
+ const f=fixture();try{const c=await control(f);const w=f.svc.state.workspaces[0];const key=c.actor+':large-retry';const args={workspaceId:w.id,requestId:'large-retry',revision:w.revision};const crypto=require('node:crypto');
+ const expected={revision:123,data:{text:'x'.repeat(100000)}};
+ w.receipts[key]={digest:crypto.createHash('sha256').update(JSON.stringify({name:'configureWorkflow',args})).digest('hex'),state:'done',result:expected};
+ f.svc.save();assert.equal(w.receipts[key].result,undefined);assert.ok(w.receipts[key].resultFile);
+ const restored=f.reload();assert.deepEqual(await restored.call(c.actor,c.id,'configureWorkflow',args),expected);
+ const receipt=w.receipts[key];fs.unlinkSync(path.join(f.root,'coordinator-receipts',crypto.createHash('sha256').update(w.id).digest('hex'),receipt.resultFile));
+ await assert.rejects(restored.call(c.actor,c.id,'configureWorkflow',args),/will not be replayed/);assert.equal(f.starts,0);
+ }finally{f.cleanup();}
+});
+test('parallel targets above four persist and share workflow configuration',async()=>{
+ const f=fixture();try{const c=await control(f);
+ await write(f,c,'manageAutopilot',{action:'start',personas:[{id:'engineering',name:'Engineering',prompt:'Review existing work'}],parallelism:12});
+ assert.equal(f.svc.ui().workspace.parallelism,12);assert.equal(f.reload().ui().workspace.autopilot.parallelism,12);
+ await write(f,c,'configureWorkflow',{parallelism:9});assert.equal(f.svc.ui().workspace.autopilot.parallelism,9);
+ await assert.rejects(write(f,c,'configureWorkflow',{parallelism:0}));
  }finally{f.cleanup();}
 });

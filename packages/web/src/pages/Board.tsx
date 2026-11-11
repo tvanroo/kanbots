@@ -130,7 +130,7 @@ export function Board({ onOpenDetail, onOpenCreate, onOpenPalette, onOpenStats }
     api.costUsage(),
   );
   const workflow=useWorkflow(config?.repo);
-  const [focusedStage, setFocusedStage] = useState<string | null>(null);
+  const [enabledStages, setEnabledStages] = useState<string[] | null>(null);
   const [relatedOnly, setRelatedOnly] = useState(false);
   const [workflowEditor,setWorkflowEditor]=useState<number|null>(null);
   useEffect(()=>{const open=()=>setWorkflowEditor(0);window.addEventListener('kanborg:open-workflow',open);return()=>window.removeEventListener('kanborg:open-workflow',open);},[]);
@@ -708,9 +708,10 @@ export function Board({ onOpenDetail, onOpenCreate, onOpenPalette, onOpenStats }
         <span>{list.filter(i => i.agent === 'running').length} running</span>
         <span>{list.filter(i => workflow?.cards[i.number]?.waiting || i.agent === 'blocked').length} waiting</span>
       </section>
-      <nav className="kb-stage-navigation" aria-label="Focus a stage"><button aria-pressed={focusedStage===null} onClick={()=>setFocusedStage(null)}>All stages</button>{(workflow?.config.stages ?? COLUMNS.map(c=>({id:String(c.key),name:c.label}))).map((stage:any)=><button key={stage.id} aria-pressed={focusedStage===stage.id} onClick={()=>setFocusedStage(stage.id)}>{stage.name}</button>)}</nav>
+      {enabledStages?.length===0 && <p role="status">No stages selected. Toggle a stage below or choose All stages.</p>}
+      <nav className="kb-stage-navigation" aria-label="Visible stages"><button aria-pressed={enabledStages===null} onClick={()=>setEnabledStages(null)}>All stages</button>{(workflow?.config.stages ?? COLUMNS.map(c=>({id:String(c.key),name:c.label}))).map((stage:any)=><button key={stage.id} aria-pressed={enabledStages===null||enabledStages.includes(stage.id)} onClick={()=>setEnabledStages(current=>{const all=(workflow?.config.stages ?? COLUMNS.map(c=>({id:String(c.key)}))).map((s:any)=>s.id);const selected=current??all;return selected.includes(stage.id)?selected.filter((id:string)=>id!==stage.id):[...selected,stage.id];})}>{stage.name}</button>)}</nav>
       <div className="kb-board kb-board-focus" onClick={handleBoardBackgroundClick}>
-        {(workflow?workflow.config.stages.map((s:any)=>({key:s.id,label:s.name,status:s.category,purpose:s.purpose})):COLUMNS.filter((col) => filterApi.includeBacklog || col.key !== 'backlog')).filter((col:any)=>focusedStage===null||String(col.key)===focusedStage).map((col:any) => (
+        {(workflow?workflow.config.stages.map((s:any)=>({key:s.id,label:s.name,status:s.category,purpose:s.purpose})):COLUMNS.filter((col) => filterApi.includeBacklog || col.key !== 'backlog')).filter((col:any)=>enabledStages===null||enabledStages.includes(String(col.key))).map((col:any) => (
           <Column
             key={String(col.key)}
             columnKey={col.key}

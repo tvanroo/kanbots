@@ -12,9 +12,9 @@ export interface AutopilotLaunchModalProps {
 
 type Tab = 'feature-dev' | 'qa';
 type Effort = 'low' | 'medium' | 'high' | 'xhigh' | 'max';
-type Parallelism = 1 | 2 | 3 | 4;
+type Parallelism = number;
 
-const PARALLELISM_OPTIONS: Parallelism[] = [1, 2, 3, 4];
+
 
 export function AutopilotLaunchModal({ onClose, onStarted }: AutopilotLaunchModalProps) {
   const bridge=getBridge();const coordinated=!!bridge?.coordinatorAction;
@@ -89,6 +89,7 @@ export function AutopilotLaunchModal({ onClose, onStarted }: AutopilotLaunchModa
     setError(null);
     try {
       if(coordinated){
+        if(!Number.isSafeInteger(parallelism)||parallelism<1)throw Error('Enter a positive whole number of parallel workers.');
         setCoordinator(await bridge!.coordinatorAction!('autopilot',{action:coordinator?.workspace?.autopilot?(coordinator.workspace.autopilot.status==='active'?'update':'resume'):'start',personas:tab==='qa'?[{id:'qa',name:'QA reviewer',prompt:'Assess the current project against its acceptance criteria. Delegate independent checks, collect reproducible evidence, file defects without automatically implementing them, and report findings through the coordinator.'}]:selected.map(p=>({id:p.id,name:p.name,prompt:p.prompt})),effort,parallelism,...(tab==='qa'?{objective:'Complete a QA assessment of the current project and deliver findings. End this assignment when the assessment is delivered.'}:{objective:coordinator?.workspace?.autopilot?.personas?.[0]?.id!=='qa'&&coordinator?.workspace?.autopilot?.objective||'Continuously discover and deliver useful improvements within the project scope.'})}));
         setNotice('Settings saved. Autopilot is On.');return;
       }
@@ -282,18 +283,8 @@ function FeatureDevTab({
         </label>
         <label className="kb-pill-select" title="Target number of active workers, maintained while Autopilot is On">
           <span className="lbl">parallel</span>
-          <select
-            value={parallelism}
-            onChange={(e) => onParallelismChange(Number(e.target.value) as Parallelism)}
-            className="kb-pill-select-native mono"
-          >
-            {PARALLELISM_OPTIONS.map((n) => (
-              <option key={n} value={n}>
-                {n}
-              </option>
-            ))}
-          </select>
-          <span className="caret">▾</span>
+          <input type="number" min={1} step={1} aria-label="Parallel worker target" value={parallelism}
+            onChange={event=>onParallelismChange(Number(event.target.value))} className="kb-parallel-input" />
         </label>
       </div>
       <div className="kb-persona-grid">

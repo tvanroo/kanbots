@@ -17,10 +17,13 @@ export class PerformanceCounters {
   drain() { const rows = Object.fromEntries(this.rows); this.rows.clear(); return rows; }
 }
 
+let activeCounters: PerformanceCounters | undefined;
+export function recordPerformanceTiming(name: string, ms: number) { activeCounters?.record(name, ms); }
+
 export function startPerformanceDiagnostics() {
   const directory = join(app.getPath('userData'), 'diagnostics');
   const file = join(directory, 'performance.jsonl');
-  const counters = new PerformanceCounters();
+  const counters = new PerformanceCounters(); activeCounters = counters;
   const lag = monitorEventLoopDelay({ resolution: 20 }); lag.enable();
   const original = ipcMain.handle.bind(ipcMain);
   let inFlight = 0, peak = 0, writing = false;
