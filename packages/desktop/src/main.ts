@@ -1,3 +1,4 @@
+import { startPerformanceDiagnostics } from './performance-diagnostics.js';
 import { configureCodexUsageSnapshot } from './codex-catalogue.js';
 import { rememberWorkspace, startupWorkspace } from './workspace-resume.js';
 import { SelfUpdater, startupSwitch } from './self-update.js';
@@ -1510,6 +1511,7 @@ if (process.platform === 'darwin') {
 const ownsLocalInstance = app.requestSingleInstanceLock();
 if (!ownsLocalInstance) app.quit();
 if (ownsLocalInstance) void app.whenReady().then(async () => {
+  const diagnosticsDirectory = startPerformanceDiagnostics();
   configureClaudeUsageSnapshot(join(app.getPath('userData'), 'claude-usage-snapshot.json'));
   configureCodexUsageSnapshot(join(app.getPath('userData'), 'codex-usage-snapshot.json'));
   selfUpdater=new SelfUpdater();
@@ -1566,7 +1568,8 @@ if (ownsLocalInstance) void app.whenReady().then(async () => {
     app.setAboutPanelOptions({ applicationName: 'KanBorg' });
     Menu.setApplicationMenu(Menu.buildFromTemplate([
       { label: 'KanBorg', submenu: [
-        { role: 'about', label: 'About KanBorg' }, { type: 'separator' },
+        { role: 'about', label: 'About KanBorg' },
+        { label: 'Show performance diagnostics', click: () => { void shell.openPath(diagnosticsDirectory); } }, { type: 'separator' },
         { role: 'services' }, { type: 'separator' },
         { role: 'hide', label: 'Hide KanBorg' }, { role: 'hideOthers' }, { role: 'unhide' },
         { type: 'separator' }, { role: 'quit', label: 'Quit KanBorg' },

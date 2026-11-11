@@ -92,3 +92,28 @@ export function moveWorkflowCard(state:WorkflowState,args:{number:number;to?:str
   state.cards[args.number]=card;return card;
 }
 export function workflowGuidance(state:WorkflowState,number?:number){const card=number?state.cards[number]:undefined;const stage=state.config.stages.find(s=>s.id===card?.stageId);return {version:state.version,stage,card,completion:state.config.completion.find(r=>r.taskType===card?.taskType),releaseOwner:state.config.releaseOwner,notifications:state.config.notifications,authority:'Workflow rules do not grant tool permissions, credentials or destructive-action authorization.'};}
+
+/** Reorder only waiting work; running cards retain their ownership and position. */
+export function reorderWorkflowCard(state: WorkflowState, number: number, stageId: string, beforeNumber: number | null, running: Set<number>, actor: string) {
+  const card = state.cards[number];
+  if (!card || card.stageId !== stageId) throw Error('Card changed stage. Refresh the board.');
+  if (running.has(number)) throw Error('Running cards stay pinned above waiting work.');
+  if (beforeNumber === number) return;
+  if (beforeNumber !== null && (!state.cards[beforeNumber] || state.cards[beforeNumber]!.stageId !== stageId)) throw Error('Drop target changed stage. Refresh the board.');
+  const all = Object.values(state.cards).filter(c => c.stageId === stageId && !running.has(c.number)).map(c => c.number);
+  const saved = state.stageOrder?.[stageId] ?? [];
+  const order = [...new Set([...saved.filter(n => all.includes(n)), ...all])].filter(n => n !== number);
+  // Dropping onto a running card means first in the waiting queue, never above it.
+  const index = beforeNumber === null ? order.length : running.has(beforeNumber) ? 0 : order.indexOf(beforeNumber);
+  order.splice(Math.max(0, index), 0, number);
+  state.stageOrder ??= {}; state.stageOrder[stageId] = order;
+  card.history.push({at:new Date().toISOString(),actor,version:state.version,from:stageId,to:stageId,reason:'Changed waiting-work priority',evidence:`Waiting order: ${order.join(', ')}`});
+}
+
+/** Preserve cross-stage queue positions while ordering each stage's eligible work. */
+export function prioritizeWorkflowQueue<T extends {number:number}>(queue: T[], state?: WorkflowState): T[] {
+  const groups = new Map<string, T[]>();
+  for (const item of queue) { const stage = state?.cards[item.number]?.stageId ?? ''; const group = groups.get(stage) ?? []; group.push(item); groups.set(stage, group); }
+  for (const [stage, group] of groups) { const order = state?.stageOrder?.[stage] ?? []; const rank = (n:number) => { const i=order.indexOf(n);return i<0?Infinity:i; }; group.sort((a,b)=>rank(a.number)-rank(b.number)); }
+  return queue.map(item => groups.get(state?.cards[item.number]?.stageId ?? '')!.shift()!);
+}

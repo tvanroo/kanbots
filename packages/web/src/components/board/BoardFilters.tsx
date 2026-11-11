@@ -150,7 +150,7 @@ export function BoardFilters({ stats, controls }: BoardFiltersProps) {
           className="kb-board-sort"
           title={
             controls.sortMode === 'manual'
-              ? 'Manual sort lets you drag cards within a column (drag-reorder ships in a later milestone)'
+              ? 'Drag waiting cards to choose what starts next. Running cards stay at the top.'
               : `Sorting by ${SORT_LABEL[controls.sortMode].toLowerCase()} — switch to Manual for drag-reorder`
           }
         >

@@ -638,3 +638,15 @@ test('independent reviewer external wait never triggers implementation rework an
   f.runs.get(job.reviewRunId).status='complete';await f.svc.tick();assert.equal(f.svc.ui().jobs[0].state,'qa-passed');
  }finally{f.cleanup();}
 });
+test('priority edit shares app and MCP persistence, validates null and protects active workers',async()=>{
+ const f=fixture();try{
+ const c=await control(f);await f.handlers['issues:create']({title:'Second',status:'todo'});
+ let view=await f.svc.uiAction('workflow:get');const stage=view.cards[1].stageId;
+ await f.svc.uiAction('workflow:card',{number:1,priorityStage:stage,beforeNumber:null,reason:'Owner priority',evidence:'Drag on board'});
+ assert.deepEqual(f.reload().ui().workspace.stagePriority[stage],[1]);
+ await write(f,c,'updateWorkflowCard',{number:1,priorityStage:stage,beforeNumber:null,reason:'Coordinator priority',evidence:'Owner request'});
+ assert.deepEqual((await f.svc.uiAction('workflow:get')).stageOrder[stage],[1]);
+ await write(f,c,'dispatchTask',{number:1,qa:false});
+ await assert.rejects(f.svc.uiAction('workflow:card',{number:1,priorityStage:(await f.svc.uiAction('workflow:get')).cards[1].stageId,beforeNumber:null,reason:'Move running',evidence:'Test'}),/pinned/);
+ }finally{f.cleanup();}
+});

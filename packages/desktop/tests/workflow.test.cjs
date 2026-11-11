@@ -8,3 +8,20 @@ test('populated removal needs a destination and cannot silently complete cards',
 test('research completion differs from implementation and requires evidence; stricter gates do not rewrite history',()=>{const s=setup();assert.throws(()=>f.moveWorkflowCard(s,{number:1,to:'done',reason:'Complete',evidence:'report',taskType:'research'},'coord'),/Record evidence/);assert.equal(s.cards[1].taskType,'implementation');f.moveWorkflowCard(s,{number:1,to:'done',reason:'Questions answered',evidence:'report.md',taskType:'research',checks:[{id:'accepted',outcome:'pass',evidence:'Owner request answered'},{id:'findings',outcome:'pass',evidence:'report.md delivered'}]},'coord');assert.equal(s.cards[1].stageId,'done');assert.equal(s.cards[1].checks.findings.version,1);});
 test('validation catches missing actors, contradictory checks and missing completion; warns on disconnected paths',()=>{const s=setup();let c=structuredClone(s.config);c.stages[0].checks=[{id:'a',label:'A',mode:'required'},{id:'a',label:'A',mode:'not-applicable'}];assert.ok(f.validateWorkflow(c).errors.some(e=>e.includes('contradictory')));c=structuredClone(s.config);c.transitions=[];assert.ok(f.validateWorkflow(c).warnings.some(e=>e.includes('no path')));c.stages=c.stages.filter(s=>s.category!=='done');assert.ok(f.validateWorkflow(c).errors.includes('Add a completion stage.'));});
 test('stale configuration writes fail and waiting requires an owner and trigger',()=>{const s=setup();assert.throws(()=>f.applyWorkflow(s,{expectedVersion:0,config:s.config,reason:'Stale'},issues,'user'),/Reload/);assert.throws(()=>f.moveWorkflowCard(s,{number:1,reason:'Waiting',evidence:'CI',waiting:{reason:'CI',owner:'',trigger:''}},'coord'),/responsible/);});
+test('waiting priority persists and cannot move running cards or cross stages',()=>{
+ const s=setup();f.materialize(s,[{number:4,title:'Next',status:'review'},{number:5,title:'Later',status:'review'}]);
+ const entered=s.cards[5].enteredAt;s.cards[5].evidence='retained';
+ f.reorderWorkflowCard(s,5,'review',1,new Set(),'user');assert.deepEqual(s.stageOrder.review,[5,1,4]);
+ assert.equal(s.cards[5].enteredAt,entered);assert.equal(s.cards[5].evidence,'retained');
+ assert.deepEqual(JSON.parse(JSON.stringify(s)).stageOrder.review,[5,1,4]);
+ assert.throws(()=>f.reorderWorkflowCard(s,2,'inProgress',null,new Set([2]),'user'),/pinned/);
+ assert.throws(()=>f.reorderWorkflowCard(s,5,'review',2,new Set(),'user'),/changed stage/);
+ f.reorderWorkflowCard(s,4,'review',1,new Set([1]),'user');assert.deepEqual(s.stageOrder.review,[4,5]);
+ f.reorderWorkflowCard(s,4,'review',null,new Set([1]),'user');assert.deepEqual(s.stageOrder.review,[5,4]);
+});
+test('dispatch priority preserves cross-stage slots and orders waiting work without duplicating it',()=>{
+ const s=setup();f.materialize(s,[{number:4,title:'Next',status:'review'}]);s.stageOrder={review:[4,1]};
+ const q=[{number:1,id:'a'},{number:2,id:'b'},{number:4,id:'c'}];
+ assert.deepEqual(f.prioritizeWorkflowQueue(q,s).map(x=>x.id),['c','b','a']);
+ assert.deepEqual(q.map(x=>x.id),['a','b','c']);
+});

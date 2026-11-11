@@ -22,6 +22,6 @@ export type WorkflowCard = {
   history: Array<{ at: string; actor: string; version: number; from: string; to: string; reason: string; evidence: string }>;
 };
 export type WorkflowState = {
-  version: number; config: WorkflowConfig; cards: Record<string, WorkflowCard>;
+  version: number; config: WorkflowConfig; cards: Record<string, WorkflowCard>; stageOrder?: Record<string, number[]>;
   history: Array<{ version: number; at: string; actor: string; reason: string; config: WorkflowConfig; moves: Array<{ number: number; from: string; to: string }> }>;
 };

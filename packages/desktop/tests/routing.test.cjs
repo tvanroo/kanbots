@@ -162,7 +162,7 @@ test('renewable Claude CLI subscription can recover without presenting stale quo
  }
 });
 
-test('grant routing defers only for an imminent natural reset with conservative spending headroom', async () => {
+test('grant routing compares natural resets with grant deadlines and observed spending headroom', async () => {
  const hour = 3600000;
  const date = Date.now();
  const pool = 'anthropic:grant';
@@ -195,12 +195,16 @@ test('grant routing defers only for an imminent natural reset with conservative 
   return candidates[0].id;
  }
  assert.equal(await preferred(), 'codex-sub');
- assert.equal(await preferred({charges:[]}), 'grant');
- assert.equal(await preferred({charges:settled.map(c=>({...c,pending:true}))}), 'grant');
- assert.equal(await preferred({charges:settled.map(c=>({...c,pool:'anthropic:other'}))}), 'grant');
- assert.equal(await preferred({charges:settled.slice(0,2)}), 'grant');
+ assert.equal(await preferred({charges:[]}), 'codex-sub');
+ assert.equal(await preferred({charges:settled.map(c=>({...c,pending:true}))}), 'codex-sub');
+ assert.equal(await preferred({charges:settled.map(c=>({...c,pool:'anthropic:other'}))}), 'codex-sub');
+ assert.equal(await preferred({charges:settled.slice(0,2)}), 'codex-sub');
  assert.equal(await preferred({expiryHours:48}), 'grant');
- assert.equal(await preferred({resetHours:8}), 'grant');
+ assert.equal(await preferred({expiryHours:6*24,remaining:184.08,resetHours:48}), 'grant');
+ assert.equal(await preferred({resetHours:8}), 'codex-sub');
  assert.equal(await preferred({stale:true}), 'grant');
+ assert.equal(await preferred({charges:[],remaining:184.08,expiryHours:19*24,resetHours:48}), 'codex-sub');
+ assert.equal(await preferred({remaining:184.08,expiryHours:19*24,resetHours:48}), 'codex-sub');
+ assert.equal(await preferred({charges:[],expiryHours:48,resetHours:72}), 'grant');
  assert.equal(await preferred({remaining:0}), 'codex-sub');
 });

@@ -4,6 +4,8 @@ import { WorkflowEditor } from '../components/modals/WorkflowEditor.js';
 import { getBridge } from '../desktop-bridge.js';
 import {
   DndContext,
+  closestCenter,
+  pointerWithin,
   DragOverlay,
   PointerSensor,
   useSensor,
@@ -343,6 +345,13 @@ export function Board({ onOpenDetail, onOpenCreate, onOpenPalette, onOpenStats }
     setActiveNumber(n);
   }
 
+  function stageIssues(stageId: string): Issue[] {
+    const order: number[] = workflow?.stageOrder?.[stageId] ?? [];
+    const items = sortIssues(list.filter(i=>workflow.cards[i.number]?.stageId===stageId),sortMode);
+    const rank=(n:number)=>{const index=order.indexOf(n);return index<0?Infinity:index;};
+    return items.sort((a,b)=>Number(!!b.activeRun)-Number(!!a.activeRun)||(sortMode==='manual'?rank(a.number)-rank(b.number):0));
+  }
+
   async function onDragEnd(event: DragEndEvent): Promise<void> {
     setActiveNumber(null);
     const { active, over } = event;
@@ -351,8 +360,20 @@ export function Board({ onOpenDetail, onOpenCreate, onOpenPalette, onOpenStats }
     const issueNumber = issueNumberFromDragId(active.id);
     if (issueNumber === null) return;
 
+    if(workflow && String(over.id).startsWith('priority:')) {
+      const targetNumber=Number(String(over.id).slice(9));
+      const stage=workflow.cards[issueNumber]?.stageId;
+      if(!stage || workflow.cards[targetNumber]?.stageId!==stage){setMoveError('To change stages, drop on the stage background.');return;}
+      const target=list.find(i=>i.number===targetNumber);
+      const waiting=stageIssues(stage).filter(i=>!i.activeRun && i.number!==issueNumber);
+      const below=(active.rect.current.translated?.top??0)+(active.rect.current.translated?.height??0)/2>over.rect.top+over.rect.height/2;
+      let beforeNumber:number|null=target?.activeRun?(waiting[0]?.number??null):targetNumber;
+      if(below&&!target?.activeRun){const index=waiting.findIndex(i=>i.number===targetNumber);beforeNumber=waiting[index+1]?.number??null;}
+      if(targetNumber===issueNumber)return;
+      try{await getBridge()?.coordinatorAction?.('workflow:card',{number:issueNumber,priorityStage:stage,beforeNumber,reason:'Reordered waiting work on board',evidence:'Owner-selected next-work priority'});setSortMode('manual');dispatchIssuesRefetch();setMoveError(null);}catch(e){setMoveError(String(e));}return;
+    }
     if(workflow&&String(over.id).startsWith('col:')){
-      const to=String(over.id).slice(4);if(workflow.cards[issueNumber]?.stageId===to)return;
+      const to=String(over.id).slice(4);if(workflow.cards[issueNumber]?.stageId===to){try{await getBridge()?.coordinatorAction?.('workflow:card',{number:issueNumber,priorityStage:to,beforeNumber:null,reason:'Moved to end of waiting queue',evidence:'Owner-selected next-work priority'});setSortMode('manual');dispatchIssuesRefetch();setMoveError(null);}catch(e){setMoveError(String(e));}return;}
       try{await getBridge()?.coordinatorAction?.('workflow:card',{number:issueNumber,to,reason:'Moved on board',evidence:'User-directed stage move'});setMoveError(null);}catch(e){setMoveError(String(e));setWorkflowEditor(issueNumber);}return;
     }
     const targetStatus = statusFromDropId(over.id);
@@ -619,7 +640,7 @@ export function Board({ onOpenDetail, onOpenCreate, onOpenPalette, onOpenStats }
   }
 
   return (
-    <DndContext sensors={sensors} onDragStart={onDragStart} onDragEnd={onDragEnd}>
+    <DndContext collisionDetection={args=>{const hits=pointerWithin(args);const cards=hits.filter(h=>String(h.id).startsWith('priority:'));return cards.length?cards:hits.length?hits:closestCenter(args);}} sensors={sensors} onDragStart={onDragStart} onDragEnd={onDragEnd}>
       <BoardToolbar
         crumbs={
           <>
@@ -695,7 +716,7 @@ export function Board({ onOpenDetail, onOpenCreate, onOpenPalette, onOpenStats }
             columnKey={col.key}
             status={col.status}
             label={col.label}
-            issues={(workflow?sortIssues(list.filter(i=>workflow.cards[i.number]?.stageId===col.key),sortMode):col.key === null ? grouped.untagged : grouped.byKey[col.key as StatusKey]).filter(i=>!relatedOnly||(i.subIssueCount??0)>0)}
+            issues={(workflow?stageIssues(col.key!):col.key === null ? grouped.untagged : grouped.byKey[col.key as StatusKey]).filter(i=>!relatedOnly||(i.subIssueCount??0)>0)}
             {...(workflow?{purpose:col.purpose,workflowCards:workflow.cards,onWorkflowCard:setWorkflowEditor}:{})}
             selectedNumber={selectedNumber}
             multiSelected={cardSelection.selected}

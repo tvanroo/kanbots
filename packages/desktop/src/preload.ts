@@ -1,3 +1,4 @@
+/// <reference lib="dom" />
 import { contextBridge, ipcRenderer, type IpcRendererEvent } from 'electron';
 import type { ChannelArgs, ChannelName, ChannelResult } from '@kanborg/api';
 import type {
@@ -338,3 +339,31 @@ const api: KanBorgBridge = {
 };
 
 contextBridge.exposeInMainWorld('kanbots', api);
+
+// Capture only timing, never DOM content, selectors, prompts or keystrokes.
+window.addEventListener('DOMContentLoaded', () => {
+  const maxima = new Map<string, number>();
+  const record = (name: string, ms: number) => {
+    if (!document.hidden && Number.isFinite(ms) && ms >= 0 && ms <= 60000)
+      maxima.set(name, Math.max(maxima.get(name) ?? 0, ms));
+  };
+  for (const [type, name] of [['longtask', 'renderer-long-task'], ['event', 'renderer-input-delay']]) {
+    try {
+      const observer = new PerformanceObserver(list => {
+        for (const entry of list.getEntries()) record(name!, entry.duration);
+      });
+      observer.observe({ type: type!, buffered: false });
+      window.addEventListener('unload', () => observer.disconnect(), { once: true });
+    } catch { /* Some Electron versions do not expose event timing. */ }
+  }
+  let previous = performance.now();
+  const pulse = setInterval(() => {
+    const now = performance.now(); record('renderer-timer-delay', Math.max(0, now - previous - 1000)); previous = now;
+  }, 1000);
+  document.addEventListener('visibilitychange', () => { previous = performance.now(); maxima.clear(); });
+  const flush = setInterval(() => {
+    if (!document.hidden && maxima.size) ipcRenderer.send('kanborg:performance', [...maxima].map(([name, ms]) => ({ name, ms })));
+    maxima.clear();
+  }, 10000);
+  window.addEventListener('unload', () => { clearInterval(pulse); clearInterval(flush); }, { once: true });
+});

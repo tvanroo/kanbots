@@ -1,5 +1,5 @@
 import { useDroppable } from '@dnd-kit/core';
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import type { Issue, StatusKey } from '../types.js';
 import { Card, type CardSelectModifiers } from './Card.js';
 import { ageString } from '../labels.js';
@@ -137,9 +137,10 @@ export function Column({
                   }
                 : null;
             return (
-              <article key={issue.number} className="kb-task-tile">
+              <DropCard key={issue.number} number={issue.number}>
                 <Card
                   issue={issue}
+                  draggable={!issue.activeRun}
                   selected={selectedNumber === issue.number}
                   multiSelected={multiSelected?.has(issue.number) ?? false}
                   liveTool={live}
@@ -161,7 +162,7 @@ export function Column({
                     </details>
                   </div>;
                 })() : null}
-              </article>
+              </DropCard>
             );
           })
         )}
@@ -257,4 +258,9 @@ function useElapsedSeconds(startedAt: string | null): number | null {
   const start = Date.parse(startedAt);
   if (Number.isNaN(start)) return null;
   return Math.max(0, Math.floor((now - start) / 1000));
+}
+
+function DropCard({number,children}:{number:number;children:ReactNode}) {
+ const {setNodeRef,isOver}=useDroppable({id:`priority:${number}`});
+ return <article ref={setNodeRef} className="kb-task-tile" style={isOver?{outline:'2px solid var(--accent)',outlineOffset:2}:undefined}>{children}</article>;
 }
