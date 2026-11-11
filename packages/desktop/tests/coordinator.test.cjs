@@ -81,9 +81,47 @@ test('Stop now records interrupted recovery state rather than completion',async(
 test('coordinator messages queue while busy, support edits and deliver once after the turn',async()=>{const f=fixture();try{await control(f);let working=true;const sent=[];f.handlers['chat:get']=async()=>({activeRun:working?{id:99}:null,messages:[],events:[]});f.handlers['chat:post-message']=async a=>{sent.push(a.body);return {};};await f.svc.uiAction('chat-submit',{id:'message-1',body:'First draft'});await f.svc.uiAction('chat-submit',{id:'message-1',body:'Duplicate click'});await f.svc.tick();assert.equal(sent.length,0);assert.equal(f.svc.ui().workspace.chatOutbox.length,1);await f.svc.uiAction('chat-edit-queued',{id:'message-1',body:'Revised direction'});working=false;await f.svc.tick();await f.svc.tick();assert.deepEqual(sent,['Revised direction']);assert.equal(f.svc.ui().workspace.chatOutbox[0].state,'sent');}finally{f.cleanup();}});
 test('steering stops only the coordinator and precedes queued follow-ups',async()=>{const f=fixture();try{await control(f);f.runs.set(99,{id:99,status:'running'});f.runs.set(88,{id:88,status:'running'});f.handlers['chat:get']=async()=>({activeRun:f.runs.get(99).status==='running'?{id:99}:null});const sent=[];f.handlers['chat:post-message']=async a=>{sent.push(a.body);return {};};await f.svc.uiAction('chat-submit',{id:'later',body:'Later'});await f.svc.uiAction('chat-submit',{id:'steer',body:'Change direction',steer:true});assert.equal(f.runs.get(99).status,'stopped');assert.equal(f.runs.get(88).status,'running');await f.svc.tick();assert.match(sent[0],/Change direction/);assert.equal(f.svc.ui().workspace.chatOutbox.find(m=>m.id==='later').state,'queued');await f.svc.uiAction('chat-cancel-queued',{id:'later'});assert.equal(f.svc.ui().workspace.chatOutbox.length,1);}finally{f.cleanup();}});
 
-test('questions retain full context and origin; explanations stay pending and free text resolves only after delivery',async()=>{const f=fixture();try{await control(f);const card={id:501,type:'decision',status:'pending',payload:{question:'Which migration path should we use?',options:[{value:'safe',label:'Stage the migration'}]}};f.runs.set(77,{id:77,threadId:22,status:'awaiting_input',worktreePath:f.root});f.svc.context.store.cards={listAllPending:()=>card.status==='pending'?[{card,agentRunId:77}]:[],findById:()=>card,resolve:()=>{card.status='resolved';}};const prompts=[];f.svc.context.supervisor.resume=async a=>{prompts.push(a);return f.runs.get(a.runId);};let questions=await f.svc.uiAction('questions-list');assert.equal(questions[0].threadId,22);await f.svc.uiAction('question-reply',{id:501,explain:true});assert.equal(card.status,'pending');assert.equal((await f.svc.uiAction('questions-list')).length,1);assert.match(prompts[0].prompt,/Do not treat this as an answer/);assert.equal(prompts[0].runId,77);await f.svc.uiAction('question-reply',{id:501,reply:'Use a staged migration after the backup'});assert.match(prompts[1].prompt,/Which migration path/);assert.match(prompts[1].prompt,/after the backup/);assert.equal(card.status,'resolved');assert.equal((await f.svc.uiAction('questions-list')).length,0);await assert.rejects(f.svc.uiAction('question-reply',{id:501,reply:'Again'}),/no longer/);}finally{f.cleanup();}});
+test('question replies and explanations persist in current coordinator inbox without resuming origin', async()=>{
+ const f=fixture();try{
+  const c=await control(f);
+  const card={id:501,type:'decision',status:'pending',payload:{question:'Which migration path?',options:[{value:'safe',label:'Stage it'}]}};
+  f.runs.set(77,{id:77,threadId:22,status:'running',worktreePath:f.root});
+  f.svc.context.store.cards={listAllPending:()=>card.status==='pending'?[{card,agentRunId:77}]:[],findById:()=>card,resolve:()=>{card.status='resolved';}};
+  const [question]=await f.svc.uiAction('questions-list');
+  assert.equal(question.busy,false);assert.equal(question.originBusy,true);
+  const explanation=await f.svc.uiAction('question-reply',{id:501,explain:true});
+  assert.equal((await f.svc.uiAction('question-reply',{id:501,explain:true})).requestId,explanation.requestId);
+  const pending=(await f.svc.uiAction('questions-list'))[0];assert.equal(pending.explanationPending,true);
+  assert.equal(card.status,'pending');
+  await write(f,c,'recordUserQuestionExplanation',{id:501,explanation:'Staging preserves the rollback option.'});
+  assert.equal((await f.svc.uiAction('questions-list'))[0].explanation,'Staging preserves the rollback option.');
+  const receipt=await f.svc.uiAction('question-reply',{id:501,reply:'Stage it after backup'});
+  const request=f.svc.ui().workspace.requests.find(r=>r.id===receipt.requestId);
+  assert.match(request.prompt,/thread 22, run 77/);assert.match(request.prompt,/after backup/);
+  assert.equal(request.state,'queued');assert.equal(f.resumes.length,0);assert.equal(f.runs.get(77).status,'running');
+  assert.equal(card.status,'resolved');assert.deepEqual(await f.svc.uiAction('questions-list'),[]);
+  assert.deepEqual(await f.svc.uiAction('question-reply',{id:501,reply:'Stage it after backup'}),receipt);
+  await assert.rejects(f.svc.uiAction('question-reply',{id:501,reply:'Different answer'}),/no longer/);
+ }finally{f.cleanup();}
+});
 
-test('failed question delivery retains the unanswered question',async()=>{const f=fixture();try{await control(f);const card={id:502,type:'decision',status:'pending',payload:{question:'Proceed?',options:[]}};f.runs.set(78,{id:78,threadId:23,status:'awaiting_input',worktreePath:f.root});f.svc.context.store.cards={listAllPending:()=>[{card,agentRunId:78}],findById:()=>card,resolve:()=>{throw Error('must not resolve');}};await f.svc.uiAction('questions-list');f.svc.context.supervisor.resume=async()=>{throw Error('provider unavailable');};await assert.rejects(f.svc.uiAction('question-reply',{id:502,reply:'Proceed'}),/provider unavailable/);assert.equal((await f.svc.uiAction('questions-list'))[0].state,'pending');assert.equal(card.status,'pending');}finally{f.cleanup();}});
+test('unavailable coordinator retains durable answer and records delivery blocker without stopping origin',async()=>{
+ const f=fixture();try{
+  await control(f);
+  const card={id:502,type:'decision',status:'pending',payload:{question:'Proceed?',options:[]}};
+  f.runs.set(78,{id:78,threadId:23,status:'running',worktreePath:f.root});
+  f.svc.context.store.cards={listAllPending:()=>card.status==='pending'?[{card,agentRunId:78}]:[],findById:()=>card,resolve:()=>{card.status='resolved';}};
+  await f.svc.uiAction('questions-list');
+  const receipt=await f.svc.uiAction('question-reply',{id:502,reply:'Proceed'});
+  f.handlers['chat:post-message']=async()=>({dispatchError:'provider unavailable'});
+  await f.svc.tick();await f.svc.tick();
+  const requests=f.svc.ui().workspace.requests;
+  assert.equal(requests.find(r=>r.id===receipt.requestId).error,'provider unavailable');
+  assert.equal(requests.find(r=>r.id===receipt.requestId).state,'queued');
+  assert.equal(f.resumes.length,0);assert.equal(f.runs.get(78).status,'running');
+  assert.equal(f.reload().ui().workspace.requests.find(r=>r.id===receipt.requestId).state,'queued');
+ }finally{f.cleanup();}
+});
 
 test('built-in handoff waits for busy turn then delivers wrap-up directly once',async()=>{const f=fixture();try{const c=await control(f);let busy=true;const messages=[];f.handlers['chat:get']=async()=>({activeRun:busy?{id:99}:null});f.handlers['chat:post-message']=async a=>{messages.push(a.body);busy=true;return {activeRun:{id:100}};};const next=await f.svc.uiAction('add-client',{name:'Codex'});await f.svc.uiAction('approve-client',{id:next.id});await f.svc.uiAction('request-handoff',{mode:'external',clientId:next.id});assert.equal(messages.length,0);assert.equal(f.svc.ui().workspace.handoff.delivery,'waiting');busy=false;await f.svc.tick();assert.equal(messages.length,1);assert.match(messages[0],/completeHandoff with handoffId/);assert.equal(f.svc.ui().workspace.handoff.delivery,'sent');await f.svc.tick();assert.equal(messages.length,1);const h=f.svc.ui().workspace.handoff;await write(f,c,'completeHandoff',{handoffId:h.id,summary:'Existing workers continue; review their evidence.'});assert.equal(f.svc.ui().workspace.handoff.state,'ready');assert.equal(f.svc.ui().workspace.controller,c.actor);}finally{f.cleanup();}});
 
@@ -229,42 +267,38 @@ test('stale question records cannot hide actionable questions or accept another 
  }
 });
 
-test('slow delivery blocks only its originating thread, and failure allows retry', async () => {
- const f = fixture();
- let release;
- try {
-  const cards = [611, 612, 613].map(id => ({
-   id, type:'decision', status:'pending', payload:{question:`Question ${id}?`,options:[]},
-  }));
-  for (const card of cards) f.runs.set(card.id, {
-   id:card.id,threadId:card.id===612?612:611,status:'awaiting_input',worktreePath:f.root,
-  });
-  f.svc.context.store.cards = {
-   listAllPending:()=>cards.filter(card=>card.status==='pending').map(card=>({card,agentRunId:card.id})),
-   findById:id=>cards.find(card=>card.id===id),
-   resolve:id=>{cards.find(card=>card.id===id).status='resolved';},
-  };
-  f.svc.context.supervisor.resume = async ({runId}) => {
-   if(runId===611) await new Promise((_,reject)=>{release=()=>reject(Error('Delivery failed'));});
-   return f.runs.get(runId);
-  };
+test('six consecutive answers from the same busy thread save once each and survive restart',async()=>{
+ const f=fixture();try{
+  await control(f);
+  const cards=Array.from({length:6},(_,i)=>({id:611+i,type:'decision',status:'pending',payload:{question:`Question ${i}`,options:[]}}));
+  f.runs.set(611,{id:611,threadId:611,status:'running',worktreePath:f.root});
+  f.svc.context.store.cards={listAllPending:()=>cards.filter(card=>card.status==='pending').map(card=>({card,agentRunId:611})),findById:id=>cards.find(card=>card.id===id),resolve:id=>{cards.find(card=>card.id===id).status='resolved';}};
   await f.svc.uiAction('questions-list');
-  const first = assert.rejects(f.svc.uiAction('question-reply',{id:611,reply:'First'}),/Delivery failed/);
-  const rows = await f.svc.uiAction('questions-list');
-  assert.equal(rows.find(q=>q.id===611).state,'sending');
-  assert.equal(rows.find(q=>q.id===613).busy,true);
-  await assert.rejects(f.svc.uiAction('question-reply',{id:613,reply:'Same thread'}),/already being sent/);
-  await f.svc.uiAction('question-reply',{id:612,reply:'Other thread'});
-  assert.equal(cards[1].status,'resolved');
-  release();
-  await first;
-  assert.equal((await f.svc.uiAction('questions-list')).find(q=>q.id===611).state,'pending');
-  f.svc.context.supervisor.resume = async ({runId})=>f.runs.get(runId);
-  await f.svc.uiAction('question-reply',{id:611,reply:'Retry'});
-  assert.equal(cards[0].status,'resolved');
- } finally {
-  f.cleanup();
- }
+  for(const card of cards){
+   const receipt=await f.svc.uiAction('question-reply',{id:card.id,reply:`Answer ${card.id}`});
+   assert.equal(receipt.queued,true);
+   assert.deepEqual(await f.svc.uiAction('question-reply',{id:card.id,reply:`Answer ${card.id}`}),receipt);
+  }
+  const restored=f.reload();
+  assert.deepEqual(await restored.uiAction('questions-list'),[]);
+  assert.equal(restored.ui().workspace.requests.filter(r=>r.id.startsWith('question-answer:')).length,6);
+  assert.equal(f.resumes.length,0);assert.equal(f.runs.get(611).status,'running');
+ }finally{f.cleanup();}
+});
+
+test('coordinator closes answered-elsewhere busy questions without stopping release worker and stale decisions disappear',async()=>{
+ const f=fixture();try{
+  const c=await control(f);const card={id:630,type:'decision',status:'pending',payload:{question:'Old release question?',options:[]}};
+  f.runs.set(67,{id:67,threadId:43,status:'running',worktreePath:f.root});
+  f.svc.context.store.cards={listAllPending:()=>card.status==='pending'?[{card,agentRunId:67}]:[],findById:()=>card,resolve:()=>{card.status='resolved';}};
+  await f.svc.uiAction('questions-list');
+  await write(f,c,'closeUserQuestion',{id:630,reason:'Already answered in owner chat, release run continues.'});
+  assert.deepEqual(await f.svc.uiAction('questions-list'),[]);assert.equal(f.runs.get(67).status,'running');assert.equal(f.resumes.length,0);
+  const w=f.svc.state.workspaces[0];w.decisions.push({id:'old',cardId:2,value:'reconfigure',state:'pending'});
+  const decisions=await f.svc.call(c.actor,c.id,'listDecisions',{workspaceId:c.id});
+  assert.deepEqual(decisions.proposed,[]);assert.equal(w.decisions[0].state,'superseded');
+  await assert.rejects(f.svc.call('other',c.id,'closeUserQuestion',{workspaceId:c.id,revision:w.revision,requestId:'close-test',id:630,reason:'No control'}),/controlled elsewhere/);
+ }finally{f.cleanup();}
 });
 
 test('successful follow-up clears worker recovery waiting only after resume and on every continuation', async () => {
@@ -353,7 +387,7 @@ test('delivered answer survives card resolution failure and restart without rese
    resolve:()=>{if(fail)throw Error('Card write failed');card.status='resolved';},
   };
   await f.svc.uiAction('questions-list');
-  assert.deepEqual(await f.svc.uiAction('question-reply',{id:620,reply:'Proceed within scope'}),{ok:true});
+  assert.equal((await f.svc.uiAction('question-reply',{id:620,reply:'Proceed within scope'})).queued,true);
   const saved=JSON.parse(fs.readFileSync(path.join(f.root,'coordinators.json'),'utf8'));
   assert.equal(saved.workspaces[0].questions[0].state,'answered');
   assert.equal(saved.workspaces[0].questions[0].reply,'Proceed within scope');
@@ -361,7 +395,8 @@ test('delivered answer survives card resolution failure and restart without rese
   const restored=f.reload();
   assert.deepEqual(await restored.uiAction('questions-list'),[]);
   assert.equal(card.status,'resolved');
-  assert.equal(f.resumes.length,1);
+  assert.equal(f.resumes.length,0);
+  assert.equal(restored.ui().workspace.requests.filter(r=>r.id==='question-answer:620').length,1);
   await assert.rejects(restored.uiAction('question-reply',{id:620,reply:'Again'}),/no longer/);
  }finally{f.cleanup();}
 });

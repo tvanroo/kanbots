@@ -11,6 +11,8 @@ type Question = {
   state: string;
   busy: boolean;
   explanation?: string;
+  explanationPending?: boolean;
+  originBusy?: boolean;
 };
 
 function errorMessage(error: unknown) {
@@ -22,10 +24,11 @@ export function QuestionsQueue({ inline = false }: { inline?: boolean }) {
   const [open, setOpen] = useState(inline);
   const [drafts, setDrafts] = useState<Record<number, string>>({});
   const [errors, setErrors] = useState<Record<number, string>>({});
+  const [receipt, setReceipt] = useState('');
   const [refreshError, setRefreshError] = useState('');
   const [refreshing, setRefreshing] = useState(false);
   const [sending, setSending] = useState<Record<number, 'sending' | 'slow'>>({});
-  const sendingThreads = useRef(new Map<number, { questionId: number }>());
+  const sendingQuestions = useRef(new Map<number, { questionId: number }>());
   const refreshSequence = useRef(0);
   const refreshPending = useRef(false);
   const action = getBridge()?.coordinatorAction;
@@ -45,14 +48,14 @@ export function QuestionsQueue({ inline = false }: { inline?: boolean }) {
       ]);
       if (sequence !== refreshSequence.current) return;
       const questions: Question[] = rows ?? [];
-      for (const [threadId, delivery] of sendingThreads.current) {
-        if (questions.some(question => question.id === delivery.questionId)) continue;
+      for (const [questionId, delivery] of sendingQuestions.current) {
+        if (questions.some(question => question.id === delivery.questionId && !question.explanationPending)) continue;
         // Authoritative refresh confirms this question has left the queue.
         // Release a lost IPC wait without replaying the answer.
-        sendingThreads.current.delete(threadId);
+        sendingQuestions.current.delete(questionId);
         setSending(current => {
           const next = { ...current };
-          delete next[threadId];
+          delete next[questionId];
           return next;
         });
       }
@@ -81,20 +84,27 @@ export function QuestionsQueue({ inline = false }: { inline?: boolean }) {
   }, [action, refresh]);
 
   async function respond(question: Question, reply?: string, explain = false) {
-    const { id, threadId } = question;
-    if (!action || question.busy || question.state !== 'pending' || sendingThreads.current.has(threadId)) return;
+    const { id } = question;
+    if (!action || question.state !== 'pending' || sendingQuestions.current.has(id)) return;
     if (!explain && !reply?.trim()) return;
     const delivery = { questionId: id };
-    sendingThreads.current.set(threadId, delivery);
-    setSending(current => ({ ...current, [threadId]: 'sending' }));
+    sendingQuestions.current.set(id, delivery);
+    setSending(current => ({ ...current, [id]: 'sending' }));
     setErrors(current => ({ ...current, [id]: '' }));
     const timer = setTimeout(() => {
-      if (sendingThreads.current.get(threadId) === delivery) {
-        setSending(current => ({ ...current, [threadId]: 'slow' }));
+      if (sendingQuestions.current.get(id) === delivery) {
+        setSending(current => ({ ...current, [id]: 'slow' }));
       }
     }, 8000);
+    let responseTimer: ReturnType<typeof setTimeout> | undefined;
     try {
-      await action('question-reply', { id, reply, explain });
+      await Promise.race([
+        action('question-reply', { id, reply, explain }),
+        new Promise<never>((_, reject) => {
+          responseTimer = setTimeout(() => reject(new Error('The save confirmation did not arrive. Refresh questions to check. Retrying the same answer is safe.')), 8000);
+        }),
+      ]);
+      setReceipt(explain ? 'Explanation requested from your coordinator. You can keep answering questions.' : 'Answer saved and queued for your coordinator.');
       if (!explain) {
         setItems(current => current.filter(item => item.id !== id));
         setDrafts(current => {
@@ -104,16 +114,17 @@ export function QuestionsQueue({ inline = false }: { inline?: boolean }) {
         });
       }
     } catch (error) {
-      if (sendingThreads.current.get(threadId) === delivery) {
+      if (sendingQuestions.current.get(id) === delivery) {
         setErrors(current => ({ ...current, [id]: errorMessage(error) }));
       }
     } finally {
       clearTimeout(timer);
-      if (sendingThreads.current.get(threadId) === delivery) {
-        sendingThreads.current.delete(threadId);
+      clearTimeout(responseTimer);
+      if (sendingQuestions.current.get(id) === delivery) {
+        sendingQuestions.current.delete(id);
         setSending(current => {
           const next = { ...current };
-          delete next[threadId];
+          delete next[id];
           return next;
         });
       }
@@ -137,25 +148,26 @@ export function QuestionsQueue({ inline = false }: { inline?: boolean }) {
           {!inline && <button className="kb-btn ghost" onClick={() => setOpen(false)}>Close</button>}
         </div>
       </header>
-      <p>Answers return to the thread that asked. Questions stay here until answered.</p>
+      <p>Answers are saved for your current coordinator, with the original question and thread attached. You can reply while workers are busy.</p>
+      {receipt && <p role="status">{receipt}</p>}
       {refreshError && <p role="alert">Couldn’t refresh questions. {refreshError}</p>}
       {!items.length && !refreshError && <p>{refreshing ? 'Checking for questions…' : 'No unanswered questions.'}</p>}
       {items.map(question => {
         const { id, threadId } = question;
-        const submitting = sending[threadId];
-        const disabled = Boolean(submitting) || question.busy || question.state !== 'pending';
+        const submitting = sending[id];
+        const disabled = Boolean(submitting) || question.state !== 'pending';
         const status = submitting === 'slow'
-          ? 'This response is taking longer than usual. You can refresh or answer questions from other threads.'
+          ? 'Checking whether your response was saved. Refresh questions to recover; other questions remain available.'
           : submitting || question.state === 'sending'
             ? 'Sending a response to this thread…'
-            : question.busy ? 'This thread is responding…' : null;
+            : question.explanationPending ? 'Your coordinator is preparing an explanation. You can still answer below.' : question.originBusy ? 'The original worker is busy. Your answer will be saved for your coordinator.' : null;
         return <article key={id}>
           <small>Thread {threadId} · Run {question.runId}</small>
           <h4>{question.question}</h4>
           <div className="kb-coordinator-actions">
             {question.options.map(option => <button className="kb-btn" key={option.value} disabled={disabled}
               onClick={() => void respond(question, option.label)}>{option.label}</button>)}
-            <button className="kb-btn ghost" disabled={disabled}
+            <button className="kb-btn ghost" disabled={disabled || question.explanationPending}
               onClick={() => void respond(question, undefined, true)}>Tell me more</button>
           </div>
           {status && <p role="status">{status}</p>}

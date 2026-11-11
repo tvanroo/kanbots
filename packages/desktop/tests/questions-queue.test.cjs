@@ -62,6 +62,20 @@ test('authoritative refresh unlocks a lost reply receipt without replay or stale
   rows=[];
   pending[1]();await flush();
   assert.deepEqual(calls,[1,2]);
+  // The original worker can be busy, and several unanswered cards can share
+  // its thread. A pending save must disable only its own question.
+  rows=Array.from({length:6},(_,i)=>({...question(i+3),busy:true,originBusy:true}));
+  find(render(),'Refresh questions').props.onClick();await flush();
+  for(let id=3;id<=8;id++){
+   const button=find(render(),'Yes '+id);assert.equal(button.props.disabled,false);
+   button.props.onClick();await flush();
+   assert.equal(find(render(),'Yes '+id).props.disabled,true);
+   // Even a stale click handler cannot submit the same question twice.
+   button.props.onClick();await flush();
+  }
+  assert.deepEqual(calls,[1,2,3,4,5,6,7,8]);
+  rows=[];for(const resolve of pending.slice(2))resolve();await flush();
+  assert.equal(find(render(),'Yes 8'),undefined);
  }finally{
   for(const resolve of pending)resolve();
   await flush();

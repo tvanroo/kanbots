@@ -50,7 +50,7 @@ type Handoff={delivery?:'waiting'|'sending'|'sent'|'failed';deliveryError?:strin
 type CoordinatorRequest={id:string;kind:'discovery'|'resume-workflows'|'workflow-change'|'workflow-action'|'autopilot';prompt:string;state:'queued'|'received'|'completed';createdAt:string;receivedBy?:string;error?:string};
 type ScheduleReceipt={id?:string;status:'active'|'paused'|'unsupported';cadenceMinutes?:number;cursor?:number;confirmedAt:string};
 type ChatDraft={id:string;body:string;steer:boolean;state:'queued'|'sending'|'sent'|'failed';createdAt:string;error?:string};
-type UserQuestion={id:number;runId:number;threadId:number;question:string;options:Array<{value:string;label:string}>;state:string;reply?:string;responseRunId?:number;explanationAfter?:number};
+type UserQuestion={id:number;runId:number;threadId:number;question:string;options:Array<{value:string;label:string}>;state:string;reply?:string;responseRunId?:number;explanationAfter?:number;explanation?:string;explanationRequestId?:string;answerRequestId?:string;closedReason?:string};
 type Workspace={replenishment?:{requestId:string;epoch:number;lastAttemptAt:number};sharedChats?:number[];ownerActions?:Array<{id:string;action:string;target:string;reason:string;epoch:number;state:string;result?:unknown;error?:string}>;uiPreferences?:{version:number;value:Record<string,any>};personas?:PersonaLibrary;outbound?:Outbound;questions?:UserQuestion[];chatOutbox?:ChatDraft[];updateDrain?:{priorStatus:string;at:string;requestId?:string};expediting?:boolean;autopilot?:{status:string;personas:Array<{id:string;name:string;prompt:string}>;effort:string;parallelism:number;objective:string;updatedAt:string;legacyWork:unknown[]};workflow?:WorkflowState;workflowSignals?:Record<string,string>;schedules?:Record<string,ScheduleReceipt>;requests?:CoordinatorRequest[];handoff?:Handoff;queue?:Array<{autopilot?:boolean;id:string;number:number;budgetUsd:number;qa:boolean;maxReworks:number;readOnly:boolean}>;onboardedAt?:string;inventory?:Record<string,{number:number;kind:string;evidence:string;verifiedAt:string;sourceHash?:string}>;id:string;path:string;revision:number;mode:'internal'|'external'|'off';controller:string|null;leaseUntil:number;epoch:number;conversationId?:number;objective:string;summary:string;parallelism:number;qaDefault:boolean;maxReworks:number;budgetUsd:number;dependencies:Record<string,number[]>;jobs:Job[];releases:Release[];decisions:Array<{id:string;cardId:number;value:string;question?:string;label?:string;state:string}>;events:Array<{cursor:number;at:string;type:string;data:unknown}>;nextCursor:number;snapshot?:string;receipts:Record<string,{digest:string;state:string;result?:unknown;error?:string}>};
 type Registry={templates?:Record<string,{id:string;name:string;version:number;config:WorkflowConfig;updatedAt:string;actor:string}>;clients:Client[];workspaces:Workspace[]};
 export class CoordinatorService{
@@ -316,24 +316,19 @@ export class CoordinatorService{
     }
     if (action === 'questions-list') {
       const { store } = this.context!;
-      const previous = w.questions ?? [];
-      for (const question of previous) {
-        if (question.state === 'answered' && question.reply && store.cards.findById(question.id)?.status === 'pending') {
+      w.questions ??= [];
+      // Keep durable answer receipts, including when card synchronization failed.
+      // Do not restart a worker merely to reconcile its old question card.
+      for (const q of w.questions) {
+        if ((q.state === 'answered' || q.state === 'closed') && store.cards.findById(q.id)?.status === 'pending') {
           try {
-            store.cards.resolve(question.id, { value: question.reply, label: question.reply, source: 'questions-for-user' });
-          } catch { /* Delivery is already recorded. Retry card reconciliation without resending. */ }
+            store.cards.resolve(q.id, q.state === 'answered'
+              ? { value: q.reply, label: q.reply, source: 'questions-for-user' }
+              : { disposition: 'obsolete', reason: q.closedReason, source: 'coordinator-reconciliation' });
+          } catch { /* Saved receipt is authoritative; retry metadata synchronization later. */ }
         }
       }
-      const pending = store.cards.listAllPending();
-      // A worker can dismiss its run's cards on exit. Keep questions already
-      // surfaced in this queue so the owner can still answer and resume it.
-      const canReplyToCard = (id: number) => {
-        const card = store.cards.findById(id);
-        return card && card.status !== 'resolved';
-      };
-      w.questions = previous.filter(q => q.state === 'sending' || canReplyToCard(q.id));
-      const changed = w.questions.length !== previous.length;
-      for (const { card, agentRunId } of pending) {
+      for (const { card, agentRunId } of store.cards.listAllPending()) {
         const payload = card.payload as { question?: string; options?: UserQuestion['options'] };
         if (card.type !== 'decision' || !payload?.question || w.questions.some(q => q.id === card.id)) continue;
         const run = store.agentRuns.findById(agentRunId);
@@ -342,72 +337,85 @@ export class CoordinatorService{
           question: payload.question, options: payload.options ?? [], state: 'pending' });
         this.event(w, 'decision-needed', { cardId: card.id });
       }
-      if (changed) this.save();
+      for (const q of w.questions) {
+        if (q.state !== 'pending' || store.cards.findById(q.id)?.status === 'resolved') continue;
+        w.requests ??= [];
+        const id = `question:${q.id}`;
+        if (w.requests.some(r => r.id === id)) continue;
+        w.requests.push({ id, kind: 'workflow-action', state: 'queued', createdAt: new Date().toISOString(),
+          prompt: `Reconcile question ${q.id} from thread ${q.threadId}, run ${q.runId}: ${q.question}\nOptions: ${JSON.stringify(q.options)}\nPoll listUserQuestions explicitly. Handle routine choices within your authority. Owner-reserved questions remain in the app inbox. If answered elsewhere or obsolete, use closeUserQuestion with evidence; do not interrupt an active worker to dismiss old questions.` });
+        this.event(w, 'coordinator-request', { id, questionId: q.id });
+      }
       return w.questions.flatMap(q => {
-        if (q.state === 'answered' || (q.state === 'sending' && !canReplyToCard(q.id))) return [];
+        const card = store.cards.findById(q.id);
+        if (q.state === 'answered' || q.state === 'closed' || !card || card.status === 'resolved') return [];
         const run = store.agentRuns.findById(q.responseRunId ?? q.runId) ?? store.agentRuns.findById(q.runId);
         if (!run) return [];
-        const busy = w.questions!.some(other => other.id !== q.id && other.threadId === q.threadId && other.state === 'sending')
-          || (active(run.status) && run.status !== 'awaiting_input');
-        const explanation = q.explanationAfter === undefined ? '' : store.events.list(run.id)
+        const explanation = q.explanation ?? (q.explanationAfter === undefined ? '' : store.events.list(run.id)
           .filter(e => e.seq > q.explanationAfter! && e.type === 'text')
-          .map(e => (e.payload as { text?: string })?.text ?? '').join('\n').slice(-8000);
-        return [{ ...q, busy, explanation }];
+          .map(e => (e.payload as { text?: string })?.text ?? '').join('\n').slice(-8000));
+        // A running origin is informational. Answers are durably queued to the
+        // CURRENT coordinator, so worker activity must never disable the inbox.
+        return [{ ...q, busy: q.state === 'sending', originBusy: active(run.status) && run.status !== 'awaiting_input',
+          explanation, explanationPending: !!q.explanationRequestId && w.requests?.find(r => r.id === q.explanationRequestId)?.state !== 'completed' }];
       });
     }
     if (action === 'question-reply') {
-      const { store, supervisor } = this.context!;
-      const q = w.questions?.find(q => q.id === args.id && q.state === 'pending');
-      const card = q && store.cards.findById(q.id);
-      if (!q || !card || card.status === 'resolved') throw Error('This question is no longer awaiting an answer.');
-      if (w.questions?.some(other => other.threadId === q.threadId && other.state === 'sending')) {
-        throw Error('A response is already being sent to this thread.');
-      }
-      const explaining = args.explain === true;
+      const { store } = this.context!;
+      const q = w.questions?.find(q => q.id === args.id);
       const reply = String(args.reply ?? '').trim();
+      // An uncertain UI receipt may be retried safely with the same answer.
+      if (q?.state === 'answered' && q.reply === reply && args.explain !== true) {
+        return { ok: true, queued: true, requestId: q.answerRequestId };
+      }
+      const card = q && store.cards.findById(q.id);
+      if (!q || q.state !== 'pending' || !card || card.status === 'resolved') throw Error('This question is no longer awaiting an answer. Refresh questions.');
+      const explaining = args.explain === true;
       if (!explaining && (!reply || reply.length > 4000)) throw Error('Enter an answer up to 4,000 characters.');
-      const run = store.agentRuns.findById(q.responseRunId ?? q.runId) ?? this.run(q.runId);
-      if (active(run.status) && run.status !== 'awaiting_input') throw Error('This thread is still working. Wait for its explanation before replying.');
-      const prompt = explaining
-        ? `Explain this pending question and the implications and tradeoffs of each option: ${q.question}. Do not treat this as an answer, implement a choice, or create a replacement question card. Explain, then wait for the user.`
-        : `The user answered the pending question: ${q.question}\nAnswer: ${reply}\nContinue within the authorized scope.`;
-      const explanationAfter = explaining ? store.events.list(run.id).at(-1)?.seq ?? -1 : undefined;
-      q.state = 'sending';
-      try {
-        this.save();
-        const conversation = w.conversationId ? store.chatConversations.findById(w.conversationId) : null;
-        if (conversation?.threadId === q.threadId) {
-          const result = await this.uiAction('chat-send', { body: prompt });
-          if (result?.dispatchError) throw Error(result.dispatchError);
-          const response = result?.activeRun ?? result?.latestRun;
-          if (response) q.responseRunId = response.id;
-          if (explaining) q.explanationAfter = response && response.id !== run.id ? -1 : explanationAfter!;
-        } else {
-          if (run.worktreePath) await supervisor.resume({ runId: run.id, prompt });
-          else await supervisor.resumeChat({ runId: run.id, prompt });
-          if (explaining) q.explanationAfter = explanationAfter!;
-        }
-      } catch (error) {
-        q.state = 'pending';
-        this.save();
+      w.requests ??= [];
+      const existing = explaining && q.explanationRequestId ? w.requests.find(r => r.id === q.explanationRequestId && r.state !== 'completed') : undefined;
+      if (existing) return { ok: true, queued: true, requestId: existing.id };
+      const before = structuredClone(w);
+      const requestId = explaining ? `question-explanation:${q.id}:${randomUUID()}` : `question-answer:${q.id}`;
+      const prompt = `Question ${q.id}, originating thread ${q.threadId}, run ${q.runId}.\n${q.question}\nOptions: ${JSON.stringify(q.options)}\n` + (explaining
+        ? `The owner requested an explanation. Explain the implications and tradeoffs without choosing an answer. Save the explanation with recordUserQuestionExplanation (id ${q.id}) so it appears in Questions. Do not create a replacement question or interrupt an active worker.`
+        : `The owner answered: ${reply}\nThis answer is saved. Reconcile it with the originating thread using its existing work and current authority; do not duplicate workers or interrupt active work. Acknowledge this request as received before acting and completed after applying the answer or recording its blocker.`);
+      w.requests.push({ id: requestId, kind: 'workflow-action', prompt, state: 'queued', createdAt: new Date().toISOString() });
+      if (explaining) q.explanationRequestId = requestId;
+      else { q.state = 'answered'; q.reply = reply; q.answerRequestId = requestId; }
+      // One synchronous durable commit contains both the answer and its inbox
+      // request. No provider/process start is awaited by the button handler.
+      try { this.event(w, 'coordinator-request', { id: requestId, questionId: q.id, explaining }); }
+      catch (error) {
+        Object.assign(w, before);
         throw error;
       }
-      q.state = explaining ? 'pending' : 'answered';
-      if (!explaining) {
-        q.reply = reply;
-        this.save();
-        if (store.cards.findById(q.id)?.status === 'pending') {
-          try {
-            store.cards.resolve(q.id, { value: reply, label: reply, source: 'questions-for-user' });
-          } catch (error) {
-            this.event(w, 'question-card-sync-pending', {
-              id: q.id, error: clip(error instanceof Error ? error.message : 'Card synchronization failed'),
-            });
-          }
-        }
+      if (!explaining && card.status === 'pending') {
+        try { store.cards.resolve(q.id, { value: reply, label: reply, source: 'questions-for-user' }); }
+        catch (error) { this.event(w, 'question-card-sync-pending', { id: q.id, error: clip(error instanceof Error ? error.message : 'Card synchronization failed') }); }
       }
-      this.event(w, 'question-response', { id: q.id, explaining });
-      return { ok: true };
+      return { ok: true, queued: true, requestId };
+    }
+    if (action === 'question-explanation-record') {
+      const q = w.questions?.find(q => q.id === args.id && q.state === 'pending');
+      if (!q) throw Error('Question is no longer pending.');
+      const explanation = String(args.explanation ?? '').trim();
+      if (!explanation || explanation.length > 16000) throw Error('Provide an explanation up to 16,000 characters.');
+      q.explanation = explanation;
+      const request = w.requests?.find(r => r.id === q.explanationRequestId);
+      if (request) request.state = 'completed';
+      this.event(w, 'question-explained', { id: q.id });
+      return { id: q.id, explanation };
+    }
+    if (action === 'question-close') {
+      const q = w.questions?.find(q => q.id === args.id && q.state === 'pending');
+      if (!q) throw Error('Question is no longer pending.');
+      const reason = String(args.reason ?? '').trim();
+      if (!reason) throw Error('Record why the question is obsolete or already answered.');
+      q.state = 'closed'; q.closedReason = reason;
+      this.event(w, 'question-closed', { id: q.id, reason });
+      await this.uiAction('questions-list');
+      return { id: q.id, state: q.state, reason };
     }
     if(action==='chat-submit'){
       if(w.mode!=='internal')throw Error('Switch to built-in coordination to send a message here.');
@@ -605,7 +613,16 @@ Never approve your own pairing. No provider API keys are needed.\n\nClaude Deskt
       case 'getDiffSummary':{const d=await h['agent-runs:diff']({runId:a.runId});if(a.file){const f=d.files.find(f=>f.path===a.file);return {file:a.file,patch:f?.patch.slice(a.offset??0,(a.offset??0)+8000),truncated:(f?.patch.length??0)>(a.offset??0)+8000};}return {files:d.files.map(f=>({path:f.path,status:f.status}))};}
 
       case 'getCapacity':return (await collectCapacity()).snapshot;
-      case 'listDecisions':return {pending:await h['decisions:pending'](),proposed:w.decisions.filter(d=>d.state==='pending'),authority:'Active coordinator answers directly with answerDecision'};
+      case 'listDecisions': {
+        const pending = await h['decisions:pending']();
+        for (const proposal of w.decisions.filter(d => d.state === 'pending')) {
+          if (!pending.some(d => d.cardId === proposal.cardId && d.options.some(o => o.value === proposal.value))) {
+            proposal.state = 'superseded';
+            this.event(w, 'decision-proposal-superseded', { id: proposal.id, cardId: proposal.cardId });
+          }
+        }
+        return { pending, proposed: w.decisions.filter(d => d.state === 'pending'), authority: 'Active coordinator answers directly with answerDecision' };
+      }
       case 'getReleaseStatus':return w.releases;
       default:throw Error('Unsupported read');
     }

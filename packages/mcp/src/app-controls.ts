@@ -46,8 +46,10 @@ add('removeReviewComment','Remove a review comment through the app handler.','re
 add('getProviderConfiguration','Read provider configuration and connection metadata; never credentials.','providers:get',false);
 add('testProviderConnection','Test a configured provider using its stored authorization. No credentials accepted through MCP.','providers:test-connection',true,{id:{type:'string'}},['id']);
 add('listUserQuestions','Read persistent questions, their originating threads, explanations and delivery state.','@questions-list',false);
-add('replyToUserQuestion','Deliver an owner-provided free-text answer to the original waiting thread. Do not invent owner consent.','@question-reply',true,{id,reply:text},['id','reply'],true);
-add('explainUserQuestion','Ask the originating thread to explain a question and its implications without answering it.','@question-explain',true,{id},['id'],true);
+add('replyToUserQuestion','Save an owner-provided answer and queue it to the current coordinator, with originating thread/run references. Does not interrupt workers. Do not invent owner consent.','@question-reply',true,{id,reply:text},['id','reply']);
+add('explainUserQuestion','Ask the current coordinator to explain a question in the app without answering or interrupting its originating worker.','@question-explain',true,{id},['id']);
+add('recordUserQuestionExplanation','Save the coordinator explanation in the persistent Questions inbox. Does not choose an answer.','@question-explanation-record',true,{id,explanation:text},['id','explanation']);
+add('closeUserQuestion','Close an obsolete or already-answered question with evidence in the reason. Metadata only: never stops or resumes its worker.','@question-close',true,{id,reason:text},['id','reason']);
 add('getCoordinatorChat','Read the built-in coordinator conversation and its queued messages.','@chat-get',false);
 add('queueCoordinatorMessage','Queue a message in the built-in coordinator thread. Steer interrupts only that coordinator, preserving workers.','@chat-submit',true,{id:text,body:text,steer:flag},['body'],true);
 add('editQueuedCoordinatorMessage','Edit a message that has not started delivery.','@chat-edit-queued',true,{id:text,body:text},['id','body']);
