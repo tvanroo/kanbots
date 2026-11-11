@@ -382,7 +382,10 @@ export class CoordinatorService{
         : `The owner answered: ${reply}\nThis answer is saved. Reconcile it with the originating thread using its existing work and current authority; do not duplicate workers or interrupt active work. Acknowledge this request as received before acting and completed after applying the answer or recording its blocker.`);
       w.requests.push({ id: requestId, kind: 'workflow-action', prompt, state: 'queued', createdAt: new Date().toISOString() });
       if (explaining) q.explanationRequestId = requestId;
-      else { q.state = 'answered'; q.reply = reply; q.answerRequestId = requestId; }
+      else {
+        q.state = 'answered'; q.reply = reply; q.answerRequestId = requestId;
+        for (const notice of w.requests.filter(r => r.id === `question:${q.id}` || r.id === q.explanationRequestId)) notice.state = 'completed';
+      }
       // One synchronous durable commit contains both the answer and its inbox
       // request. No provider/process start is awaited by the button handler.
       try { this.event(w, 'coordinator-request', { id: requestId, questionId: q.id, explaining }); }
@@ -413,6 +416,7 @@ export class CoordinatorService{
       const reason = String(args.reason ?? '').trim();
       if (!reason) throw Error('Record why the question is obsolete or already answered.');
       q.state = 'closed'; q.closedReason = reason;
+      for (const notice of w.requests?.filter(r => r.id === `question:${q.id}` || r.id === q.explanationRequestId) ?? []) notice.state = 'completed';
       this.event(w, 'question-closed', { id: q.id, reason });
       await this.uiAction('questions-list');
       return { id: q.id, state: q.state, reason };
@@ -868,7 +872,7 @@ Never approve your own pairing. No provider API keys are needed.\n\nClaude Deskt
       const message=w.chatOutbox?.find(m=>m.state==='queued');
       if(message){const chat=await this.h()['chat:get']({conversationId:w.conversationId});if(!chat.activeRun){message.state='sending';this.save();try{const result=await this.uiAction('chat-send',{body:(message.steer?'Steering update from the user. Follow this direction using existing work and evidence; do not duplicate worker assignments.\n\n':'')+message.body});if(result?.dispatchError)throw Error(result.dispatchError);message.state='sent';this.event(w,'chat-message-sent',{id:message.id});}catch(e){message.state='failed';message.error=clip(e instanceof Error?e.message:'Delivery failed');this.event(w,'chat-message-failed',{id:message.id,error:message.error});}return;}}
     }
-    if(w.mode==='internal'&&w.conversationId&&(!w.handoff||w.handoff.state==='completed')){const pending=w.requests?.find(r=>r.state==='queued'&&!r.error);if(pending){const chat=await this.h()['chat:get']({conversationId:w.conversationId});if(!chat.activeRun){pending.state='received';pending.receivedBy=w.controller!;this.save();try{const result=await this.uiAction('chat-send',{body:pending.prompt});if(result?.dispatchError)throw Error(result.dispatchError);this.event(w,'coordinator-request-received',{id:pending.id});}catch(e){pending.state='queued';delete pending.receivedBy;pending.error=clip(e instanceof Error?e.message:'Could not start request');this.event(w,'coordinator-request-blocked',{id:pending.id,error:pending.error});}}}}
+    if(w.mode==='internal'&&w.conversationId&&(!w.handoff||w.handoff.state==='completed')){const pending=w.requests?.find(r=>r.state==='queued'&&!r.error);if(pending){const chat=await this.h()['chat:get']({conversationId:w.conversationId});if(!chat.activeRun||chat.activeRun.status==='awaiting_input'){pending.state='received';pending.receivedBy=w.controller!;this.save();try{const result=await this.uiAction('chat-send',{body:pending.prompt});if(result?.dispatchError)throw Error(result.dispatchError);this.event(w,'coordinator-request-received',{id:pending.id});}catch(e){pending.state='queued';delete pending.receivedBy;pending.error=clip(e instanceof Error?e.message:'Could not start request');this.event(w,'coordinator-request-blocked',{id:pending.id,error:pending.error});}}}}
     for(const q of [...(w.handoff&&w.handoff.state!=='completed'?[]:w.queue??[])]){
       if(w.mode==='off'||(q.autopilot&&w.autopilot?.status!=='active')||w.updateDrain)continue;
       const slots=w.jobs.filter(j=>active(this.run(j.runId).status)||(j.reviewRunId&&active(this.run(j.reviewRunId).status))).length;

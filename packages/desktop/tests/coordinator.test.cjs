@@ -114,7 +114,7 @@ test('unavailable coordinator retains durable answer and records delivery blocke
   await f.svc.uiAction('questions-list');
   const receipt=await f.svc.uiAction('question-reply',{id:502,reply:'Proceed'});
   f.handlers['chat:post-message']=async()=>({dispatchError:'provider unavailable'});
-  await f.svc.tick();await f.svc.tick();
+  await f.svc.tick();
   const requests=f.svc.ui().workspace.requests;
   assert.equal(requests.find(r=>r.id===receipt.requestId).error,'provider unavailable');
   assert.equal(requests.find(r=>r.id===receipt.requestId).state,'queued');
@@ -530,5 +530,41 @@ test('completed demoted discovery does not restart its inherited automatic QA pi
   assert.equal(f.checks.length,0);
   assert.equal(f.starts,1);
   assert.equal(f.resumes.length,1);
+ }finally{f.cleanup();}
+});
+
+test('built-in coordinator awaiting user input receives the saved answer once rather than deadlocking',async()=>{
+ const f=fixture();try{
+  await control(f);
+  const card={id:650,type:'decision',status:'pending',payload:{question:'Choose the next phase',options:[]}};
+  f.runs.set(650,{id:650,threadId:1,status:'awaiting_input'});
+  f.svc.context.store.cards={listAllPending:()=>card.status==='pending'?[{card,agentRunId:650}]:[],findById:()=>card,resolve:()=>{card.status='resolved';}};
+  let busy=false;const delivered=[];
+  f.handlers['chat:get']=async()=>({activeRun:{id:650,status:busy?'running':'awaiting_input'}});
+  f.handlers['chat:post-message']=async a=>{delivered.push(a.body);busy=true;return {activeRun:{id:650,status:'running'}};};
+  await f.svc.uiAction('questions-list');
+  await f.svc.uiAction('question-reply',{id:650,explain:true});
+  const receipt=await f.svc.uiAction('question-reply',{id:650,reply:'Continue to review'});
+  await f.svc.tick();await f.svc.tick();
+  assert.equal(delivered.length,1);assert.match(delivered[0],/owner answered: Continue to review/);
+  assert.equal(f.svc.ui().workspace.requests.find(r=>r.id===receipt.requestId).state,'received');
+  assert.equal(f.svc.ui().workspace.requests.find(r=>r.id==='question:650').state,'completed');
+  assert.equal(f.resumes.length,0);
+ }finally{f.cleanup();}
+});
+
+test('question save failure leaves no successful receipt or orphaned answer request',async()=>{
+ const f=fixture();try{
+  await control(f);const card={id:651,type:'decision',status:'pending',payload:{question:'Save safely?',options:[]}};
+  f.runs.set(651,{id:651,threadId:651,status:'running',worktreePath:f.root});
+  f.svc.context.store.cards={listAllPending:()=>card.status==='pending'?[{card,agentRunId:651}]:[],findById:()=>card,resolve:()=>{card.status='resolved';}};
+  await f.svc.uiAction('questions-list');
+  const save=f.svc.save;f.svc.save=()=>{throw Error('Disk unavailable');};
+  await assert.rejects(f.svc.uiAction('question-reply',{id:651,reply:'Yes'}),/Disk unavailable/);
+  f.svc.save=save;
+  assert.equal((await f.svc.uiAction('questions-list'))[0].state,'pending');assert.equal(card.status,'pending');
+  assert.equal(f.svc.ui().workspace.requests.filter(r=>r.id==='question-answer:651').length,0);
+  const receipt=await f.svc.uiAction('question-reply',{id:651,reply:'Yes'});
+  assert.equal(receipt.queued,true);assert.equal(f.svc.ui().workspace.requests.filter(r=>r.id===receipt.requestId).length,1);
  }finally{f.cleanup();}
 });
