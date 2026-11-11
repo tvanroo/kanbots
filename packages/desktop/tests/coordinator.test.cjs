@@ -603,3 +603,29 @@ test('invalid external wait metadata does not invent a next trigger or bypass ch
   }
  }finally{fs.rmSync(root,{recursive:true,force:true});fs.rmSync(dir,{recursive:true,force:true});}
 });
+
+test('independent reviewer external wait never triggers implementation rework and resumes same reviewer after trigger',async()=>{
+ const f=fixture();try{
+  const c=await control(f);await write(f,c,'dispatchTask',{number:1,qa:true});
+  f.runs.get(1).status='complete';await f.svc.tick();f.checks[0].status='pass';
+  // Keep reviewer alive until its explicit checkpoint is saved.
+  const start=f.svc.context.supervisor.start;
+  f.svc.context.supervisor.start=async a=>{const run=await start(a);run.status='running';return run;};
+  await f.svc.tick();const job=f.svc.ui().jobs[0];assert.equal(job.state,'reviewing');
+  const {checkpointDirectory}=load(path.resolve(__dirname,'../src/worker-checkpoint.ts'));
+  const waiting={kind:'external',reason:'Exact hosted evidence pending',nextTrigger:'Hosted run123 completes',checkedAt:'2026-11-11T00:00:00Z',references:['https://example.test/actions/runs/123']};
+  const dir=checkpointDirectory(f.root,job.reviewControlId);
+  fs.writeFileSync(path.join(dir,'response.json'),JSON.stringify({id:job.reviewControlId,state:'checkpointed',summary:'Local independent review preserved',remainingValidation:'Check exact hosted evidence',waiting}));
+  f.runs.get(job.reviewRunId).status='complete';await f.svc.tick();await f.svc.tick();
+  const pending=await f.svc.call(c.actor,c.id,'getRunResult',{workspaceId:c.id,runId:job.reviewRunId});
+  assert.equal(pending.qa.state,'review-checkpointed');assert.equal(pending.assignment.role,'reviewer');assert.equal(pending.assignment.readOnly,true);
+  assert.deepEqual(pending.qa.reviewCheckpoint.waiting,waiting);assert.match(pending.nextAction,/not failed/);
+  assert.equal(pending.qa.reworks,0);assert.equal(f.resumes.length,0);assert.equal(f.starts,2);assert.equal(f.checks.length,1);
+  assert.equal(f.svc.ui().workspace.requests.filter(r=>r.id.startsWith(`worker-wait:${job.reviewRunId}:`)).length,1);
+  const restored=f.reload();await restored.tick();assert.equal(restored.ui().jobs[0].state,'review-checkpointed');
+  await write(f,c,'followUpRun',{runId:job.reviewRunId,message:'Hosted evidence is now available; complete the remaining independent assessment',origin:'manual'});
+  assert.equal(f.resumes.length,1);assert.equal(f.resumes[0].runId,job.reviewRunId);
+  assert.match(f.resumes[0].prompt,/Do not edit files/);assert.equal(f.svc.ui().jobs[0].reworks,0);assert.equal(f.starts,2);
+  f.runs.get(job.reviewRunId).status='complete';await f.svc.tick();assert.equal(f.svc.ui().jobs[0].state,'qa-passed');
+ }finally{f.cleanup();}
+});
