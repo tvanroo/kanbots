@@ -548,7 +548,7 @@ test('built-in coordinator awaiting user input receives the saved answer once ra
   await f.svc.tick();await f.svc.tick();
   assert.equal(delivered.length,1);assert.match(delivered[0],/owner answered: Continue to review/);
   assert.equal(f.svc.ui().workspace.requests.find(r=>r.id===receipt.requestId).state,'received');
-  assert.equal(f.svc.ui().workspace.requests.find(r=>r.id==='question:650').state,'completed');
+  assert.equal(f.svc.state.workspaces[0].requests.find(r=>r.id==='question:650').state,'completed');
   assert.equal(f.resumes.length,0);
  }finally{f.cleanup();}
 });
