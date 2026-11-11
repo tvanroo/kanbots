@@ -685,3 +685,22 @@ test('parallel targets above four persist and share workflow configuration',asyn
  await assert.rejects(write(f,c,'configureWorkflow',{parallelism:0}));
  }finally{f.cleanup();}
 });
+
+test('coordinator phase continuation supersedes inspection without owner reapproval',async()=>{
+ for(const phase of ['implementation','testing']){
+  const f=fixture();try{
+   const c=await control(f);
+   await write(f,c,'dispatchTask',{number:1,readOnly:true,qa:false});
+   f.runs.get(1).status='awaiting_input';
+   await write(f,c,'followUpRun',{runId:1,phase,message:'Continue authorized work using reversible fixtures; preserve explicit owner holds.'});
+   const job=f.svc.state.workspaces[0].jobs[0];
+   assert.equal(job.readOnly,false);assert.equal(job.role,'implementation');
+   assert.equal(job.assignmentHistory.length,1);
+   assert.match(job.assignmentHistory[0].reason,new RegExp(phase));
+   assert.equal(f.starts,1);assert.equal(f.resumes[0].runId,1);
+   assert.doesNotMatch(f.resumes[0].prompt,/Read-only assignment\. Inspect/);
+   assert.match(f.resumes[0].prompt,/do not ask the owner to lift it again/);
+   assert.equal(f.reload().state.workspaces[0].jobs[0].readOnly,false);
+  }finally{f.cleanup();}
+ }
+});
