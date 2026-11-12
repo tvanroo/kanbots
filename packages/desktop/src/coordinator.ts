@@ -1,3 +1,4 @@
+import {compactCapacity} from './capacity-summary.js';
 import { recordPerformanceTiming } from './performance-diagnostics.js';
 import { questionCommands, questionExplanation, fencedQuestionCommands, type QuestionCommand } from './question-presentation.js';
 import { reorderWorkflowCard, prioritizeWorkflowQueue } from './workflow.js';
@@ -772,7 +773,7 @@ Never approve your own pairing. No provider API keys are needed.\n\nClaude Deskt
       case 'readRunLog':{this.run(a.runId);const rows=this.context!.store.events.list(a.runId).filter(e=>e.seq>(a.offset??-1));const items=rows.slice(0,a.limit??10).map(e=>({seq:e.seq,type:e.type,content:clip(e.payload,2000)}));return {items,nextCursor:items.at(-1)?.seq??a.offset??0,hasMore:rows.length>items.length};}
       case 'getDiffSummary':{const d=await h['agent-runs:diff']({runId:a.runId});if(a.file){const f=d.files.find(f=>f.path===a.file);return {file:a.file,patch:f?.patch.slice(a.offset??0,(a.offset??0)+8000),truncated:(f?.patch.length??0)>(a.offset??0)+8000};}return {files:d.files.map(f=>({path:f.path,status:f.status}))};}
 
-      case 'getCapacity':return (await collectCapacity()).snapshot;
+      case 'getCapacity':return compactCapacity((await collectCapacity()).snapshot,a.usageOffset,a.usageLimit);
       case 'listDecisions': {
         const pending = await h['decisions:pending']();
         for (const proposal of w.decisions.filter(d => d.state === 'pending')) {
