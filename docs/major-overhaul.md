@@ -13,7 +13,7 @@ Owner requested full implementation and deployed acceptance, November 12, 2026.
 - Metrics for utilization, duplicates, recovery, PR age, stage latency and verified delivery.
 - Failure injection: lost responses, duplicates, stale review head, rate limits, restart, event ordering and wrong runtime SHA.
 - Build, sign, notarize, publish, install, restore workflows and verify app interactions.
-- CardBox workflow 43259186068 and intended main 143eb8c3461e18ee4fccade379c86ff3887006b3 remain unverified; fresh evidence may supersede them. GitHub access currently blocks this lane, not local development. Preserve question 98, Autopilot off and paused schedule.
+- CardBox workflow 43259186068 passed for intended main 143eb8c3461e18ee4fccade379c86ff3887006b3. Deployment workflow 43275539475 was observed in progress on that exact revision; runtime and functional acceptance remain unverified. GitHub access has recovered. Preserve question 98, Autopilot off and paused schedule.
 
 ## In-progress implementation
 
@@ -25,7 +25,7 @@ Tests currently cover staged rotation, retained rollback, wrong project/consumer
 
 Dispatch reserves worker capacity before asynchronous preparation. Reservations survive restart and block duplicate task starts. `reconcileDispatch` adopts a single newly recorded worker or clears a reservation only when no worker was recorded. Concurrent dispatch and lost-response/restart tests pass.
 
-Release validation now reserves the workspace release slot before revision reads. Interrupted read-only validation restores its prior state; uncertain side effects block subsequent publication. `reconcileRelease` reads exact merge parents or matching PR plus remote branch SHA without repeating publication. A completed release plan means its merge or draft PR completed, never deployment or functional acceptance. Concurrent release and mismatched/exact merge-parent tests pass. PR reconciliation still needs dedicated failure-injection coverage and rendered controls need verification before release.
+Release validation now reserves the workspace release slot before revision reads. Interrupted read-only validation restores its prior state; uncertain side effects block subsequent publication. `reconcileRelease` reads exact merge parents or matching PR plus remote branch SHA without repeating publication. A completed release plan means its merge or draft PR completed, never deployment or functional acceptance. Concurrent release and mismatched/exact merge-parent tests pass. Lost PR response coverage verifies restart reconciliation, rejection of mismatched remote revisions and no repeated push or PR creation. Rendered recovery controls remain to be verified.
 
 Provider preflight failures release unused charge reservations; ambiguous network outcomes retain them. Repeated/missing pagination cursors stop refresh while retaining prior verified model/cost readings.
 
@@ -35,7 +35,7 @@ Owner reported answered cards disappearing on text submission. The UI now reques
 
 ## Latest verification
 
-All 202 desktop tests passed under the packaged Electron runtime (synthetic fixtures). The Questions component was rendered with application styles in isolated headless Chrome at 1280x900 and 390x844: text submission, answer/response visibility after reload, originating chat and return navigation passed without console errors or framework overlays. This uses a mock desktop bridge; it does not prove installed-app IPC or live coordinator response delivery. Screenshots and fixture scripts are outside the repository in /private/tmp. Full dependency and desktop build passed before the latest metrics addition; rebuild before packaging.
+All 204 desktop tests passed under the packaged Electron runtime (synthetic fixtures). The Questions component was rendered with application styles in isolated headless Chrome at 1280x900 and 390x844: text submission, answer/response visibility after reload, originating chat and return navigation passed without console errors or framework overlays. This uses a mock desktop bridge; it does not prove installed-app IPC or live coordinator response delivery. Screenshots and fixture scripts are outside the repository in /private/tmp. Full dependency and desktop build passed before the latest metrics addition; rebuild before packaging.
 
 ## Provider vault binding
 
@@ -44,3 +44,7 @@ Provider settings now offer explicit selection of an active project vault entry 
 ## Owner entry and final regression pass
 
 `requestSecretEntry` accepts only name, consumer and reason. The app embeds a write-only vault form in the owner request; verification requires a new matching staged or active version and returns metadata only. Existing entries cannot satisfy a new request accidentally. Recovery re-verifies the staged copy after owner confirmation before swapping directories, preventing a changed backup from replacing the working vault. All 204 desktop tests pass under the packaged Electron runtime; desktop and web typechecking pass. No real credential or running workspace was mutated by this pass.
+
+## Published 1.2.45 acceptance status
+
+Source dd404c82706c023e3755f741a456475f3f81ec7e was published as v1.2.45 with the DMG and update manifest. DMG SHA-256: 4c56bfe9e2003a40c2255cbbbf6af67a6c6a1973f37ca669312e4715c13947ac. Apple notarization, staple validation and Gatekeeper acceptance passed. Packaged launch, renderer bridge and synthetic update workspace restoration passed. The installed app accepted update request 60925b19-71f5-40c4-b4b2-482a45458d29; installation is waiting for safe worker checkpoints. Do not infer installed acceptance from publication. Current live ownership and paused schedules are retained; question 98 has a queued owner answer and must not be discarded.
