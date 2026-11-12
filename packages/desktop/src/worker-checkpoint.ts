@@ -35,3 +35,16 @@ export function readCheckpoint(root: string, id: string) {
       ...(waiting ? { waiting } : {}) };
   } catch { return null; }
 }
+
+export function stageDispositionPrompt(root:string,id:string,entry:string,workflowVersion:number){
+ return `\nStage handoff contract: when this assigned stage is complete, write ${JSON.stringify(join(checkpointDirectory(root,id),'stage-disposition.json'))} atomically with JSON {id:${JSON.stringify(id)},entry:${JSON.stringify(entry)},workflowVersion:${workflowVersion},to:"configured target stage ID",reason:"acceptance or concrete corrections",evidence:"exact reviewed revision/artifact and decision",checks:[{id:"configured check ID",outcome:"pass or fail or not-applicable",evidence:"exact supporting evidence"}]}. Use only a transition assigned to this stage's worker/reviewer role. Never invent a pass or use completion as release permission. The app validates the current assignment, allowed transition and required checks before handing off. If a decision is pending, use the checkpoint contract instead. Do not change another worker's files.\n`;
+}
+export function readStageDisposition(root:string,id:string){
+ try{
+  const raw=readFileSync(join(checkpointDirectory(root,id),'stage-disposition.json'),'utf8');if(raw.length>16000)return null;
+  const v=JSON.parse(raw);
+  if(v.id!==id||!Number.isSafeInteger(v.workflowVersion)||!['entry','to','reason','evidence'].every(k=>typeof v[k]==='string'&&v[k].trim()&&v[k].length<=4000)||!Array.isArray(v.checks)||v.checks.length>30)return null;
+  if(v.checks.some((c:any)=>!c||typeof c.id!=='string'||!c.id.trim()||!['pass','fail','not-applicable'].includes(c.outcome)||typeof c.evidence!=='string'||!c.evidence.trim()||c.evidence.length>4000))return null;
+  return v as {id:string;entry:string;workflowVersion:number;to:string;reason:string;evidence:string;checks:Array<{id:string;outcome:'pass'|'fail'|'not-applicable';evidence:string}>};
+ }catch{return null;}
+}

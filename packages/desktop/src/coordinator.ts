@@ -6,7 +6,7 @@ import {routingState,saveRouting} from './routing-state.js';
 import {invalidateCapacity} from './routing-capacity.js';
 import {newPersonaLibrary, editPersonaLibrary, type PersonaLibrary} from './persona-library.js';
 import {enqueueWake, deliverWake, reconcileAuthority, acknowledgeWake, type Outbound, type Wake, type HostAdapter} from './coordinator-outbound.js';
-import {createCheckpoint, requestCheckpoint, readCheckpoint} from './worker-checkpoint.js';
+import {createCheckpoint, requestCheckpoint, readCheckpoint, stageDispositionPrompt, readStageDisposition} from './worker-checkpoint.js';
 import { newWorkflow, materialize, previewWorkflow, applyWorkflow, undoWorkflowChange, moveWorkflowCard, workflowGuidance } from './workflow.js';
 import type { WorkflowState, WorkflowConfig } from '@kanborg/core';
 import { app } from 'electron';
@@ -47,7 +47,7 @@ function runNextAction(status: string): string {
 }
 
 type AssignmentChange={at:string;actor:string;requestId:string;from:{role:string;readOnly:boolean};to:{role:'discovery'|'implementation';readOnly:boolean};reason:string;evidence:string};
-type StageAssignment={stageId:string;entry:string;personaId:string;personaVersion:number;prompt:string};
+type StageAssignment={workflowVersion?:number;stageId:string;entry:string;personaId:string;personaVersion:number;prompt:string};
 type Job={stageAssignment?:StageAssignment;assignmentHistory?:AssignmentChange[];workflowStartPending?:string;readOnly?:boolean;phaseContextPending?:boolean;phaseCheckpoint?:unknown;manualQA?:boolean;controlId?:string;reviewControlId?:string;checkpoint?:unknown;reviewCheckpoint?:unknown;autopilot?:boolean;runId:number;number:number;role:string;qa:boolean;maxReworks:number;reworks:number;budgetUsd:number;state:string;sha?:string;reviewRunId?:number;checkIds?:number[];error?:string};
 type Release={validationPriorState?:string;id:string;runId:number;sha:string;targetBranch:string;targetSha:string;action:'merge'|'draft-pr';title?:string;body?:string;state:string;result?:unknown};
 type Handoff={delivery?:'waiting'|'sending'|'sent'|'failed';deliveryError?:string;deliveryRunId?:number;id:string;from:string|null;to:string;mode:'internal'|'external';state:'requested'|'ready'|'completed';requestedAt:string;summary:string;checkpoint:unknown;receivedBy?:string};
@@ -925,6 +925,19 @@ Never approve your own pairing. No provider API keys are needed.\n\nClaude Deskt
     card.owner=stage.personaId;card.nextAction='Assigned to '+(this.personaLibrary(w).items.find(p=>p.id===stage.personaId)?.name??stage.personaId);
     this.save();
   }
+  private async finishStageAssignment(w:Workspace,j:Job){
+    const a=j.stageAssignment!,flow=w.workflow!,card=flow.cards[j.number];
+    const receipt=readStageDisposition(this.root,j.controlId!);
+    if(!receipt){j.state='awaiting-review';j.error='Stage worker finished without a saved disposition. Record acceptance or corrections before handoff.';this.event(w,'stage-disposition-needed',{runId:j.runId,number:j.number});return;}
+    const from=flow.config.stages.find(s=>s.id===a.stageId);
+    if(!card||receipt.entry!==a.entry||receipt.workflowVersion!==flow.version||a.workflowVersion!==flow.version||card.stageId!==a.stageId||a.entry!==card.stageId+':'+card.history.length+':'+card.enteredAt||from?.personaId!==a.personaId)throw Error('Stage disposition is stale; reconcile the current assignment before handoff');
+    if(!flow.config.transitions.some(t=>t.from===from.id&&t.to===receipt.to&&t.actor===from.actor&&!['coordinator','user'].includes(t.actor)))throw Error('Stage worker is not authorized for this transition');
+    const target=flow.config.stages.find(s=>s.id===receipt.to);
+    if(!target||receipt.to===from.id)throw Error('Choose a distinct configured target stage');
+    if(flow.config.releaseOwner==='user'&&target.category==='done'&&['implementation','release'].includes(card.taskType))throw Error('Owner-reserved release completion requires the owner decision');
+    moveWorkflowCard(flow,{number:j.number,to:receipt.to,reason:receipt.reason,evidence:receipt.evidence,checks:receipt.checks},'persona:'+a.personaId+' / run:'+j.runId);
+    j.state='completed';delete j.error;this.queueStageAssignment(w,j.number);this.event(w,'stage-disposition-applied',{number:j.number,runId:j.runId,from:from.id,to:receipt.to,evidence:receipt.evidence});this.save();
+  }
   private async dispatchStageAssignments(w:Workspace){
     if(w.mode==='off'||w.updateDrain||this.updater?.pending()||(w.handoff&&w.handoff.state!=='completed'))return;
     for(const assignment of Object.values(w.stageAssignments??{})){
@@ -942,7 +955,7 @@ Never approve your own pairing. No provider API keys are needed.\n\nClaude Deskt
       const persona=this.personaLibrary(w).items.find(p=>p.id===stage.personaId);
       if(!persona){assignment.state='blocked';assignment.error='Assigned persona is missing';continue;}
       assignment.state='starting';this.save();
-      try{const result=await this.dispatch(w,assignment.number,w.budgetUsd,false,0,false,true,false,{stageId:stage.id,entry:assignment.entry,personaId:persona.id,personaVersion:persona.version,prompt:persona.prompt});if(result.runId===undefined)throw Error('Stage dispatch did not create a run');assignment.runId=result.runId;assignment.state='dispatched';this.event(w,'stage-persona-dispatched',{...assignment,personaId:persona.id,personaVersion:persona.version});}
+      try{const result=await this.dispatch(w,assignment.number,w.budgetUsd,false,0,false,true,false,{workflowVersion:w.workflow!.version,stageId:stage.id,entry:assignment.entry,personaId:persona.id,personaVersion:persona.version,prompt:persona.prompt});if(result.runId===undefined)throw Error('Stage dispatch did not create a run');assignment.runId=result.runId;assignment.state='dispatched';this.event(w,'stage-persona-dispatched',{...assignment,personaId:persona.id,personaVersion:persona.version});}
       catch(e){assignment.state='blocked';assignment.error=e instanceof Error?e.message:'Stage dispatch failed';this.event(w,'stage-persona-blocked',{...assignment});}
       this.save();
     }
@@ -965,7 +978,7 @@ Never approve your own pairing. No provider API keys are needed.\n\nClaude Deskt
     const control=createCheckpoint(this.root);
     reservation.threadId=thread.id;reservation.priorRunIds=this.context!.store.agentRuns.listByThread(thread.id).map(r=>r.id);reservation.job={...(stageAssignment?{stageAssignment}:{}),readOnly,controlId:control.id,autopilot,number,role:readOnly?'discovery':'implementation',qa:readOnly?false:qa,maxReworks,reworks:0,budgetUsd,state:'implementing'};
     reservation.state='starting';this.save();
-    const run=await this.context!.supervisor.start({appendSystemPrompt:control.prompt,threadId:thread.id,issueNumber:number,...(stageBase?{baseRef:stageBase}:{}),prompt:(stageAssignment?stageAssignment.prompt+'\nStage assignment: '+stageAssignment.stageId+'. Follow existing tool and release permissions; stage ownership grants no additional authority.\n':'')+stageEvidence+guidance+workerDeliveryInstructions(readOnly)+'\n\n'+issue.title+'\n'+(issue.body??''),costBudgetUsd:budgetUsd,provider:'claude-code',personaId:stageAssignment?.personaId??'implementation'});
+    const run=await this.context!.supervisor.start({appendSystemPrompt:control.prompt,threadId:thread.id,issueNumber:number,...(stageBase?{baseRef:stageBase}:{}),prompt:(stageAssignment?stageDispositionPrompt(this.root,control.id,stageAssignment.entry,w.workflow!.version)+stageAssignment.prompt+'\nStage assignment: '+stageAssignment.stageId+'. Follow existing tool and release permissions; stage ownership grants no additional authority.\n':'')+stageEvidence+guidance+workerDeliveryInstructions(readOnly)+'\n\n'+issue.title+'\n'+(issue.body??''),costBudgetUsd:budgetUsd,provider:'claude-code',personaId:stageAssignment?.personaId??'implementation'});
     const j:Job={...(stageAssignment?{stageAssignment}:{}),readOnly,controlId:control.id,autopilot,runId:run.id,number,role:readOnly?'discovery':'implementation',qa:readOnly?false:qa,maxReworks,reworks:0,budgetUsd,state:'implementing'};w.jobs.push(j);delete w.dispatchReservations[number];this.save();if(!stageAssignment)await this.workflowSignal(w,number,'worker-started',`Worker run ${run.id} started`,String(run.id));this.save();return {runId:run.id,number,status:run.status,qa,prerequisites:w.dependencies[number]??[],nextAction:'Use waitForChanges'};
     }catch(error){if(w.dispatchReservations[number]){if(reservation.state==='preparing')delete w.dispatchReservations[number];else{reservation.state='uncertain';(reservation as any).error='Worker start outcome is uncertain. Inspect run history before clearing this reservation.';}this.save();}throw error;}
   }
@@ -1055,7 +1068,7 @@ Never approve your own pairing. No provider API keys are needed.\n\nClaude Deskt
         this.recordWorkerCheckpoint(w,j,j.reviewRunId,j.reviewControlId!,reviewCheckpoint,true);continue;
       }
 
-      if(j.state==='implementing'){const r=this.run(j.runId);if(active(r.status))continue;if(r.status!=='complete'){j.state='blocked';j.error=r.exitReason??r.status;this.event(w,'blocked',{runId:r.id,reason:j.error});await this.workflowSignal(w,j.number,'worker-failed',`Run ${r.id}: ${j.error}`,j.controlId??String(r.id));continue;}if(j.autopilot&&w.autopilot?.status!=='active'){j.state='awaiting-review';j.error=j.qa?'Implementation finished; QA remains pending.':'Coordinator review remains pending.';this.event(w,'wind-down-checkpoint',{runId:r.id,remaining:j.error??'Coordinator review'});continue;}if(!j.qa||j.readOnly===true||j.role==='discovery'){j.state='completed';this.event(w,'implementation-completed',{runId:r.id});await this.workflowSignal(w,j.number,'worker-completed',`Deliverable from run ${r.id}; inspect getRunResult for evidence and limitations`,String(r.id));continue;}await this.startQA(w,j);}
+      if(j.state==='implementing'){const r=this.run(j.runId);if(active(r.status))continue;if(r.status!=='complete'){j.state='blocked';j.error=r.exitReason??r.status;this.event(w,'blocked',{runId:r.id,reason:j.error});await this.workflowSignal(w,j.number,'worker-failed',`Run ${r.id}: ${j.error}`,j.controlId??String(r.id));continue;}if(j.autopilot&&w.autopilot?.status!=='active'){j.state='awaiting-review';j.error=j.qa?'Implementation finished; QA remains pending.':'Coordinator review remains pending.';this.event(w,'wind-down-checkpoint',{runId:r.id,remaining:j.error??'Coordinator review'});continue;}if(j.stageAssignment){await this.finishStageAssignment(w,j);continue;}if(!j.qa||j.readOnly===true||j.role==='discovery'){j.state='completed';this.event(w,'implementation-completed',{runId:r.id});await this.workflowSignal(w,j.number,'worker-completed',`Deliverable from run ${r.id}; inspect getRunResult for evidence and limitations`,String(r.id));continue;}await this.startQA(w,j);}
       if(j.state==='checks'){
         const checks=(await this.h()['agent-runs:checks:list']({runId:j.runId})).filter(c=>j.checkIds?.includes(c.id));if(!checks.length||checks.some(c=>!['pass','fail'].includes(c.status)))continue;
         if(await this.revision(j.runId)!==j.sha)throw Error('Implementation changed during QA. Run QA again.');
