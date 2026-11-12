@@ -3629,3 +3629,5 @@
 .kb-api-date-hint { color: var(--ink-3); font-size: 11px; }
 .kb-api-reporting-body { padding: 0 14px 14px; }
 .kb-api-reporting-body .kb-api-summary { padding: 4px 0; }
+
+.kb-persona-pick{display:block;width:100%;border:0;background:transparent;color:inherit;text-align:left;font:inherit;padding:0;cursor:pointer}.kb-persona-pick:focus-visible{outline:2px solid var(--accent);outline-offset:4px;border-radius:4px}

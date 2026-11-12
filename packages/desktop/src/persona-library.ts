@@ -90,7 +90,7 @@ export function newPersonaLibrary(projectName:string):PersonaLibrary {
 export function editPersonaLibrary(library:PersonaLibrary,action:'upsert'|'remove',args:any,actor:string,selectedIds:string[]) {
  const id=action==='upsert'?args.persona.id:args.id;
  const previous=library.items.find(p=>p.id===id);
- if(action==='remove'&&selectedIds.includes(id))throw Error('Remove this persona from the Autopilot selection before removing its definition. Running workers retain their assigned instructions.');
+ if(action==='remove'&&selectedIds.includes(id))throw Error('This persona is assigned to a workflow stage or Autopilot. Reassign those uses before deleting its definition. Running workers retain their assigned instructions.');
  if(action==='remove'&&!previous)throw Error('Persona not found');
  const at=new Date().toISOString();
  const item=action==='upsert'?{...args.persona,builtIn:false,version:(previous?.version??0)+1,updatedAt:at}:undefined;

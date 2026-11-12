@@ -6,7 +6,7 @@ export const taskType={type:'string',enum:['research','implementation','qa','rel
 const check=object({id,label:text,mode:{type:'string',enum:['required','advisory','not-applicable']}});
 export const workflowConfigSchema=object({
  name:text,
- stages:array(object({id,name:text,purpose:text,entry:text,exit:text,coordinatorGuidance:text,workerGuidance:text,actor,category:{type:'string',enum:['backlog','todo','inProgress','review','done']},checks:array(check,30)}),30),
+ stages:array(object({id,name:text,purpose:text,entry:text,exit:text,coordinatorGuidance:text,workerGuidance:text,actor,personaId:id,category:{type:'string',enum:['backlog','todo','inProgress','review','done']},checks:array(check,30)},["id","name","purpose","entry","exit","coordinatorGuidance","workerGuidance","actor","category","checks"]),30),
  transitions:array(object({from:id,to:id,actor,automatic:{type:'boolean'},event:{type:'string',enum:['manual','worker-completed','qa-passed','merged','deployed']}}),1000),
  completion:array(object({taskType,guidance:text,checks:array(check,30)}),6),
  waitingReasons:array(text,30),notifications:{type:'string',enum:['meaningful','all-transitions','decisions-only']},

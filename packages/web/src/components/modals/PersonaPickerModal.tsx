@@ -1,9 +1,11 @@
+import {getBridge} from '../../desktop-bridge.js';
 import { Logo } from '../Logo.js';
 import { useEffect, useMemo, useState } from 'react';
 import { savePersona, removePersona, loadPersonas, listPersonas, type Persona } from '../../personas.js';
 import type { ProviderId } from '../../types.js';
 
 export interface PersonaPickerModalProps {
+  manageOnly?: boolean;
   onClose: () => void;
   onPick: (persona: Persona, provider?: ProviderId, userNotes?: string) => void;
   /** If true, the user can pick multiple personas before confirming. */
@@ -21,12 +23,14 @@ export interface PersonaPickerModalProps {
 export function PersonaPickerModal({
   onClose,
   onPick,
+  manageOnly = false,
   multiSelect = false,
   multiSelectConfirmLabel,
   onConfirm,
   title,
   subtitle,
 }: PersonaPickerModalProps) {
+  const [stages,setStages]=useState<Array<{name:string;personaId?:string}>>([]);
   const [personas, setPersonas] = useState<Persona[]>(() => listPersonas());
   const [editingId,setEditingId]=useState<string|undefined>();
   const [creating, setCreating] = useState(false);
@@ -55,7 +59,7 @@ export function PersonaPickerModal({
   }, [onClose]);
 
   async function reload(): Promise<void> {
-    try { setPersonas(await loadPersonas()); } catch(e) {setError(String(e));}
+    try { setPersonas(await loadPersonas());const flow=await getBridge()?.coordinatorAction?.('workflow:get');setStages(flow?.config?.stages??[]); } catch(e) {setError(String(e));}
   }
   useEffect(()=>{void reload();const timer=setInterval(()=>void reload(),2000);return()=>clearInterval(timer);},[]);
 
@@ -97,12 +101,13 @@ export function PersonaPickerModal({
         next.add(created.id);
         return next;
       });
-    } else if(useNow) {
+    } else if(useNow&&!manageOnly) {
       onPick(created, undefined, notesArg);
     }
   }
 
   function handleCardClick(persona: Persona): void {
+    if(manageOnly){setEditingId(persona.id);setDraftName(persona.name);setDraftTagline(persona.tagline);setDraftEmoji(persona.emoji);setDraftPrompt(persona.prompt);setCreating(true);return;}
     if (!multiSelect) {
       onPick(persona, undefined, notesArg);
       return;
@@ -129,6 +134,7 @@ export function PersonaPickerModal({
   }
 
   async function removeCustom(id: string): Promise<void> {
+    const assigned=stages.filter(s=>s.personaId===id);if(assigned.length){setError(`Assigned to ${assigned.map(s=>s.name).join(", ")}. Reassign these stages before removing this persona.`);return;}
     await removePersona(id);
     await reload();
   }
@@ -158,15 +164,15 @@ export function PersonaPickerModal({
         <div className="kb-modal-body" style={{ display: 'block', overflowY: 'auto' }}>
           <div style={{ padding: '18px 22px' }}>
             <div style={{ marginBottom: 16, color: 'var(--ink-2)', fontSize: 12.5 }}>
-              {subtitle ??
-                'Choose a perspective for your coordinator to explore. It will review existing work and bring useful suggestions onto the board.'}
+              {subtitle ?? (manageOnly?'Edit workspace personas and their saved instructions. Stage assignments keep the same identity when you rename a persona.':
+                'Choose a perspective for your coordinator to explore. It will review existing work and bring useful suggestions onto the board.')}
             </div>
 
             <p style={{ color: 'var(--ink-2)', fontSize: 12.5 }}>
-              Your coordinator delegates this review using automatic provider routing.
+              {manageOnly?"Assigned personas receive stage work through automatic provider routing.":"Your coordinator delegates this review using automatic provider routing."}
             </p>
 
-            <div className="kb-field" style={{ marginBottom: 16 }}>
+            {!manageOnly?<><div className="kb-field" style={{ marginBottom: 16 }}>
               <label className="kb-field-label" htmlFor="kb-suggest-notes">
                 Notes (optional) — narrow the suggestion to a topic, area, or constraint
               </label>
@@ -182,23 +188,22 @@ export function PersonaPickerModal({
               />
             </div>
 
-            <div className="kb-persona-grid">
+            </>:null}
+            {error?<p role="alert">{error}</p>:null}<div className="kb-persona-grid">
               {personas.map((p) => {
                 const isSelected = multiSelect && selectedIds.has(p.id);
                 return (
-                <button
+                <div
                   key={p.id}
-                  type="button"
                   className={`kb-persona-card${isSelected ? ' selected' : ''}`}
-                  onClick={() => handleCardClick(p)}
-                  title={p.prompt}
-                  aria-pressed={multiSelect ? isSelected : undefined}
                 >
+<button type="button" className="kb-persona-pick" onClick={()=>handleCardClick(p)} aria-pressed={multiSelect?isSelected:undefined} title={p.prompt}>
                   <div className="kb-persona-emoji" aria-hidden>
                     {p.emoji}
                   </div>
                   <div className="kb-persona-name">{p.name}</div>
-                  <div className="kb-persona-tagline">{p.tagline}</div>
+                  <div className="kb-persona-tagline">{p.tagline}</div><small>{stages.filter(s=>s.personaId===p.id).map(s=>s.name).join(" · ")||"No stage assignments"}</small>
+                  </button>
                   {multiSelect && isSelected ? (
                     <span
                       style={{
@@ -213,13 +218,14 @@ export function PersonaPickerModal({
                       ✓
                     </span>
                   ) : null}
-                  {!p.builtIn ? <span role="button" tabIndex={0} aria-label={`Edit ${p.name}`} style={{display:'block',marginTop:12}} onClick={e=>{e.stopPropagation();setEditingId(p.id);setDraftName(p.name);setDraftTagline(p.tagline);setDraftEmoji(p.emoji);setDraftPrompt(p.prompt);setCreating(true);}} onKeyDown={e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();e.stopPropagation();setEditingId(p.id);setDraftName(p.name);setDraftTagline(p.tagline);setDraftEmoji(p.emoji);setDraftPrompt(p.prompt);setCreating(true);}}}>Edit instructions</span>:null}
-                  {!p.builtIn ? (
-                    <span
-                      className="kb-persona-del"
-                      role="button"
+                  {true ? <button type="button" className="kb-btn" aria-label={`Edit ${p.name}`} style={{display:'block',marginTop:12}} onClick={e=>{e.stopPropagation();setEditingId(p.id);setDraftName(p.name);setDraftTagline(p.tagline);setDraftEmoji(p.emoji);setDraftPrompt(p.prompt);setCreating(true);}} onKeyDown={e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();e.stopPropagation();setEditingId(p.id);setDraftName(p.name);setDraftTagline(p.tagline);setDraftEmoji(p.emoji);setDraftPrompt(p.prompt);setCreating(true);}}}>Edit instructions</button>:null}
+                  {true ? (
+                    <button type="button"
+                      disabled={stages.some(s=>s.personaId===p.id)}
+                      className="kb-btn"
+                      aria-disabled={stages.some(s=>s.personaId===p.id)}
+                      title={stages.some(s=>s.personaId===p.id)?"Reassign workflow stages before deleting":"Delete persona"}
                       aria-label={`Delete ${p.name}`}
-                      tabIndex={0}
                       onClick={(e) => {
                         e.stopPropagation();
                         void removeCustom(p.id).catch(e=>setError(String(e)));
@@ -232,10 +238,10 @@ export function PersonaPickerModal({
                         }
                       }}
                     >
-                      ×
-                    </span>
+                      Delete
+                    </button>
                   ) : null}
-                </button>
+                </div>
                 );
               })}
 
@@ -275,7 +281,7 @@ export function PersonaPickerModal({
                     <label className="kb-field-label">Name</label>
                     <input
                       className="kb-input"
-                      placeholder="e.g. Indie hacker"
+                      aria-label="Persona name" placeholder="e.g. Indie hacker"
                       maxLength={60}
                       value={draftName}
                       onChange={(e) => setDraftName(e.target.value)}
@@ -288,7 +294,7 @@ export function PersonaPickerModal({
                   <label className="kb-field-label">Tagline</label>
                   <input
                     className="kb-input"
-                    placeholder="One short line — what they care about"
+                    aria-label="Persona tagline" placeholder="One short line — what they care about"
                     maxLength={80}
                     value={draftTagline}
                     onChange={(e) => setDraftTagline(e.target.value)}
@@ -300,6 +306,7 @@ export function PersonaPickerModal({
                   <textarea
                     className="kb-textarea"
                     placeholder='"You are a ____ who prioritizes ____. You think in terms of ____. You frame proposals around ____."'
+                    aria-label="Persona prompt"
                     value={draftPrompt}
                     onChange={(e) => setDraftPrompt(e.target.value)}
                     rows={5}
@@ -325,10 +332,10 @@ export function PersonaPickerModal({
                       resetDraft();
                     }}
                   >
-                    Cancel
+                    {manageOnly?'Done':'Cancel'}
                   </button>
                   <button type="button" className="kb-btn" onClick={()=>void saveDraft(false).catch(e=>setError(String(e)))}>Save persona</button>
-                  <button type="button" className="kb-btn primary" onClick={()=>void saveDraft().catch(e=>setError(String(e)))}>
+                  <button hidden={manageOnly} type="button" className="kb-btn primary" onClick={()=>void saveDraft().catch(e=>setError(String(e)))}>
                     Save and use
                   </button>
                 </div>
@@ -339,11 +346,11 @@ export function PersonaPickerModal({
 
         <div className="kb-modal-foot">
           <span className="hint">
-            Custom personas are saved in the workspace library and available to your coordinator.
+            Personas are saved in this workspace and shared with your coordinator.
           </span>
           <span className="grow" />
           <button type="button" className="kb-btn ghost" onClick={onClose}>
-            Cancel
+            {manageOnly?'Done':'Cancel'}
           </button>
           {multiSelect ? (
             <button

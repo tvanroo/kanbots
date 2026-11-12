@@ -3,7 +3,7 @@ export type WorkflowTaskType = 'research' | 'implementation' | 'qa' | 'release' 
 export type WorkflowCheck = { id: string; label: string; mode: 'required' | 'advisory' | 'not-applicable' };
 export type WorkflowStage = {
   id: string; name: string; purpose: string; entry: string; exit: string;
-  coordinatorGuidance: string; workerGuidance: string; actor: WorkflowActor;
+  coordinatorGuidance: string; workerGuidance: string; actor: WorkflowActor; personaId?: string | undefined;
   category: 'backlog' | 'todo' | 'inProgress' | 'review' | 'done'; checks: WorkflowCheck[];
 };
 export type WorkflowTransition = { from: string; to: string; actor: WorkflowActor; automatic: boolean; event: 'manual' | 'worker-completed' | 'qa-passed' | 'merged' | 'deployed' };
