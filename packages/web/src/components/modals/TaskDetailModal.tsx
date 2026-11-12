@@ -106,7 +106,7 @@ export interface TaskDetailModalProps {
 }
 
 export function TaskDetailModal({ issueNumber, onClose, onOpenDetail }: TaskDetailModalProps) {
-  const { data, loading, error, refetch } = useFetch<IssueDetailPayload>(
+  const { data, loading, error, refetch, mutate } = useFetch<IssueDetailPayload>(
     `issue:${issueNumber}`,
     () => api.issue(issueNumber),
   );
@@ -122,13 +122,6 @@ export function TaskDetailModal({ issueNumber, onClose, onOpenDetail }: TaskDeta
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isAutopilot]);
 
-  useEffect(() => {
-    function onKey(e: globalThis.KeyboardEvent): void {
-      if (e.key === 'Escape') onClose();
-    }
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [onClose]);
 
   // Refetch this issue's detail whenever the main process signals a change.
   // Debounced so a burst of run-status flips collapses to one fetch.
@@ -166,6 +159,49 @@ export function TaskDetailModal({ issueNumber, onClose, onOpenDetail }: TaskDeta
     activeRun?.status === 'awaiting_input' ||
     activeRun?.status === 'starting';
 
+  const [stoppingRun, setStoppingRun] = useState<number | null>(null);
+  const [stopError, setStopError] = useState<string | null>(null);
+  const stopInFlight = useRef(false);
+  const stopActiveRun = useCallback(async () => {
+    if (!activeRun || stopInFlight.current) return;
+    stopInFlight.current = true;
+    setStoppingRun(activeRun.id);
+    setStopError(null);
+    let timeout: ReturnType<typeof setTimeout> | undefined;
+    try {
+      const stopped = await Promise.race([
+        api.stopAgent(activeRun.id),
+        new Promise<never>((_, reject) => { timeout = setTimeout(() => reject(new Error('Stop has not been confirmed. Refresh the run status and retry; this does not mean the worker has stopped.')), 20000); }),
+      ]);
+      if (['running', 'starting', 'awaiting_input'].includes(stopped.status)) throw new Error('The worker is still active. Retry Stop or check its thread for an error.');
+      mutate(previous => previous?.thread ? { ...previous, thread: { ...previous.thread,
+        activeRun: previous.thread.activeRun?.id === stopped.id ? null : previous.thread.activeRun,
+        latestRun: previous.thread.latestRun?.id === stopped.id ? stopped : previous.thread.latestRun,
+      }} : previous);
+      dispatchIssuesRefetch();
+      await refetch();
+    } catch (failure) {
+      setStopError(failure instanceof Error ? failure.message : String(failure));
+    } finally {
+      clearTimeout(timeout);
+      stopInFlight.current = false;
+      setStoppingRun(null);
+    }
+  }, [activeRun, mutate, refetch]);
+
+  useEffect(() => {
+    function onKey(event: globalThis.KeyboardEvent) {
+      if (event.key !== 'Escape' || event.defaultPrevented || event.isComposing) return;
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      if (!isAutopilot && isRunning) {
+        if (!event.repeat) void stopActiveRun();
+      } else onClose();
+    }
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [isAutopilot, isRunning, stopActiveRun, onClose]);
+
   const visibleTabs: DetailTab[] = isAutopilot
     ? ['autopilot', 'overview']
     : ['overview', 'thread', 'diff', 'preview', 'runs'];
@@ -186,9 +222,11 @@ export function TaskDetailModal({ issueNumber, onClose, onOpenDetail }: TaskDeta
             <button
               type="button"
               className="kb-btn ghost"
-              onClick={() => void api.stopAgent(activeRun.id).then(() => refetch())}
+              onClick={() => void stopActiveRun()}
+              disabled={stoppingRun !== null}
+              title="Stop this worker (Escape). Saved work is retained."
             >
-              Stop
+              {stoppingRun !== null ? 'Stopping…' : 'Stop'}
             </button>
           ) : null}
           {!isAutopilot ? (
@@ -239,7 +277,7 @@ export function TaskDetailModal({ issueNumber, onClose, onOpenDetail }: TaskDeta
             type="button"
             className="x-btn"
             onClick={onClose}
-            aria-label="Close (Esc)"
+            aria-label={isRunning ? "Close drawer" : "Close (Esc)"}
             title="Close"
           >
             <svg
@@ -329,6 +367,8 @@ export function TaskDetailModal({ issueNumber, onClose, onOpenDetail }: TaskDeta
                 </div>
 
                 <div className="kb-tdm-content">
+                  {stoppingRun !== null && <p role="status">Stopping run #{stoppingRun}… waiting for the worker to exit. Saved work will be retained.</p>}
+                  {stopError && <p role="alert" className="kb-error">{stopError}</p>}
                   {tab === 'autopilot' ? (
                     <AutopilotTab issueNumber={issue.number} />
                   ) : null}
@@ -1511,6 +1551,7 @@ function ThreadTab({
               seed={displayRun.id}
               startedAt={displayRun.startedAt}
               tokensOut={displayRun.tokenUsageOutput ?? null}
+              interruptShortcut="Esc to stop this worker"
             />
           ) : null}
           {displayRun && displayRun.status === 'complete' ? (

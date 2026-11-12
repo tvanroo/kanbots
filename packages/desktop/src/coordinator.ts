@@ -6,7 +6,7 @@ import {routingState,saveRouting} from './routing-state.js';
 import {invalidateCapacity} from './routing-capacity.js';
 import {newPersonaLibrary, editPersonaLibrary, type PersonaLibrary} from './persona-library.js';
 import {enqueueWake, deliverWake, reconcileAuthority, acknowledgeWake, type Outbound, type Wake, type HostAdapter} from './coordinator-outbound.js';
-import {createCheckpoint, requestCheckpoint, readCheckpoint, stageDispositionPrompt, readStageDisposition} from './worker-checkpoint.js';
+import {createCheckpoint, resumeWithCheckpoint, requestCheckpoint, readCheckpoint, stageDispositionPrompt, readStageDisposition} from './worker-checkpoint.js';
 import { newWorkflow, materialize, previewWorkflow, applyWorkflow, undoWorkflowChange, moveWorkflowCard, workflowGuidance } from './workflow.js';
 import type { WorkflowState, WorkflowConfig } from '@kanborg/core';
 import { app } from 'electron';
@@ -857,10 +857,9 @@ Never approve your own pairing. No provider API keys are needed.\n\nClaude Deskt
           if (!j.sha || await this.revision(j.runId) !== j.sha || await this.revision(run.id) !== j.sha) {
             throw Error('Review revision changed. Reconcile implementation and QA before continuing this review.');
           }
-          const control = createCheckpoint(this.root);
-          const resumed = await this.context!.supervisor.resume({runId:run.id,appendSystemPrompt:control.prompt,
-            prompt:a.message+'\n'+INDEPENDENT_REVIEW_AUTHORITY+'\nContinue the SAME independent review. Do not edit product files or author implementation commits. Preserve completed review evidence and inspect only the remaining authorized scope. End with KANBOTS_QA_PASS or KANBOTS_QA_FAIL only after a completed assessment; an external wait must return a pending checkpoint instead.\nImplementation commit: '+j.sha+'\nPrior review checkpoint: '+JSON.stringify(j.reviewCheckpoint??null),
-            costBudgetUsd:j.budgetUsd});
+          const {control,result:resumed} = await resumeWithCheckpoint(this.root,j.reviewControlId,control=>this.context!.supervisor.resume({runId:run.id,appendSystemPrompt:control.prompt,
+            prompt:control.prompt+a.message+'\n'+INDEPENDENT_REVIEW_AUTHORITY+'\nContinue the SAME independent review. Do not edit product files or author implementation commits. Preserve completed review evidence and inspect only the remaining authorized scope. End with KANBOTS_QA_PASS or KANBOTS_QA_FAIL only after a completed assessment; an external wait must return a pending checkpoint instead.\nImplementation commit: '+j.sha+'\nPrior review checkpoint: '+JSON.stringify(j.reviewCheckpoint??null),
+            costBudgetUsd:j.budgetUsd}));
           j.reviewControlId=control.id;j.state='reviewing';delete j.error;
           this.event(w,'review-resumed',{runId:j.runId,reviewRunId:run.id,controlId:control.id});
           return {runId:run.id,implementationRunId:j.runId,state:j.state,status:resumed.status};
@@ -889,16 +888,15 @@ Never approve your own pairing. No provider API keys are needed.\n\nClaude Deskt
         const background = freshContext
           ? 'Phase checkpoint (historical evidence; current request follows):\n' + JSON.stringify(j.phaseCheckpoint) + '\n'
           : '';
-        const control = createCheckpoint(this.root);
-        const resumed = await this.context!.supervisor.resume({
+        const {control,result:resumed} = await resumeWithCheckpoint(this.root,j.controlId,control=>this.context!.supervisor.resume({
           freshContext,
           appendSystemPrompt: control.prompt,
           runId: a.runId,
-          prompt: background + a.message + assignmentContext
+          prompt: control.prompt + background + a.message + assignmentContext
             + '\nWorkflow: ' + JSON.stringify(workflowGuidance(w.workflow ?? newWorkflow(), j.number))
             + '\n' + workerDeliveryInstructions(j.readOnly === true || j.role === 'discovery',!!j.stageAssignment&&w.workflow?.config.stages.find(s=>s.id===j.stageAssignment!.stageId)?.actor==='reviewer'),
           costBudgetUsd: j.budgetUsd,
-        });
+        }));
         j.controlId = control.id;
         j.state = 'implementing';
         delete j.sha;

@@ -9,6 +9,7 @@ interface AgentSpinnerProps {
   // Stable seed so the verb stays the same across re-renders. Pass the
   // active runId.
   seed: string | number;
+  interruptShortcut?: string;
   // Wall-clock start of the spin window (ISO or epoch ms).
   startedAt?: string | number | null;
   // Optional override — claude-code uses the active todo's "activeForm" when
@@ -20,7 +21,7 @@ interface AgentSpinnerProps {
 
 const FRAMES = [...SPINNER_GLYPHS, ...[...SPINNER_GLYPHS].reverse()];
 
-export function AgentSpinner({ seed, startedAt, override, tokensOut }: AgentSpinnerProps) {
+export function AgentSpinner({ seed, startedAt, override, tokensOut, interruptShortcut }: AgentSpinnerProps) {
   const verb = useMemo(() => pickSpinnerVerb(seed), [seed]);
   const startMs = useMemo(() => parseStart(startedAt), [startedAt]);
   const [frame, setFrame] = useState(0);
@@ -56,7 +57,7 @@ export function AgentSpinner({ seed, startedAt, override, tokensOut }: AgentSpin
       <span className="kb-spin-verb">{message}…</span>
       <span className="kb-spin-meta">
         ({elapsed}
-        {tokens ? ` · ${tokens} tokens` : ''} · esc to interrupt)
+        {tokens ? ` · ${tokens} tokens` : ''}{interruptShortcut ? ` · ${interruptShortcut}` : ''})
       </span>
     </div>
   );

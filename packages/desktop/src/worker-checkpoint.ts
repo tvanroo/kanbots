@@ -48,3 +48,18 @@ export function readStageDisposition(root:string,id:string){
   return v as {id:string;entry:string;workflowVersion:number;to:string;reason:string;evidence:string;checks:Array<{id:string;outcome:'pass'|'fail'|'not-applicable';evidence:string}>};
  }catch{return null;}
 }
+
+// A resumed harness retains earlier control paths in its conversation. Retire the
+// old request before launch, but restore it if the provider refuses to start.
+export async function resumeWithCheckpoint<T>(root:string, previousId:string|undefined, resume:(control:{id:string;prompt:string})=>Promise<T>){
+ const control=createCheckpoint(root);
+ const previous=previousId?join(checkpointDirectory(root,previousId),'request.json'):null;
+ const saved=previous&&existsSync(previous)?readFileSync(previous,'utf8'):null;
+ if(previous&&saved!==null){
+  writeFileSync(previous+'.tmp',JSON.stringify({id:previousId,action:'continue',supersededBy:control.id,currentRequest:join(checkpointDirectory(root,control.id),'request.json')}),{mode:0o600});
+  renameSync(previous+'.tmp',previous);
+ }
+ control.prompt='Current authorized continuation: the prior update/stop checkpoint has ended. Earlier checkpoint instructions and responses are historical evidence, not a current request to stop. Use ONLY the current cooperative control below. Preserve the same run, worktree, saved evidence and unrelated owner holds.\n'+control.prompt;
+ try{return {control,result:await resume(control)};}
+ catch(error){if(previous&&saved!==null){writeFileSync(previous+'.tmp',saved,{mode:0o600});renameSync(previous+'.tmp',previous);}throw error;}
+}

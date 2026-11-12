@@ -895,3 +895,20 @@ test('release lanes have a separate persisted limit and do not consume implement
  const restored=f.reload();await restored.tick();assert.equal(f.starts,2);assert.equal(restored.ui().workspace.releaseParallelism,1);
  f.runs.get(2).status='awaiting_input';f.runs.get(2).pid=null;await restored.tick();assert.equal(f.starts,3);assert.equal(f.runs.get(1).status,'running');
  }finally{f.cleanup();}});
+
+test('same-run continuation retires stale update checkpoint and restores it on launch failure',async()=>{
+ const f=fixture();try{
+  const c=await control(f);await write(f,c,'dispatchTask',{number:1,qa:false});
+  const {checkpointDirectory,requestCheckpoint}=load(path.resolve(__dirname,'../src/worker-checkpoint.ts'));
+  const job=f.svc.current().jobs[0],prior=job.controlId,request=path.join(checkpointDirectory(f.root,prior),'request.json');
+  requestCheckpoint(f.root,prior);f.runs.get(1).status='stopped';job.state='checkpointed';
+  const original=fs.readFileSync(request,'utf8'),resume=f.svc.context.supervisor.resume;
+  f.svc.context.supervisor.resume=async()=>{assert.equal(JSON.parse(fs.readFileSync(request,'utf8')).action,'continue');throw Error('Provider unavailable');};
+  await assert.rejects(write(f,c,'followUpRun',{runId:1,message:'Continue authorized work',origin:'manual'}),/Provider unavailable/);
+  assert.equal(fs.readFileSync(request,'utf8'),original);assert.equal(job.controlId,prior);
+  f.svc.context.supervisor.resume=resume;
+  await write(f,c,'followUpRun',{runId:1,message:'Continue authorized work',origin:'manual'});
+  const retired=JSON.parse(fs.readFileSync(request,'utf8'));assert.equal(retired.action,'continue');assert.equal(retired.supersededBy,job.controlId);assert.notEqual(job.controlId,prior);
+  assert.match(f.resumes.at(-1).prompt,/prior update\/stop checkpoint has ended/);assert.equal(f.resumes.at(-1).runId,1);assert.equal(f.starts,1);
+ }finally{f.cleanup();}
+});

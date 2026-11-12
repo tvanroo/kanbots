@@ -36,6 +36,7 @@ function makeFakeHandle(pid = 1234): FakeHandle {
       const summary: RunSummary = {
         exitCode: opts?.exitCode ?? 0,
         killedByStop: opts?.killedByStop ?? false,
+        stopEscalation: null,
         stderr: '',
         result: null,
       };
@@ -59,7 +60,7 @@ async function buildSupervisorWithFakes(store: Store): Promise<{
     store,
     repoPath: '/tmp/repo',
     prepareWorktreeDir: async () => undefined,
-    stampWorktreeIdentity: async () => undefined,
+    stampWorktreeIdentity: async () => ({userName:'test',userEmail:'test@example.test',hookInstalled:false,hookSkippedReason:'fixture'}),
     createWorktree: async (input: CreateWorktreeInput): Promise<Worktree> => {
       worktreeCalls.push(input);
       return { branch: input.branch, path: input.worktreePath, baseRef: null };
@@ -133,6 +134,20 @@ describe('supervisor.stop', () => {
 
   afterEach(() => {
     store.close();
+  });
+
+  it('retains owner stop intent even when the harness reports a clean exit', async () => {
+    const { supervisor, handle } = await buildSupervisorWithFakes(store);
+    const run = await supervisor.start({ threadId, issueNumber: 1, prompt: 'work' });
+    let stopCalls = 0;
+    handle.stop = () => { stopCalls++; handle.emitClose({ exitCode: 0, killedByStop: false }); };
+    const stopped = await supervisor.stop(run.id);
+    expect(stopCalls).toBe(1);
+    expect(stopped.status).toBe('stopped');
+    expect(stopped.exitReason).toBe('stopped by user');
+    expect(stopped.pid).toBeNull();
+    expect(await supervisor.stop(run.id)).toMatchObject({ status: 'stopped' });
+    expect(stopCalls).toBe(1);
   });
 
   it('marks an active-in-DB-but-untracked run as stopped', async () => {

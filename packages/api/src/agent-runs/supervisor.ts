@@ -241,6 +241,7 @@ export interface AgentSupervisor {
 }
 
 interface ActiveRun {
+  stopRequested?: boolean;
   handle: AgentRunHandle;
   hasDecision: boolean;
   pendingMessageId: number | null;
@@ -688,7 +689,8 @@ export async function createSupervisor(
     });
 
     handle.on('close', (summary) => {
-      const naturalStatus: AgentRunStatus = summary.killedByStop
+      const stoppedByOwner = entry.stopRequested || summary.killedByStop;
+      const naturalStatus: AgentRunStatus = stoppedByOwner
         ? 'stopped'
         : summary.result?.isError === true
           ? 'failed'
@@ -705,7 +707,7 @@ export async function createSupervisor(
           : naturalStatus;
       const exitReason = budgetReason
         ? `interrupted: ${budgetReason}`
-        : summary.killedByStop
+        : stoppedByOwner
           ? summary.stopEscalation === 'sigkill'
             ? `stopped by user (SIGKILL after ${stopGracefulTimeoutMs}ms)`
             : 'stopped by user'
@@ -722,7 +724,7 @@ export async function createSupervisor(
           ? null
           : entry.budgetExceeded
             ? 'aborted_budget'
-            : summary.killedByStop
+            : stoppedByOwner
               ? 'stopped'
               : status === 'failed'
                 ? 'failed'
@@ -1121,6 +1123,7 @@ export async function createSupervisor(
   async function stop(runId: number): Promise<AgentRun> {
     const entry = active.get(runId);
     if (entry) {
+      entry.stopRequested = true;
       entry.handle.stop({ gracefulTimeoutMs: stopGracefulTimeoutMs });
       const forceResolveAt = stopGracefulTimeoutMs + STOP_FORCE_RESOLVE_SLACK_MS;
       let timer: NodeJS.Timeout | null = null;
