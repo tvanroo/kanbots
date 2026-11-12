@@ -14,9 +14,11 @@ KanBorg publishes `getControlCoverage`, `proposeHostBinding`, `getOutboundEvents
 
 ## Bindings and adapters for Claude
 
-The coordination session lists installed adapters under `outbound.adapterIds`. The only verified adapter is `codex-cli-queue-v1`, which delivers into Codex desktop chats through the Codex CLI. It cannot deliver to Claude. Do not propose a binding for a Claude chat with that adapter, and do not invent a Claude adapter ID. `proposeHostBinding` is for a verified, owner-selected existing `hostId`, `chatId` and installed `adapterId`; the owner approves it in KanBorg. Proposal and approval do not transfer coordinator control.
+The coordination session lists installed adapters under `outbound.adapterIds`. `codex-cli-queue-v1` delivers into Codex desktop chats only. For Claude, the plugin's `kanborg-wake` channel pairs with KanBorg's `claude-channel-v1` adapter (see `docs/kanborg-claude-wake-handoff.md` in the KanBorg repository). When that ID is listed, call `kanborgWakeStatus` and pass its exact `hostId`, `chatId` and `adapterId` to `proposeHostBinding`; the owner approves it in KanBorg unless the app auto-approves. Never invent an adapter ID or use the Codex adapter for a Claude chat. Proposal and approval do not transfer coordinator control.
 
-Without a Claude adapter, KanBorg cannot start a turn in an idle Claude chat. Supported fallbacks:
+Wake notices arrive as `<channel source="kanborg">` messages. A push wake carries `event_id`, `epoch` and `kind`; run the receive steps above for it. A watch notice (`mode="watch"`) has no event ID: read `getChanges` from its `from_cursor` and do not call `acknowledgeWake` for it.
+
+If this session has no active channel (no `kanborgWakeStatus` tool, or Claude was started without the channel enabled), KanBorg cannot start a turn here. Supported fallbacks:
 
 - **Manual continuation:** the owner returns to the chat; it reads `getChanges` / `getOutboundEvents` and runs the steps above.
 - **One authorized scheduled check:** a single owner-approved Claude Desktop scheduled task (or Claude Code `/loop`/trigger) per workspace/controller, using the session's `checkIn` cadence and immediate `getChanges`. Label it polling with delay. Never create one schedule per event or per chat.

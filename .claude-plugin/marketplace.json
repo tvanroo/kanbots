@@ -12,7 +12,7 @@
       "name": "kanborg-connect",
       "source": "./plugins/kanborg-connect-claude",
       "description": "Operate KanBorg projects from any Claude chat on the paired Mac through KanBorg's local MCP connection.",
-      "version": "0.2.0",
+      "version": "0.3.0",
       "category": "development"
     }
   ]

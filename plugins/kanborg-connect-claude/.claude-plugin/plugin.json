@@ -1,7 +1,7 @@
 {
   "name": "kanborg-connect",
-  "version": "0.2.0",
-  "description": "Operate KanBorg from Claude Desktop (or Claude Code) through its paired local MCP connection: discover projects and operations, manage supported settings, coordinate work and hand off control, gated by live app capabilities.",
+  "version": "0.3.0",
+  "description": "Operate KanBorg from Claude Desktop or Claude Code through its paired local MCP connection, and let KanBorg wake this Claude session through a bundled channel: discover projects, manage settings, coordinate work and hand off control, gated by live app capabilities.",
   "author": {
     "name": "Toby vanRoojen",
     "url": "https://github.com/tvanroo"
@@ -17,5 +17,27 @@
     "coordination",
     "agents"
   ],
-  "icon": "./assets/kanborg-icon.png"
+  "icon": "./assets/kanborg-icon.png",
+  "userConfig": {
+    "kanborg_connection_id": {
+      "type": "string",
+      "title": "KanBorg connection ID",
+      "description": "The KANBORG_COORDINATOR_CLIENT value from KanBorg \u2192 Coordinators for this Claude connection. Not a secret. Enables local watching so KanBorg events wake this session.",
+      "required": false
+    }
+  },
+  "mcpServers": {
+    "kanborg-wake": {
+      "command": "${CLAUDE_PLUGIN_ROOT}/bin/kanborg-wake",
+      "args": [],
+      "env": {
+        "KANBORG_CONNECTION_ID": "${user_config.kanborg_connection_id}"
+      }
+    }
+  },
+  "channels": [
+    {
+      "server": "kanborg-wake"
+    }
+  ]
 }

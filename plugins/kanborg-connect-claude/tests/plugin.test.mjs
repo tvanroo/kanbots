@@ -7,6 +7,9 @@ import assert from 'node:assert/strict';
 import { readFileSync, readdirSync, existsSync } from 'node:fs';
 import { join, dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { mkdtempSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { WakeChannel } from '../wake/server.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const skillsDir = join(root, 'skills');
@@ -54,8 +57,13 @@ test('relative links resolve', () => {
   }
 });
 
-test('no credentials, hardcoded chat UUIDs or bundled MCP config', () => {
+test('only the wake channel is bundled, with no credentials or hardcoded chat UUIDs', () => {
   assert.ok(!existsSync(join(root, '.mcp.json')));
+  const m = JSON.parse(read(join(root, '.claude-plugin', 'plugin.json')));
+  assert.deepEqual(Object.keys(m.mcpServers), ['kanborg-wake']);
+  assert.deepEqual(m.channels, [{ server: 'kanborg-wake' }]);
+  assert.deepEqual(Object.keys(m.mcpServers['kanborg-wake'].env), ['KANBORG_CONNECTION_ID']);
+  assert.ok(existsSync(join(root, 'bin', 'kanborg-wake')));
   for (const s of skills) {
     const text = read(join(skillsDir, s, 'SKILL.md'));
     assert.doesNotMatch(text, /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/);
@@ -65,10 +73,11 @@ test('no credentials, hardcoded chat UUIDs or bundled MCP config', () => {
 
 const src = process.env.KANBORG_MCP_SOURCE;
 // Argument and field names that appear in backticks but are not tools.
-const FIELDS = new Set(['hostId', 'chatId', 'adapterId', 'adapterIds', 'handoffId', 'requestId', 'checkIn']);
+const FIELDS = new Set(['hostId', 'chatId', 'adapterId', 'adapterIds', 'handoffId', 'requestId', 'checkIn', 'sessionIdSource']);
 test('tools named in skills exist in the KanBorg MCP source', { skip: !src && 'set KANBORG_MCP_SOURCE' }, () => {
   const source = readdirSync(src).filter((f) => f.endsWith('.ts')).map((f) => read(join(src, f))).join('\n');
   const published = new Set([...source.matchAll(/(?:tool|add)\('([A-Za-z]+)'|name: *'([A-Za-z]+)'/g)].map((m) => m[1] ?? m[2]));
+  for (const t of new WakeChannel({ root: mkdtempSync(join(tmpdir(), 'kbp-')), client: null }).tools()) published.add(t.name);
   const files = [join(root, 'references', 'receiver-protocol.md'), ...skills.map((s) => join(skillsDir, s, 'SKILL.md'))];
   for (const f of files) {
     for (const [, name] of read(f).matchAll(/`([a-z]+[A-Z][A-Za-z]+)`/g)) {
