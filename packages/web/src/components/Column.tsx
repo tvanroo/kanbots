@@ -49,6 +49,9 @@ export interface ColumnProps {
   status: 'inbox' | StatusKey;
   label: string;
   issues: Issue[];
+  locatedNumber?: number | null;
+  trackedNumbers?: ReadonlySet<number>;
+  onToggleTracked?: (number: number) => void;
   selectedNumber?: number | null;
   /** Numbers of cards that are currently part of the bulk selection. */
   multiSelected?: ReadonlySet<number>;
@@ -68,6 +71,9 @@ export function Column({
   status,
   label,
   issues,
+  locatedNumber = null,
+  trackedNumbers,
+  onToggleTracked,
   selectedNumber = null,
   multiSelected,
   liveByRun,
@@ -137,7 +143,10 @@ export function Column({
                   }
                 : null;
             return (
-              <DropCard key={issue.number} number={issue.number}>
+              <DropCard located={issue.number===locatedNumber || (trackedNumbers?.has(issue.number) ?? false)} key={issue.number} number={issue.number}>
+                {onToggleTracked && <label className="kb-track-card" onClick={event => event.stopPropagation()} onPointerDown={event => event.stopPropagation()}>
+                  <input type="checkbox" checked={trackedNumbers?.has(issue.number) ?? false} onChange={() => onToggleTracked(issue.number)} aria-label={`Track card #${issue.number}`} /> Track
+                </label>}
                 <Card
                   issue={issue}
                   draggable={!issue.activeRun}
@@ -260,7 +269,7 @@ function useElapsedSeconds(startedAt: string | null): number | null {
   return Math.max(0, Math.floor((now - start) / 1000));
 }
 
-function DropCard({number,children}:{number:number;children:ReactNode}) {
+function DropCard({number,children,located}:{number:number;children:ReactNode;located?:boolean}) {
  const {setNodeRef,isOver}=useDroppable({id:`priority:${number}`});
- return <article ref={setNodeRef} className="kb-task-tile" style={isOver?{outline:'2px solid var(--accent)',outlineOffset:2}:undefined}>{children}</article>;
+ return <article data-board-card={number} data-located={located||undefined} ref={setNodeRef} className="kb-task-tile" style={isOver?{outline:'2px solid var(--accent)',outlineOffset:2}:undefined}>{children}</article>;
 }

@@ -1,0 +1,7 @@
+const {test}=require('node:test');const assert=require('node:assert/strict');const fs=require('node:fs');const ts=require('typescript');const Module=require('node:module');const path=require('node:path');
+const file=path.resolve(__dirname,'../src/subscription-budget.ts');const mod=new Module(file);mod._compile(ts.transpileModule(fs.readFileSync(file,'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS}}).outputText,file);const {subscriptionBudget}=mod.exports;
+const windows=[{id:'seven_day',pct:.27,resetsAt:'2026-11-13T16:00:00Z'},{id:'seven_day_fable',pct:1,resetsAt:'2026-11-12T22:00:00Z'}];
+test('Fable exhaustion leaves other models eligible within total capacity',()=>{assert.equal(subscriptionBudget(windows,'fable').headroomPercent,0);assert.equal(subscriptionBudget(windows,'sonnet').headroomPercent,73);assert.equal(subscriptionBudget(windows,'fable').totalUsedPercent,27);});
+test('total exhaustion blocks Fable even if its subset has room',()=>{assert.equal(subscriptionBudget([{...windows[0],pct:1},{...windows[1],pct:.1}],'fable').headroomPercent,0);});
+test('subset deadline never changes shared scheduling urgency',()=>{assert.equal(subscriptionBudget(windows,'fable').resetAt,Date.parse(windows[0].resetsAt));});
+test('model-only data does not invent a total subscription allowance',()=>{assert.equal(subscriptionBudget([windows[1]],'fable').known,false);assert.equal(subscriptionBudget([windows[1]],'fable').headroomPercent,null);});

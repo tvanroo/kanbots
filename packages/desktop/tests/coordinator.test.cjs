@@ -780,3 +780,69 @@ test('manual dispatch is not capped by the Autopilot parallelism setting',async(
  assert.equal(f.starts,2);assert.equal(f.svc.current().queue?.length??0,0);
  await assert.rejects(write(f,c,'dispatchTask',{number:1,qa:false}),/active pipeline/);
 }finally{f.cleanup();}});
+
+test('resolved questions checkpoint idle workers without completing work or consuming an active slot',async()=>{
+ const f=fixture();try{
+  const c=await control(f);await write(f,c,'dispatchTask',{number:1,qa:true});
+  const run=f.runs.get(1);run.status='awaiting_input';run.pid=null;
+  const card={id:990,type:'decision',status:'pending',payload:{question:'Proceed?',options:[]}};
+  f.svc.context.store.cards={listAllPending:()=>card.status==='pending'?[{card,agentRunId:1}]:[],findById:()=>card,listByRun:()=>[card]};
+  f.svc.context.store.agentRuns.update=(id,patch)=>Object.assign(f.runs.get(id),patch);
+  await f.svc.uiAction('questions-list');assert.equal(run.status,'awaiting_input');
+  card.status='resolved';run.pid=123;
+  await f.svc.uiAction('questions-list');assert.equal(run.status,'awaiting_input');
+  run.pid=null;await f.svc.uiAction('questions-list');
+  assert.equal(run.status,'stopped');assert.match(run.exitReason,/checkpoint/);
+  assert.equal(f.svc.ui().jobs[0].state,'checkpointed');assert.equal(f.starts,1);
+  await f.svc.uiAction('questions-list');assert.equal(f.starts,1);assert.equal(f.resumes.length,0);
+ }finally{f.cleanup();}
+});
+
+test('stale trace map blocks QA infrastructure without implementation rework',async()=>{
+ const f=fixture();try{const c=await control(f);await write(f,c,'dispatchTask',{number:1,qa:true,maxReworks:2});
+ f.runs.get(1).status='complete';await f.svc.tick();
+ f.checks[0].status='fail';f.checks[0].summary='FAIL: backend: stale trace map 4140d268; expected b7ecea99';
+ await f.svc.tick();const job=f.svc.ui().jobs[0];assert.equal(job.state,'blocked');assert.match(job.error,/QA infrastructure blocker/);assert.equal(job.reworks,0);assert.equal(f.resumes.length,0);assert.equal(f.starts,1);
+ }finally{f.cleanup();}
+});
+
+test('checkpointed implementation advances on exact-head required CI and starts assigned reviewer once',async()=>{
+ const f=fixture();try{
+  const c=await control(f);
+  await write(f,c,'upsertPersona',{persona:{id:'ci-reviewer',name:'Code Reviewer',tagline:'Review',emoji:'R',prompt:'Review this exact saved revision independently.'},reason:'Assign reviewer'});
+  const flow=await f.svc.uiAction('workflow:get',{});flow.config.stages.find(s=>s.id==='review').personaId='ci-reviewer';
+  await f.svc.uiAction('workflow:apply',{expectedVersion:flow.version,config:flow.config,reason:'Assign review'});
+  await write(f,c,'dispatchTask',{number:1,qa:true});
+  const w=f.svc.current(),job=w.jobs[0];job.state='checkpointed';f.runs.get(1).status='stopped';
+  let bucket='pending';f.svc.readRequiredPullRequestChecks=async()=>({head:'a'.repeat(40),url:'https://github.com/example/repo/pull/1',checks:[{name:'required',bucket,link:'https://github.com/example/check/1'}]});
+  await f.svc.tick();assert.equal(f.starts,1);assert.match(job.error,/pending/);
+  bucket='pass';job.ciCheckedAt=0;await f.svc.tick();assert.equal(f.starts,2);
+  assert.equal(f.startInputs[1].personaId,'ci-reviewer');assert.match(f.startInputs[1].prompt,/Review this exact saved revision independently/);
+  assert.equal(w.workflow.cards[1].stageId,'review');assert.equal(job.ciReview.head,'a'.repeat(40));
+  assert.ok(w.events.some(e=>e.type==='ci-review-ready'));
+  await f.svc.tick();await f.reload().tick();assert.equal(f.starts,2);
+ }finally{f.cleanup();}
+});
+
+test('already-green checkpoint waits through changed head and dispatches only after matching current revision',async()=>{
+ const f=fixture();try{
+  const c=await control(f);await write(f,c,'upsertPersona',{persona:{id:'ci-reviewer',name:'Reviewer',tagline:'Review',emoji:'R',prompt:'Independent exact-head review'},reason:'Configure'});
+  const flow=await f.svc.uiAction('workflow:get',{});flow.config.stages.find(s=>s.id==='review').personaId='ci-reviewer';await f.svc.uiAction('workflow:apply',{expectedVersion:flow.version,config:flow.config,reason:'Assign'});
+  await write(f,c,'dispatchTask',{number:1,qa:true});const w=f.svc.current(),job=w.jobs[0];job.state='checkpointed';f.runs.get(1).status='stopped';
+  f.svc.readRequiredPullRequestChecks=async()=>({head:'b'.repeat(40),url:'https://github.com/example/repo/pull/1',checks:[{name:'test',bucket:'pass'}]});
+  await f.svc.tick();assert.equal(f.starts,1);assert.match(job.error,/differs from the current PR head/);
+  f.setSha('b'.repeat(40));job.ciCheckedAt=0;await f.svc.tick();assert.equal(f.starts,2);assert.equal(job.ciReview.head,'b'.repeat(40));
+  await f.svc.tick();assert.equal(f.starts,2);
+ }finally{f.cleanup();}
+});
+
+test('manual QA uses the assigned reviewer and reuses that exact revision review',async()=>{
+ const f=fixture();try{
+  const c=await control(f);await write(f,c,'upsertPersona',{persona:{id:'assigned-reviewer',name:'Reviewer',tagline:'Review',emoji:'R',prompt:'Independent assigned review'},reason:'Configure'});
+  const flow=await f.svc.uiAction('workflow:get',{});flow.config.stages.find(s=>s.id==='review').personaId='assigned-reviewer';await f.svc.uiAction('workflow:apply',{expectedVersion:flow.version,config:flow.config,reason:'Assign'});
+  await write(f,c,'dispatchTask',{number:1,qa:true});f.runs.get(1).status='complete';await f.svc.tick();f.checks[0].status='pass';await f.svc.tick();
+  assert.equal(f.starts,2);assert.equal(f.startInputs[1].personaId,'assigned-reviewer');
+  await write(f,c,'runQA',{runId:1});f.checks[0].status='pass';await f.svc.tick();
+  assert.equal(f.starts,2);assert.equal(f.svc.current().jobs[0].reviewRunId,2);assert.equal(f.svc.current().jobs[0].state,'review-delegated');
+ }finally{f.cleanup();}
+});

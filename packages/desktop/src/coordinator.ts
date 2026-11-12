@@ -47,8 +47,8 @@ function runNextAction(status: string): string {
 }
 
 type AssignmentChange={at:string;actor:string;requestId:string;from:{role:string;readOnly:boolean};to:{role:'discovery'|'implementation';readOnly:boolean};reason:string;evidence:string};
-type StageAssignment={workflowVersion?:number;stageId:string;entry:string;personaId:string;personaVersion:number;prompt:string};
-type Job={stageAssignment?:StageAssignment;assignmentHistory?:AssignmentChange[];workflowStartPending?:string;readOnly?:boolean;phaseContextPending?:boolean;phaseCheckpoint?:unknown;manualQA?:boolean;controlId?:string;reviewControlId?:string;checkpoint?:unknown;reviewCheckpoint?:unknown;autopilot?:boolean;runId:number;number:number;role:string;qa:boolean;maxReworks:number;reworks:number;budgetUsd:number;state:string;sha?:string;reviewRunId?:number;checkIds?:number[];error?:string};
+type StageAssignment={baseRevision?:string;workflowVersion?:number;stageId:string;entry:string;personaId:string;personaVersion:number;prompt:string};
+type Job={ciReview?:{head:string;url:string;checkedAt:string;checks:unknown[]};ciCheckedAt?:number;stageAssignment?:StageAssignment;assignmentHistory?:AssignmentChange[];workflowStartPending?:string;readOnly?:boolean;phaseContextPending?:boolean;phaseCheckpoint?:unknown;manualQA?:boolean;controlId?:string;reviewControlId?:string;checkpoint?:unknown;reviewCheckpoint?:unknown;autopilot?:boolean;runId:number;number:number;role:string;qa:boolean;maxReworks:number;reworks:number;budgetUsd:number;state:string;sha?:string;reviewRunId?:number;checkIds?:number[];error?:string};
 type Release={validationPriorState?:string;id:string;runId:number;sha:string;targetBranch:string;targetSha:string;action:'merge'|'draft-pr';title?:string;body?:string;state:string;result?:unknown};
 type Handoff={delivery?:'waiting'|'sending'|'sent'|'failed';deliveryError?:string;deliveryRunId?:number;id:string;from:string|null;to:string;mode:'internal'|'external';state:'requested'|'ready'|'completed';requestedAt:string;summary:string;checkpoint:unknown;receivedBy?:string};
 type CoordinatorRequest={id:string;kind:'discovery'|'resume-workflows'|'workflow-change'|'workflow-action'|'autopilot';prompt:string;state:'queued'|'received'|'completed';createdAt:string;receivedBy?:string;error?:string};
@@ -374,6 +374,24 @@ export class CoordinatorService{
               : { disposition: 'obsolete', reason: q.closedReason, source: 'coordinator-reconciliation' });
           } catch { /* Saved receipt is authoritative; retry metadata synchronization later. */ }
         }
+      }
+      // A resolved decision is no longer an owner wait. Preserve the run as a
+      // checkpoint, never success, and leave continuation to current authority.
+      for (const runId of new Set(w.questions.map(q => q.runId))) {
+        const run = store.agentRuns.findById(runId);
+        if (!run || run.status !== 'awaiting_input' || run.pid != null) continue;
+        const decisions = store.cards.listByRun?.(runId)?.filter(c => c.type === 'decision');
+        if (!decisions?.length || decisions.some(c => c.status === 'pending')) continue;
+        const job = w.jobs.find(j => j.runId === runId || j.reviewRunId === runId);
+        if (job) {
+          const review = job.reviewRunId === runId;
+          job.state = review ? 'review-checkpointed' : 'checkpointed';
+          job.error = 'Question resolved; saved work awaits coordinator continuation. Not task completion.';
+        }
+        // Persist the resumable assignment before releasing its active run slot.
+        this.save();
+        store.agentRuns.update(runId, {status:'stopped', endedAt:new Date().toISOString(), exitReason:'checkpoint: question resolved; coordinator continuation pending'});
+        this.event(w, 'resolved-question-checkpoint', {runId, questionIds: decisions.map(c => c.id)});
       }
       for (const { card, agentRunId } of store.cards.listAllPending()) {
         const payload = card.payload as { question?: string; options?: UserQuestion['options']; commands?:QuestionCommand[] };
@@ -919,14 +937,14 @@ Never approve your own pairing. No provider API keys are needed.\n\nClaude Deskt
     const job=[...w.jobs].reverse().find(j=>j.number===number);if(job&&['worker-completed','qa-passed','merged'].includes(event))await this.phaseContext(w,job,event,card.nextAction??evidence);
     this.event(w,'workflow-event',{number,event,workflowVersion:flow.version,evidence});
   }
-  private queueStageAssignment(w:Workspace,number:number){
+  private queueStageAssignment(w:Workspace,number:number,persist=true){
     const card=w.workflow?.cards[number],stage=w.workflow?.config.stages.find(s=>s.id===card?.stageId);
     if(!card||!stage?.personaId||stage.category==='done')return;
     const entry=stage.id+':'+card.history.length+':'+card.enteredAt;
     const key=number+':'+entry;w.stageAssignments??={};
     w.stageAssignments[key]??={number,stageId:stage.id,entry,state:'queued'};
     card.owner=stage.personaId;card.nextAction='Assigned to '+(this.personaLibrary(w).items.find(p=>p.id===stage.personaId)?.name??stage.personaId);
-    this.save();
+    if(persist)this.save();
   }
   private async finishStageAssignment(w:Workspace,j:Job){
     const a=j.stageAssignment!,flow=w.workflow!,card=flow.cards[j.number];
@@ -942,6 +960,56 @@ Never approve your own pairing. No provider API keys are needed.\n\nClaude Deskt
     moveWorkflowCard(flow,{number:j.number,to:receipt.to,reason:receipt.reason,evidence:receipt.evidence,checks:receipt.checks},'persona:'+a.personaId+' / run:'+j.runId);
     j.state='completed';delete j.error;this.queueStageAssignment(w,j.number);this.event(w,'stage-disposition-applied',{number:j.number,runId:j.runId,from:from.id,to:receipt.to,evidence:receipt.evidence});this.save();
   }
+  private async readRequiredPullRequestChecks(runId:number) {
+    const run=this.run(runId);
+    if(!run.worktreePath||!run.branchName)throw Error('PR lookup requires the implementation worktree and branch.');
+    const options={cwd:run.worktreePath,timeout:30000,maxBuffer:2e6};
+    const read=async()=>JSON.parse((await exec('gh',['pr','view',run.branchName!,'--json','number,url,headRefOid,state,isDraft'],options)).stdout);
+    const pr=await read();
+    if(pr.state!=='OPEN'||pr.isDraft)throw Error('Independent review requires an open, ready PR.');
+    let output:string;let policy:'required'|'all-reported'='required';
+    const args=['pr','checks',String(pr.number),'--json','name,bucket,state,link,completedAt'];
+    try {output=(await exec('gh',[...args,'--required'],options)).stdout;}
+    catch(error){
+      const e=error as {code?:number;stdout?:string;stderr?:string};
+      if((e.code===1||e.code===8)&&e.stdout?.trim().startsWith('['))output=e.stdout;
+      else if(e.code===1&&/no required checks reported/i.test((e.stderr??'')+(e.stdout??''))){
+        policy='all-reported';
+        try{output=(await exec('gh',args,options)).stdout;}catch(failure){const result=failure as {code?:number;stdout?:string};if((result.code===1||result.code===8)&&result.stdout?.trim().startsWith('['))output=result.stdout;else throw failure;}
+      }else throw error;
+    }
+    const reported=JSON.parse(output) as Array<{name:string;bucket:string;link:string}>;
+    // Conditional jobs are not required when the repository has no required-check
+    // policy. Keep them in evidence, but demand a real successful check as well.
+    const checks=policy==='required'?reported:reported.filter(c=>c.bucket!=='skipping');
+    if((await read()).headRefOid!==pr.headRefOid)throw Error('PR head changed while checking CI; retrying the new head.');
+    return {head:pr.headRefOid as string,url:pr.url as string,checks,reported,policy};
+  }
+  private async reconcileCheckpointCI(w:Workspace,j:Job) {
+    if(j.stageAssignment||j.role!=='implementation'||j.readOnly||!['checkpointed','awaiting-review'].includes(j.state))return;
+    if(active(this.run(j.runId).status)||w.jobs.some(other=>other!==j&&other.number===j.number&&other.runId>j.runId))return;
+    const card=w.workflow?.cards[j.number],flow=w.workflow;
+    const current=flow?.config.stages.find(s=>s.id===card?.stageId);
+    if(!flow||!card||!current||!['inProgress','review'].includes(current.category))return;
+    if(Date.now()-(j.ciCheckedAt??0)<60000)return;
+    j.ciCheckedAt=Date.now();
+    if(card.waiting?.owner==='user'){j.error='Owner decision required: '+card.waiting.trigger;card.nextAction=j.error;this.save();return;}
+    try{
+      const ci=await this.readRequiredPullRequestChecks(j.runId);
+      if(!ci.checks.length)throw Error('Required GitHub checks could not be established; configure or verify the PR required checks.');
+      const incomplete=ci.checks.filter(c=>c.bucket!=='pass');
+      if(incomplete.length)throw Error('Required GitHub CI: '+incomplete.map(c=>c.name+' ('+c.bucket+')').join(', '));
+      if(await this.revision(j.runId)!==ci.head)throw Error('Local implementation revision differs from the current PR head; reconcile the saved worktree before review.');
+      const target=current.id==='review'||current.actor==='reviewer'?current:flow.config.stages.find(s=>s.category==='review'&&(s.actor==='reviewer'||s.id==='review'));
+      if(!target?.personaId)throw Error('Review stage has no assigned reviewer persona.');
+      const evidence=JSON.stringify({source:'GitHub required CI',...ci,implementationRunId:j.runId});
+      if(current.id!==target.id&&!flow.config.transitions.some(t=>t.from===current.id&&t.to===target.id&&t.automatic))throw Error('Workflow has no automatic transition from '+current.name+' to '+target.name+'.');
+      moveWorkflowCard(flow,{number:j.number,to:target.id,reason:'Required CI passed on current PR head',evidence,checks:[{id:'deliverable',outcome:'pass',evidence}],clearWaiting:card.waiting?.reason==='CI'},'system:github-ci');
+      j.sha=ci.head;j.ciReview={...ci,checkedAt:new Date().toISOString()};j.state='review-queued';delete j.error;
+      this.queueStageAssignment(w,j.number,false);
+      this.event(w,'ci-review-ready',{number:j.number,implementationRunId:j.runId,head:ci.head,url:ci.url,stageId:target.id,personaId:target.personaId});
+    }catch(error){const reason=clip(error instanceof Error?error.message:'CI reconciliation failed',1500);j.error=reason;card.nextAction=reason;this.save();}
+  }
   private async dispatchStageAssignments(w:Workspace){
     if(w.mode==='off'||w.updateDrain||this.updater?.pending()||(w.handoff&&w.handoff.state!=='completed'))return;
     for(const assignment of Object.values(w.stageAssignments??{})){
@@ -955,6 +1023,20 @@ Never approve your own pairing. No provider API keys are needed.\n\nClaude Deskt
       if(!card||card.stageId!==assignment.stageId||assignment.entry!==stage?.id+':'+card.history.length+':'+card.enteredAt||!stage?.personaId){assignment.state='superseded';continue;}
       if(card.waiting?.owner==='user')continue;
       if(w.jobs.some(j=>j.number===assignment.number && (active(this.run(j.runId).status) || (j.reviewRunId && active(this.run(j.reviewRunId).status)) || ['implementing','checks','reviewing'].includes(j.state))))continue;
+      const implementation=[...w.jobs].reverse().find(j=>j.number===assignment.number&&!j.stageAssignment&&j.role==='implementation');
+      if(implementation&&['checkpointed','awaiting-review'].includes(implementation.state)){
+        assignment.error=implementation.error??'Checkpointed implementation is awaiting exact-head CI evidence.';
+        card.nextAction=assignment.error;this.save();continue;
+      }
+      if(implementation?.ciReview){
+        try{
+          const ci=await this.readRequiredPullRequestChecks(implementation.runId);
+          if(ci.head!==implementation.ciReview.head||!ci.checks.length||ci.checks.some(c=>c.bucket!=='pass')){
+            implementation.state='checkpointed';implementation.ciCheckedAt=0;delete implementation.ciReview;
+            throw Error('PR head or required CI changed before reviewer dispatch; rechecking current revision.');
+          }
+        }catch(error){assignment.error=clip(error instanceof Error?error.message:'CI verification unavailable');card.nextAction=assignment.error;this.save();continue;}
+      }
       const persona=this.personaLibrary(w).items.find(p=>p.id===stage.personaId);
       if(!persona){assignment.state='blocked';assignment.error='Assigned persona is missing';continue;}
       assignment.state='starting';this.save();
@@ -979,10 +1061,10 @@ Never approve your own pairing. No provider API keys are needed.\n\nClaude Deskt
     const stageBase=prior?await this.revision(prior.runId):undefined;
     const stageEvidence=stageAssignment?'\nPrior stage evidence: '+JSON.stringify({runId:prior?.runId,revision:stageBase,checkpoint:prior?.phaseCheckpoint??prior?.checkpoint,card:w.workflow.cards[number],instruction:'Read the referenced run result and exact diff. Preserve prior evidence; do not repeat completed work.'}):'';
     const control=createCheckpoint(this.root);
-    reservation.threadId=thread.id;reservation.priorRunIds=this.context!.store.agentRuns.listByThread(thread.id).map(r=>r.id);reservation.job={...(stageAssignment?{stageAssignment}:{}),readOnly,controlId:control.id,autopilot,number,role:readOnly?'discovery':'implementation',qa:readOnly?false:qa,maxReworks,reworks:0,budgetUsd,state:'implementing'};
+    reservation.threadId=thread.id;reservation.priorRunIds=this.context!.store.agentRuns.listByThread(thread.id).map(r=>r.id);reservation.job={...(stageAssignment?{stageAssignment:{...stageAssignment,...(stageBase?{baseRevision:stageBase}:{})}}:{}),readOnly,controlId:control.id,autopilot,number,role:readOnly?'discovery':'implementation',qa:readOnly?false:qa,maxReworks,reworks:0,budgetUsd,state:'implementing'};
     reservation.state='starting';this.save();
     const run=await this.context!.supervisor.start({appendSystemPrompt:control.prompt,threadId:thread.id,issueNumber:number,...(stageBase?{baseRef:stageBase}:{}),prompt:(stageAssignment?stageDispositionPrompt(this.root,control.id,stageAssignment.entry,w.workflow!.version)+stageAssignment.prompt+'\nStage assignment: '+stageAssignment.stageId+'. Follow existing tool and release permissions; stage ownership grants no additional authority.\n':'')+stageEvidence+guidance+workerDeliveryInstructions(readOnly)+'\n\n'+issue.title+'\n'+(issue.body??''),costBudgetUsd:budgetUsd,provider:'claude-code',personaId:stageAssignment?.personaId??'implementation'});
-    const j:Job={...(stageAssignment?{stageAssignment}:{}),readOnly,controlId:control.id,autopilot,runId:run.id,number,role:readOnly?'discovery':'implementation',qa:readOnly?false:qa,maxReworks,reworks:0,budgetUsd,state:'implementing'};w.jobs.push(j);delete w.dispatchReservations[number];this.save();if(!stageAssignment)await this.workflowSignal(w,number,'worker-started',`Worker run ${run.id} started`,String(run.id));this.save();return {runId:run.id,number,status:run.status,qa,prerequisites:w.dependencies[number]??[],nextAction:'Use waitForChanges'};
+    const j:Job={...(stageAssignment?{stageAssignment:{...stageAssignment,...(stageBase?{baseRevision:stageBase}:{})}}:{}),readOnly,controlId:control.id,autopilot,runId:run.id,number,role:readOnly?'discovery':'implementation',qa:readOnly?false:qa,maxReworks,reworks:0,budgetUsd,state:'implementing'};w.jobs.push(j);delete w.dispatchReservations[number];this.save();if(!stageAssignment)await this.workflowSignal(w,number,'worker-started',`Worker run ${run.id} started`,String(run.id));this.save();return {runId:run.id,number,status:run.status,qa,prerequisites:w.dependencies[number]??[],nextAction:'Use waitForChanges'};
     }catch(error){if(w.dispatchReservations[number]){if(reservation.state==='preparing')delete w.dispatchReservations[number];else{reservation.state='uncertain';(reservation as any).error='Worker start outcome is uncertain. Inspect run history before clearing this reservation.';}this.save();}throw error;}
   }
   private async phaseContext(w:Workspace,j:Job,phase:string,nextAction:string){
@@ -1075,8 +1157,25 @@ Never approve your own pairing. No provider API keys are needed.\n\nClaude Deskt
       if(j.state==='checks'){
         const checks=(await this.h()['agent-runs:checks:list']({runId:j.runId})).filter(c=>j.checkIds?.includes(c.id));if(!checks.length||checks.some(c=>!['pass','fail'].includes(c.status)))continue;
         if(await this.revision(j.runId)!==j.sha)throw Error('Implementation changed during QA. Run QA again.');
+        const infrastructureFailures = checks.filter(c => c.status === 'fail' && /stale trace map/i.test(c.summary ?? ''));
+        if (infrastructureFailures.length) {
+          j.state='blocked';j.error='QA infrastructure blocker: '+infrastructureFailures.map(c=>clip(c.summary)).join('\n');
+          this.event(w,'qa-infrastructure-blocked',{runId:j.runId,number:j.number,sha:j.sha,checkIds:infrastructureFailures.map(c=>c.id),reason:j.error});
+          await this.workflowSignal(w,j.number,'worker-failed',j.error,'qa-infrastructure:'+j.runId+':'+infrastructureFailures.map(c=>c.id).join(','));
+          continue;
+        }
         if(checks.some(c=>c.status==='fail')){await this.repair(w,j,checks.filter(c=>c.status==='fail').map(c=>clip(c.summary)).join('\n'));continue;}
         if(j.autopilot&&!j.manualQA&&w.autopilot?.status!=='active'){j.state='awaiting-review';j.error='Checks finished; independent review remains pending.';this.event(w,'wind-down-checkpoint',{runId:j.runId,remaining:j.error});continue;}
+        const reviewStage=w.workflow?.config.stages.find(stage=>stage.id==='review'&&stage.personaId);
+        if(reviewStage&&w.workflow){
+          const existing=w.jobs.find(other=>other!==j&&other.number===j.number&&other.stageAssignment?.stageId===reviewStage.id&&other.stageAssignment.baseRevision===j.sha);
+          if(existing){j.reviewRunId=existing.runId;j.state='review-delegated';this.event(w,'review-reused',{runId:j.runId,reviewRunId:existing.runId,sha:j.sha});continue;}
+          const current=w.workflow.cards[j.number];
+          if(current?.stageId!==reviewStage.id&&w.workflow.config.stages.find(stage=>stage.id===current?.stageId)?.category!=='inProgress')throw Error('Review stage has already advanced; reconcile existing review evidence before requesting another review.');
+          const evidence='Local QA checks passed for '+j.sha+'; implementation run '+j.runId+'; checks '+j.checkIds?.join(', ');
+          moveWorkflowCard(w.workflow,{number:j.number,to:reviewStage.id,reason:'Implementation QA passed; assigned independent reviewer acts next',evidence,checks:[{id:'deliverable',outcome:'pass',evidence}]},'system:local-qa');
+          j.state='review-queued';this.queueStageAssignment(w,j.number,false);this.event(w,'local-qa-review-ready',{runId:j.runId,number:j.number,sha:j.sha,personaId:reviewStage.personaId});continue;
+        }
         const original=this.run(j.runId);const issue=(await this.h()['issues:get']({number:j.number})).issue;const phase=await this.phaseContext(w,j,'Independent review','Mechanical checks passed for the recorded commit. Review independently; do not treat check success as review approval.');
         const reviewControl=createCheckpoint(this.root);j.reviewControlId=reviewControl.id;const reviewer=await this.context!.supervisor.start({appendSystemPrompt:reviewControl.prompt,threadId:original.threadId,issueNumber:j.number,baseRef:j.sha!,provider:'claude-code',costBudgetUsd:j.budgetUsd,personaId:'reviewer',prompt:phase+'\nWorkflow: '+JSON.stringify(workflowGuidance(w.workflow??newWorkflow(),j.number))+'\n'+`Independently review this committed implementation against the task. Do not edit files, commit, merge or push. Inspect the actual diff against the project target and identify defects or unmet criteria. Your final answer MUST end with exactly KANBOTS_QA_PASS or KANBOTS_QA_FAIL. Include concise evidence.\nImplementation commit: ${j.sha}\nTask: ${issue.title}\n${issue.body??''}`});j.reviewRunId=reviewer.id;j.state='reviewing';this.event(w,'review-started',{runId:j.runId,reviewRunId:reviewer.id});
       }
@@ -1085,6 +1184,7 @@ Never approve your own pairing. No provider API keys are needed.\n\nClaude Deskt
         if(r.status==='complete'&&/KANBOTS_QA_PASS\s*$/.test(texts)&&await this.revision(r.id)===j.sha&&await this.revision(j.runId)===j.sha){j.state='qa-passed';this.event(w,'qa-passed',{runId:j.runId,sha:j.sha,reviewRunId:r.id});await this.workflowSignal(w,j.number,'qa-passed',`Independent review ${r.id} passed for ${j.sha}`,String(r.id));}else await this.repair(w,j,clip(texts||r.exitReason||'Review did not pass',6000));
       }
     }catch(e){j.state='blocked';j.error=clip(e instanceof Error?e.message:'Pipeline blocked',1000);this.event(w,'blocked',{runId:j.runId,reason:j.error});await this.workflowSignal(w,j.number,'worker-failed',j.error,j.controlId??String(j.runId));}}
+    for(const job of w.jobs)await this.reconcileCheckpointCI(w,job);
     await this.dispatchStageAssignments(w);
     this.maintainAutopilot(w);
   }finally{this.polling=false;}}

@@ -50,3 +50,16 @@
 :root[data-theme='paper'] .kb-board-focus .kb-col-head[data-status=inProgress] {background:#e5f0ff;border-radius:7px;}
 :root[data-theme='paper'] .kb-board-focus .kb-col-head[data-status=done] {background:#e4f4e9;border-radius:7px;}
 @media(max-width:700px) {.kb-board-heading{padding:12px;}.kb-board-heading h1{font-size:18px;}.kb-stage-navigation{padding:6px 12px;}}
+
+.kb-board-locate{display:flex;align-items:center;gap:12px;flex-wrap:wrap;padding:12px 24px;border-bottom:1px solid var(--hairline)}
+.kb-board-locate-results{display:flex;flex-direction:column;gap:8px;width:100%}
+.kb-task-tile[data-located=true]{outline:3px solid var(--accent);outline-offset:3px}
+.kb-col:has([data-located=true])>.kb-col-head{box-shadow:inset 0 -3px var(--accent)}
+
+.kb-track-card { display:flex; align-items:center; gap:6px; padding:8px 14px 0; color:var(--ink-2); font-size:12px; cursor:pointer; }
+.kb-track-card input { accent-color:var(--accent); width:16px; height:16px; }
+.kb-board-tracked { display:flex; align-items:center; gap:8px; flex-wrap:wrap; width:100%; }
+.kb-board-tracked .kb-btn { max-width:320px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+
+.kb-board-locate input[type="search"] { min-height:36px; width:240px; max-width:100%; padding:8px 12px; border:1px solid var(--hairline); border-radius:8px; background:var(--bg); color:var(--ink); font:inherit; }
+.kb-board-locate input[type="search"]:focus-visible { outline:2px solid var(--accent); outline-offset:2px; }

@@ -94,7 +94,15 @@ async function loadUsage(credential: Credential, identity: string, empty: CostUs
     for (const [id, raw] of Object.entries(data)) {
       if (!/^(five_hour|seven_day)(_|$)/.test(id)) continue;
       const window = toWindow(raw);
-      if (window) windows.push({ ...window, id, label: id === 'five_hour' ? '5-hour quota' : id === 'seven_day' ? 'Weekly quota' : id.replaceAll('_', ' ') });
+      if (window) {
+        const shared = id === 'five_hour' || id === 'seven_day';
+        const modelFamily = id.replace(/^(five_hour|seven_day)_/, '');
+        windows.push({ ...window, id,
+          label: id === 'five_hour' ? '5-hour quota' : id === 'seven_day' ? 'Weekly quota' : id.replaceAll('_', ' '),
+          scope: shared ? 'subscription' : 'model',
+          ...(shared ? {} : { modelFamily, overlapsSubscription: true }),
+        });
+      }
     }
     if (!windows.length) throw new Error('unavailable');
     const payload: CostUsageResult = { fiveHour: toWindow(data.five_hour), sevenDay: toWindow(data.seven_day), windows, source: 'oauth', checkedAt: new Date().toISOString(), stale: false };

@@ -135,3 +135,15 @@ it('retains account quota across both restart and token rotation during an outag
   expect(readFileSync(path,'utf8')).not.toContain(fixture.token);
  }finally{rmSync(root,{recursive:true,force:true});}
 });
+
+it('keeps Fable allowance separate from its overlapping subscription budget', async () => {
+ vi.stubGlobal('fetch',vi.fn().mockResolvedValue(new Response(JSON.stringify({
+  seven_day:{utilization:27,resets_at:'2026-11-13T16:00:00Z'},
+  seven_day_fable:{utilization:80,resets_at:'2026-11-12T22:00:00Z'},
+ }))));
+ const api=await import('../../src/handlers/cost.js');const result=await api.readClaudeSubscriptionUsage();
+ expect(result.sevenDay?.pct).toBe(.27);
+ expect(result.windows?.find(w=>w.id==='seven_day')).toMatchObject({scope:'subscription',pct:.27});
+ expect(result.windows?.find(w=>w.id==='seven_day_fable')).toMatchObject({scope:'model',modelFamily:'fable',overlapsSubscription:true,pct:.8});
+ expect(result.windows?.find(w=>w.id==='seven_day')?.resetsAt).toBe('2026-11-13T16:00:00Z');
+});

@@ -1,3 +1,4 @@
+import { subscriptionBudget } from './subscription-budget.js';
 import { getClaudeDetails } from './claude-auth.js';
 import { grantCapacity, grantFunding } from './grant-capacity.js';
 import type { ApiConnection,CapacitySnapshot,CapacityRow } from '@kanborg/api';
@@ -7,8 +8,8 @@ import { getAnthropicReportingAccounts,updateAnthropicReporting } from './anthro
 import { manageCodexResets } from './subscription-resets.js';
 import { readRouting,routingState,charged,type Charge } from './routing-state.js';
 import { modelCatalogue,selectApiModel,type PricedModel } from './routing-models.js';
-export type Candidate={id:string;provider:'claude-code'|'codex-cli';kind:'api'|'subscription';score:number;reason:string;row?:ApiConnection;model?:PricedModel;pool?:string;available?:number;since?:number;funding?:'grant'|'paid';deadline?:number;resetAt?:number};
-let configuration:()=>Array<{id:string;enabled:boolean}>=()=>[];
+export type Candidate={nativeModel?:string;id:string;provider:'claude-code'|'codex-cli';kind:'api'|'subscription';score:number;reason:string;row?:ApiConnection;model?:PricedModel;pool?:string;available?:number;since?:number;funding?:'grant'|'paid';deadline?:number;resetAt?:number};
+let configuration:()=>Array<{id:string;enabled:boolean;defaultModel?:string|null}>=()=>[];
 export function configureRoutingProviders(fn:typeof configuration){configuration=fn;}
 const reportingAttempts = new Map<string, number>();
 let cached:{at:number;snapshot:CapacitySnapshot;candidates:Candidate[]}|undefined;
@@ -74,18 +75,34 @@ async function load(hasWork:boolean){
   const state=readRouting();
   if(enabled.has('claude-code')){
     const windows=quota?.windows??[];
-    const fresh=quota?.source==='oauth'&&!quota.stale&&!!quota.checkedAt&&now-Date.parse(quota.checkedAt)>=0&&now-Date.parse(quota.checkedAt)<=6*60000&&windows.every(w=>!w.resetsAt||Date.parse(w.resetsAt)>now);
-    const used=windows.length?Math.max(...windows.map(w=>w.pct*100)):null;
+    // Model allowances overlap the subscription; they are not extra capacity.
+    // Their reset dates must never create urgency for the entire account.
+    const sharedWindows=windows.filter(w=>w.id==='five_hour'||w.id==='seven_day'||!w.id);
+    const modelWindows=windows.filter(w=>!sharedWindows.includes(w));
+    const totalUsed=sharedWindows.length?Math.max(...sharedWindows.map(w=>w.pct*100)):null;
+    for(const window of modelWindows)rows.push({id:'claude-model:'+window.id,label:`Claude · ${window.label}`,kind:'unknown',usedPercent:window.pct*100,remaining:100-window.pct*100,spent:null,available:false,stale:!!quota?.stale,detail:`Overlapping model allowance; use also counts against the total subscription. Not an additional pool.${window.resetsAt?` Resets ${new Date(window.resetsAt).toLocaleString()}.`:''}`});
+    const configuredModel=configuration().find(p=>p.id==='claude-code')?.defaultModel;
+    // A stable CLI alias follows the provider's current release, rather than a
+    // hard-coded model version or an unknown ambient CLI model override.
+    let nativeModel=configuredModel||'sonnet';
+    const family=(name:string)=>name.toLowerCase().match(/(?:^|[-_])(fable|opus|sonnet|haiku)(?:$|[-_])/)?.[1];
+    const normalized=windows.map(w=>({...w,id:w.id||'seven_day'}));
+    let budget=subscriptionBudget(normalized,family(nativeModel));
+    if(budget.known&&budget.headroomPercent!==null&&budget.headroomPercent<=5&&budget.totalUsedPercent!==null&&budget.totalUsedPercent<95&&nativeModel!=='sonnet'){
+      nativeModel='sonnet';budget=subscriptionBudget(normalized,'sonnet');
+    }
+    const applicable=windows.filter(w=>sharedWindows.includes(w)||w.id===`five_hour_${family(nativeModel)}`||w.id===`seven_day_${family(nativeModel)}`);
+    const fresh=quota?.source==='oauth'&&!quota.stale&&!!quota.checkedAt&&now-Date.parse(quota.checkedAt)>=0&&now-Date.parse(quota.checkedAt)<=6*60000&&applicable.every(w=>!w.resetsAt||Date.parse(w.resetsAt)>now);
+    const used=budget.known&&budget.headroomPercent!==null?100-budget.headroomPercent:null;
     const cli = !fresh ? await getClaudeDetails().catch(()=>null) : null;
     // A renewable access token is not a revoked CLI login. Let Claude Code own
     // renewal on the next authorized run; never label the old quota as fresh.
-    const renewable=cli?.cliAvailable===true&&cli.hasKey&&cli.authenticationLabel==='Claude subscription'&&historicalQuotaUsable(used,quota?.checkedAt,windows.map(w=>w.resetsAt?Date.parse(w.resetsAt):null),now);
+    const renewable=cli?.cliAvailable===true&&cli.hasKey&&cli.authenticationLabel==='Claude subscription'&&historicalQuotaUsable(used,quota?.checkedAt,applicable.map(w=>w.resetsAt?Date.parse(w.resetsAt):null),now);
     const usable=(fresh&&used!==null&&used<95)||renewable;
     if(state.config.claudeResetExpiresAt)rows.push({id:'claude-reset',label:'Claude reset offer',kind:'unknown',usedPercent:null,remaining:null,spent:null,available:false,detail:`Manually tracked · ${Date.parse(state.config.claudeResetExpiresAt)>now?'expires':'expired'} ${new Date(state.config.claudeResetExpiresAt).toLocaleString()} · redeem in Claude Usage`});
-    const resetSoon=state.config.claudeResetExpiresAt&&Date.parse(state.config.claudeResetExpiresAt)>now&&Date.parse(state.config.claudeResetExpiresAt)-now<48*3600000;
-    rows.push({id:'claude-sub',label:'Claude subscription',kind:'subscription',needsAttention:quota?.source==='unauthorized'&&!renewable,stale:!fresh&&used!==null,usedPercent:used,remaining:used!==null?100-used:null,spent:null,available:!!usable,detail:!fresh?`${used!==null?'Last reported quota · ':''}${renewable?'Claude Code is signed in. Using the saved reading with a growing safety margin while fresh usage is recovered.':quota?.message??'Quota unavailable; retrying automatically.'}${quota?.checkedAt?` Last successful reading ${new Date(quota.checkedAt).toLocaleString()}.`:''}${windows.filter(w=>w.resetsAt).map(w=>` Last known ${w.label} reset ${new Date(w.resetsAt!).toLocaleString()}.`).join('')}${quota?.retryAt?` Next check ${new Date(quota.retryAt).toLocaleTimeString()}.`:''}`:windows.map(w=>`${w.label}: ${Math.round(w.pct*100)}% used${w.resetsAt?` · resets ${new Date(w.resetsAt).toLocaleString()}`:''}`).join('; ')});
-    const resetHours=Math.min(...windows.filter(w=>w.resetsAt&&Date.parse(w.resetsAt)>now).map(w=>(Date.parse(w.resetsAt!)-now)/3600000));
-    if(usable)candidates.push({id:'claude-sub',provider:'claude-code',kind:'subscription',...(Number.isFinite(resetHours)?{resetAt:now+resetHours*HOUR}:{}),score:renewable?100:resetSoon?280:resetHours<24?270-resetHours:180-(used??0)/10,reason:renewable?'Verified Claude login; recent saved quota with reduced confidence':resetSoon?'Use included capacity before the tracked Claude reset expires':resetHours<24?'Use subscription quota before its approaching reset':'Available Claude subscription quota'});
+    rows.push({id:'claude-sub',label:'Claude subscription',kind:'subscription',needsAttention:quota?.source==='unauthorized'&&!renewable,stale:!fresh&&totalUsed!==null,usedPercent:totalUsed,remaining:totalUsed!==null?100-totalUsed:null,spent:null,available:!!usable,detail:!fresh?`${used!==null?'Last reported quota · ':''}${renewable?'Claude Code is signed in. Using the saved reading with a growing safety margin while fresh usage is recovered.':quota?.message??'Quota unavailable; retrying automatically.'}${quota?.checkedAt?` Last successful reading ${new Date(quota.checkedAt).toLocaleString()}.`:''}${windows.filter(w=>w.resetsAt).map(w=>` Last known ${w.label} reset ${new Date(w.resetsAt!).toLocaleString()}.`).join('')}${quota?.retryAt?` Next check ${new Date(quota.retryAt).toLocaleTimeString()}.`:''}`:windows.map(w=>`${w.label}: ${Math.round(w.pct*100)}% used${w.resetsAt?` · resets ${new Date(w.resetsAt).toLocaleString()}`:''}`).join('; ')});
+    const resetHours=Math.min(...sharedWindows.filter(w=>w.resetsAt&&Date.parse(w.resetsAt)>now).map(w=>(Date.parse(w.resetsAt!)-now)/3600000));
+    if(usable)candidates.push({id:'claude-sub',provider:'claude-code',kind:'subscription',nativeModel,...(Number.isFinite(resetHours)?{resetAt:now+resetHours*HOUR}:{}),score:renewable?100:resetHours<24?270-resetHours:180-(used??0)/10,reason:renewable?'Verified Claude login; recent saved quota with reduced confidence':resetHours<24?'Use subscription quota before its approaching reset':'Available Claude subscription quota'});
   }
   if(enabled.has('codex-cli')){
     const usage=codex?.subscriptionUsage;

@@ -1,5 +1,5 @@
 const {test}=require('node:test');const assert=require('node:assert/strict');const fs=require('node:fs');const path=require('node:path');const Module=require('node:module');const ts=require('typescript');
-function load(fixture){const file=path.resolve(__dirname,'../src/routing-capacity.ts');const mod=new Module(file);mod.paths=Module._nodeModulePaths(path.dirname(file));const req=mod.require.bind(mod);const mocks={
+function load(fixture){const file=path.resolve(__dirname,'../src/routing-capacity.ts');const mod=new Module(file);mod.paths=Module._nodeModulePaths(path.dirname(file));const req=mod.require.bind(mod);const budgetFile=path.resolve(__dirname,'../src/subscription-budget.ts');const budget=new Module(budgetFile);budget._compile(ts.transpileModule(fs.readFileSync(budgetFile,'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS}}).outputText,budgetFile);const mocks={'./subscription-budget.js':budget.exports,
  './grant-capacity.js':{grantCapacity:()=>fixture.grant??({amount:null,since:0,useBy:Infinity,usable:false,detail:''}),grantFunding:()=>({eligibleGrant:!!fixture.grant,paid:!fixture.grant})},
  '@kanborg/api':{readClaudeSubscriptionUsage:async()=>fixture.quota??({source:'oauth',stale:false,checkedAt:new Date().toISOString(),windows:[{pct:.25,resetsAt:new Date(Date.now()+3600000).toISOString()}]})},'./api-connections.js':{listApiConnections:()=>fixture.rows},'./anthropic-reporting.js':{getAnthropicReportingAccounts:()=>[]},'./claude-auth.js':{getClaudeDetails:async()=>({cliAvailable:true,hasKey:true,authenticationLabel:'Claude subscription'})},'./subscription-resets.js':{},
  './routing-state.js':{readRouting:()=>({config:{}}),routingState:()=>({}),charged:()=>0},'./routing-models.js':{modelCatalogue:()=>fixture.catalogue(),selectApiModel:()=>({input:1,output:1})}};
@@ -40,4 +40,21 @@ test('saved Claude reset in sixteen hours takes precedence over an eighteen-day 
  const now=Date.now();const api=load({rows:[{id:'grant',provider:'anthropic',name:'Grant',enabled:true,funding:'grant',afterGrant:'stop'}],catalogue:async()=>[],grant:{amount:175,since:0,useBy:now+18*86400000,usable:true,detail:'Saved balance'},quota:{source:'unavailable',stale:true,checkedAt:new Date(now-3600000).toISOString(),windows:[{id:'seven_day',label:'Weekly quota',pct:.26,resetsAt:new Date(now+16*3600000).toISOString()}]}});
  api.configureRoutingProviders(()=>[{id:'claude-code',enabled:true}]);
  const result=await api.collectCapacity();assert.equal(result.candidates[0].id,'claude-sub');assert.equal(result.candidates[1].funding,'grant');assert.match(result.candidates[0].reason,/resets sooner/);
+});
+
+test('Fable reset cannot accelerate the total subscription deadline or inflate its usage',async()=>{
+ const now=Date.now();const api=load({rows:[],catalogue:async()=>[],quota:{source:'oauth',stale:false,checkedAt:new Date(now).toISOString(),windows:[{id:'seven_day',label:'Weekly quota',pct:.27,resetsAt:new Date(now+16*3600000).toISOString()},{id:'seven_day_fable',label:'Fable quota',pct:.8,resetsAt:new Date(now+3600000).toISOString()}]}});
+ api.configureRoutingProviders(()=>[{id:'claude-code',enabled:true}]);const result=await api.collectCapacity();
+ assert.equal(result.candidates[0].resetAt,now+16*3600000);
+ assert.equal(result.snapshot.rows.find(r=>r.id==='claude-sub').remaining,73);
+ const fable=result.snapshot.rows.find(r=>r.id==='claude-model:seven_day_fable');assert.equal(fable.usedPercent,80);assert.match(fable.detail,/Not an additional pool/);
+});
+
+test('exhausted Fable subset routes useful work on Sonnet without exhausting the shared pool',async()=>{
+ const api=load({rows:[],catalogue:async()=>[],quota:{source:'oauth',stale:false,checkedAt:new Date().toISOString(),windows:[{id:'seven_day',label:'Weekly',pct:.27,resetsAt:new Date(Date.now()+16*3600000).toISOString()},{id:'seven_day_fable',label:'Fable',pct:1,resetsAt:new Date(Date.now()+3600000).toISOString()}]}});
+ api.configureRoutingProviders(()=>[{id:'claude-code',enabled:true,defaultModel:'fable'}]);const result=await api.collectCapacity();assert.equal(result.candidates[0].nativeModel,'sonnet');assert.equal(result.snapshot.rows.find(r=>r.id==='claude-sub').remaining,73);
+});
+test('Fable uses both budgets when selected and total exhaustion blocks it',async()=>{
+ const f={rows:[],catalogue:async()=>[],quota:{source:'oauth',stale:false,checkedAt:new Date().toISOString(),windows:[{id:'seven_day',label:'Weekly',pct:.3,resetsAt:new Date(Date.now()+3600000).toISOString()},{id:'seven_day_fable',label:'Fable',pct:.5,resetsAt:new Date(Date.now()+3600000).toISOString()}]}};
+ const api=load(f);api.configureRoutingProviders(()=>[{id:'claude-code',enabled:true,defaultModel:'fable'}]);assert.equal((await api.collectCapacity()).candidates[0].nativeModel,'fable');f.quota.windows[0].pct=1;assert.equal((await api.collectCapacity(false,true)).candidates.length,0);
 });

@@ -3,7 +3,7 @@ const assert=require('node:assert/strict');
 const ts=require('typescript');const fs=require('node:fs');const path=require('node:path');const Module=require('node:module');const {EventEmitter}=require('node:events');
 function load(name,mocks={}){
  const file=path.join(__dirname,'../src',name+'.ts');const mod=new Module(file);const original=mod.require.bind(mod);
- mod.require=id=>Object.hasOwn(mocks,id)?mocks[id]:original(id);
+ mod.require=id=>Object.hasOwn(mocks,id)?mocks[id]:id==='./subscription-budget.js'?load('subscription-budget'):original(id);
  mod._compile(ts.transpileModule(fs.readFileSync(file,'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText,file);return mod.exports;
 }
 const {resetToRedeem}=load('reset-policy');

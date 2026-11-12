@@ -9,7 +9,8 @@ import { apiTurn,RouteUnavailable,type TranscriptEntry } from './api-task.js';
 import { collectCapacity,invalidateCapacity,type Candidate } from './routing-capacity.js';
 import { readRouting,recordDecision } from './routing-state.js';
 import { subscriptionFailure, recoveryContext } from './routing-recovery.js';
-type Session={cwd:string;transcript:TranscriptEntry[];native?:{provider:'claude-code'|'codex-cli';id:string}};
+type Session={cwd:string;transcript:TranscriptEntry[];native?:{model?:string;provider:'claude-code'|'codex-cli';id:string}};
+const routeKey=(route:Candidate)=>route.id+(route.nativeModel?':'+route.nativeModel:'');
 const sessions=()=>join(app.getPath('userData'),'routed-sessions');
 function saveSession(id:string,data:Session){mkdirSync(sessions(),{recursive:true,mode:0o700});const path=join(sessions(),id+'.json');writeFileSync(path+'.tmp',JSON.stringify(data),{mode:0o600});renameSync(path+'.tmp',path);}
 export function startRoutedRun(opts:StartAgentRunOptions):AgentRunHandle{
@@ -36,7 +37,7 @@ export function startRoutedRun(opts:StartAgentRunOptions):AgentRunHandle{
       for(let step=0;step<80;step++){
         abort.signal.throwIfAborted();
         const {candidates}=await collectCapacity(true,step===0);
-        const route=candidates.find(c=>!blocked.has(c.id));
+        const route=candidates.find(c=>!blocked.has(routeKey(c)));
         if(!route)throw Error('No usable capacity: refresh quota or grant balances, connect a priced API model, or enable an allowed payment source.');
         if(route.id!==lastRoute){
           lastRoute=route.id;
@@ -54,11 +55,11 @@ export function startRoutedRun(opts:StartAgentRunOptions):AgentRunHandle{
             saveSession(id,session);
             if(result.done)return;
           }catch(error){
-            if(error instanceof RouteUnavailable){blocked.add(route.id);emit({kind:'text',text:'Switching payment source before the next request: '+error.message+'\n'});continue;}
+            if(error instanceof RouteUnavailable){blocked.add(routeKey(route));emit({kind:'text',text:'Switching payment source before the next request: '+error.message+'\n'});continue;}
             throw error;
           }
         }else{
-          const same=session.native?.provider===route.provider;
+          const same=session.native?.provider===route.provider&&session.native?.model===route.nativeModel;
           const archive=join(sessions(),id+'.json');
           const fullContext=session.transcript.map(m=>`${m.role}: ${m.text}`).join('\n\n');
           const prompt=same?opts.prompt:compactRecovery||fullContext.length>32000?recoveryContext(session.transcript,opts.prompt,archive):fullContext;
@@ -80,6 +81,7 @@ export function startRoutedRun(opts:StartAgentRunOptions):AgentRunHandle{
             }
           }
           child=startAgentRun({cwd:opts.cwd,prompt,provider:route.provider,spawn:cleanSpawn,
+            ...(route.nativeModel?{model:route.nativeModel}:{}),
             ...(opts.appendSystemPrompt?{appendSystemPrompt:opts.appendSystemPrompt}:{}),
             ...(same&&session.native?{resumeFromSessionId:session.native.id}:{}),
             ...(opts.env?{env:opts.env}:{}),...(extraArgs?{extraArgs}:{}),
@@ -87,7 +89,7 @@ export function startRoutedRun(opts:StartAgentRunOptions):AgentRunHandle{
           let limited=false;let hadTools=false;let hadOutput=false;let launchError='';let diagnostic='';
           child.on('event',event=>{
             if(event.kind==='session'){
-              session.native={provider:route.provider,id:event.sessionId};saveSession(id,session);
+              session.native={provider:route.provider,id:event.sessionId,...(route.nativeModel?{model:route.nativeModel}:{})};saveSession(id,session);
               emit({...event,sessionId:id,provider:route.provider});return;
             }
             if(event.kind==='rate_limit'){limited=true;return;}
@@ -104,10 +106,10 @@ export function startRoutedRun(opts:StartAgentRunOptions):AgentRunHandle{
           child.on('error',error=>{launchError=error instanceof Error?error.message:String(error);});
           // Re-evaluate before a subscription can quietly become a paid-credit route.
           const monitor=setInterval(()=>void collectCapacity(false,true).then(({candidates})=>{
-            if(!candidates.some(c=>c.id===route.id)){limited=true;child?.stop();}
+            if(!candidates.some(c=>routeKey(c)===routeKey(route))){limited=true;child?.stop();}
           }).catch(()=>{}),60000);
           const summary=await child.done;clearInterval(monitor);child=undefined;saveSession(id,session);
-          if(limited){blocked.add(route.id);invalidateCapacity();delete session.native;
+          if(limited){blocked.add(routeKey(route));invalidateCapacity();delete session.native;
             if(hadTools)session.transcript.push({role:'user',text:'The previous subscription stopped for capacity. Continue from recorded completed tool results; inspect current files before making further changes.'});
             continue;
           }
@@ -129,7 +131,7 @@ export function startRoutedRun(opts:StartAgentRunOptions):AgentRunHandle{
                 recovered.add(route.id);
                 emit({kind:'text',text:`KanBorg recovery: ${providerName} could not connect. Retrying once before choosing another available source.\n`});continue;
               }
-              blocked.add(route.id);delete session.native;saveSession(id,session);
+              blocked.add(routeKey(route));delete session.native;saveSession(id,session);
               emit({kind:'text',text:`KanBorg recovery: ${providerName}: ${problem.message} Checking another allowed source; your message is preserved.\n`});continue;
             }
             throw Error(`${providerName}: ${problem.message} ${hadTools?'Work may already have changed files; saved progress is preserved and was not replayed.':'Your conversation is saved; retry after resolving the provider issue.'}`);

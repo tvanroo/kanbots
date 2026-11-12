@@ -634,7 +634,7 @@ export interface CostUsageResult {
   checkedAt?: string;
   stale?: boolean;
   message?: string;
-  windows?: Array<CostUsageWindow & { id: string; label: string }>;
+  windows?: Array<CostUsageWindow & { id: string; label: string; scope?: 'subscription' | 'model'; modelFamily?: string; overlapsSubscription?: boolean }>;
   fiveHour: CostUsageWindow | null;
   sevenDay: CostUsageWindow | null;
   // 'oauth' = live numbers, 'unauthorized' = token expired (relog required),
