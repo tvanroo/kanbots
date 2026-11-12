@@ -1,7 +1,7 @@
 const {test}=require('node:test');const assert=require('node:assert/strict');const fs=require('node:fs');const path=require('node:path');const Module=require('node:module');const ts=require('typescript');
 function load(fixture){const file=path.resolve(__dirname,'../src/routing-capacity.ts');const mod=new Module(file);mod.paths=Module._nodeModulePaths(path.dirname(file));const req=mod.require.bind(mod);const mocks={
- './grant-capacity.js':{grantCapacity:()=>({amount:null,since:0,useBy:Infinity,usable:false,detail:''}),grantFunding:()=>({eligibleGrant:false,paid:true})},
- '@kanborg/api':{readClaudeSubscriptionUsage:async()=>({source:'oauth',stale:false,checkedAt:new Date().toISOString(),windows:[{pct:.25,resetsAt:new Date(Date.now()+3600000).toISOString()}]})},'./api-connections.js':{listApiConnections:()=>fixture.rows},'./anthropic-reporting.js':{getAnthropicReportingAccounts:()=>[]},'./claude-auth.js':{},'./subscription-resets.js':{},
+ './grant-capacity.js':{grantCapacity:()=>fixture.grant??({amount:null,since:0,useBy:Infinity,usable:false,detail:''}),grantFunding:()=>({eligibleGrant:!!fixture.grant,paid:!fixture.grant})},
+ '@kanborg/api':{readClaudeSubscriptionUsage:async()=>fixture.quota??({source:'oauth',stale:false,checkedAt:new Date().toISOString(),windows:[{pct:.25,resetsAt:new Date(Date.now()+3600000).toISOString()}]})},'./api-connections.js':{listApiConnections:()=>fixture.rows},'./anthropic-reporting.js':{getAnthropicReportingAccounts:()=>[]},'./claude-auth.js':{getClaudeDetails:async()=>({cliAvailable:true,hasKey:true,authenticationLabel:'Claude subscription'})},'./subscription-resets.js':{},
  './routing-state.js':{readRouting:()=>({config:{}}),routingState:()=>({}),charged:()=>0},'./routing-models.js':{modelCatalogue:()=>fixture.catalogue(),selectApiModel:()=>({input:1,output:1})}};
  mod.require=id=>mocks[id]??req(id);mod._compile(ts.transpileModule(fs.readFileSync(file,'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText,file);return mod.exports;}
 const row={id:'key',provider:'openai',name:'Test',enabled:true,funding:'paid'};
@@ -19,4 +19,25 @@ test('historical quota confidence declines without converting an outage into exh
  assert.equal(usable(6,stamp(25),[],now),false);
  assert.equal(usable(6,stamp(1),[now-1],now),false);
  assert.equal(usable(null,stamp(1),[],now),false);
+});
+
+ test('usable historical Claude quota retains its known reset deadline and displays it',async()=>{
+ const reset=new Date(Date.now()+16*3600000).toISOString();
+ const api=load({rows:[],catalogue:async()=>[],quota:{source:'unavailable',stale:true,checkedAt:new Date(Date.now()-3600000).toISOString(),windows:[{id:'seven_day',label:'Weekly quota',pct:.26,resetsAt:reset}]}});
+ api.configureRoutingProviders(()=>[{id:'claude-code',enabled:true}]);
+ const result=await api.collectCapacity();
+ assert.equal(result.candidates[0].resetAt,Date.parse(reset));
+ assert.match(result.snapshot.rows[0].detail,/Last known Weekly quota reset/);
+ assert.equal(result.snapshot.rows[0].stale,true);
+ });
+ test('historical quota past its reset is not inferred to be replenished',async()=>{
+ const api=load({rows:[],catalogue:async()=>[],quota:{source:'unavailable',stale:true,checkedAt:new Date(Date.now()-3600000).toISOString(),windows:[{id:'seven_day',label:'Weekly quota',pct:.26,resetsAt:new Date(Date.now()-1000).toISOString()}]}});
+ api.configureRoutingProviders(()=>[{id:'claude-code',enabled:true}]);
+ assert.equal((await api.collectCapacity()).candidates.length,0);
+ });
+
+test('saved Claude reset in sixteen hours takes precedence over an eighteen-day grant',async()=>{
+ const now=Date.now();const api=load({rows:[{id:'grant',provider:'anthropic',name:'Grant',enabled:true,funding:'grant',afterGrant:'stop'}],catalogue:async()=>[],grant:{amount:175,since:0,useBy:now+18*86400000,usable:true,detail:'Saved balance'},quota:{source:'unavailable',stale:true,checkedAt:new Date(now-3600000).toISOString(),windows:[{id:'seven_day',label:'Weekly quota',pct:.26,resetsAt:new Date(now+16*3600000).toISOString()}]}});
+ api.configureRoutingProviders(()=>[{id:'claude-code',enabled:true}]);
+ const result=await api.collectCapacity();assert.equal(result.candidates[0].id,'claude-sub');assert.equal(result.candidates[1].funding,'grant');assert.match(result.candidates[0].reason,/resets sooner/);
 });

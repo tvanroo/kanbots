@@ -202,7 +202,7 @@ test('grant routing compares natural resets with grant deadlines and observed sp
  assert.equal(await preferred({expiryHours:48}), 'grant');
  assert.equal(await preferred({expiryHours:6*24,remaining:184.08,resetHours:48}), 'grant');
  assert.equal(await preferred({resetHours:8}), 'codex-sub');
- assert.equal(await preferred({stale:true}), 'grant');
+ assert.equal(await preferred({stale:true}), 'codex-sub');
  assert.equal(await preferred({charges:[],remaining:184.08,expiryHours:19*24,resetHours:48}), 'codex-sub');
  assert.equal(await preferred({remaining:184.08,expiryHours:19*24,resetHours:48}), 'codex-sub');
  assert.equal(await preferred({charges:[],expiryHours:48,resetHours:72}), 'grant');
