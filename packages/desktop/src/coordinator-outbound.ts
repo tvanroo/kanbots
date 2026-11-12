@@ -30,7 +30,7 @@ export async function deliverWake(out:Outbound,adapters:Map<string,HostAdapter>,
  if(e.attempts>=6){e.state='failed';e.error='Delivery requires attention after six attempts';save();return;}
  e.attempts++;e.updatedAt=now;e.nextAttemptAt=now+Math.min(300000,5000*2**(e.attempts-1));save();
  try{
-  const reach=await bounded(adapter.reachable(b));e.reachability=reach.state;if(reach.state==='revoked'){b.state='revoked';e.state='cancelled';return;}if(reach.state!=='available')return;
+  const reach=await bounded(adapter.reachable(b));e.reachability=reach.state;if(reach.state==='offline'){e.attempts--;e.nextAttemptAt=now+30000;delete e.error;return;}if(reach.state==='revoked'){b.state='revoked';e.state='cancelled';return;}if(reach.state!=='available')return;
   if(!valid(e)||b.state!=='approved'){e.state='cancelled';save();return;}
   if(!uncertain){e.state='sending';save();}
   const result=await bounded(uncertain?adapter.reconcile(b,e.id,e.receipt):adapter.send(b,{id:e.id,workspaceId:e.workspaceId,clientId:e.clientId,epoch:e.epoch,kind:e.kind,cursor:e.cursor,...(e.handoffId?{handoffId:e.handoffId}:{})}));
