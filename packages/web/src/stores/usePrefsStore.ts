@@ -582,7 +582,9 @@ if (typeof window !== 'undefined' && getBridge()?.coordinatorAction) {
  let previous=snapshot();
  usePrefsStore.subscribe(()=>{
   const next=snapshot();
-  if(!applying)for(const key of ['tweaks','diff','board','savedViews'] as const){const changed:Record<string,unknown>={};for(const [field,value] of Object.entries(next[key]))if(JSON.stringify(value)!==JSON.stringify((previous[key] as any)[field]))changed[field]=value;if(Object.keys(changed).length)pending[key]={...(pending[key] as object??{}),...changed};}
+  // Saved views are one validated group: selection and deletion must travel
+  // with the view list, while independent appearance fields remain deltas.
+  if(!applying)for(const key of ['tweaks','diff','board','savedViews'] as const){const changed:Record<string,unknown>={};for(const [field,value] of Object.entries(next[key]))if(JSON.stringify(value)!==JSON.stringify((previous[key] as any)[field]))changed[field]=value;if(Object.keys(changed).length)pending[key]=key==='savedViews'?next.savedViews:{...(pending[key] as object??{}),...changed};}
   previous=next;
  });
  const sync=async()=>{
