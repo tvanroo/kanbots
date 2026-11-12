@@ -230,16 +230,19 @@ export class CoordinatorService{
     const now=Date.now();const age=(at:string|undefined)=>{const time=Date.parse(at??'');return Number.isFinite(time)&&time<=now?now-time:null;};
     const activeJobs=w.jobs.filter(j=>[j.runId,j.reviewRunId].some(id=>id!==undefined&&active(this.context!.store.agentRuns.findById(id)?.status??'')));
     const activeRunIds=[...new Set(activeJobs.flatMap(j=>[j.runId,j.reviewRunId].filter((id):id is number=>id!==undefined&&active(this.context!.store.agentRuns.findById(id)?.status??''))))];
+    const runStates=activeRunIds.map(runId=>{const run=this.run(runId);return {runId,status:run.status,processAttached:run.pid!=null};});
+    const waitingRunIds=runStates.filter(r=>r.status==='awaiting_input').map(r=>r.runId);
+    const executingRunIds=runStates.filter(r=>r.status==='starting'||r.status==='running').map(r=>r.runId);
     const byTask=new Map<number,number[]>();for(const job of activeJobs)byTask.set(job.number,[...(byTask.get(job.number)??[]),job.runId]);
     const reservations=Object.entries(w.dispatchReservations??{}).map(([number,r])=>({number:Number(number),id:r.id,state:r.state,ageMs:age(r.at)}));
     const counts:Record<string,number>={};for(const event of w.events)counts[event.type]=(counts[event.type]??0)+1;
     return {observedAt:new Date(now).toISOString(),workspaceId:w.id,revision:w.revision,
-      workers:{target:w.parallelism,active:activeRunIds.length,activeAssignments:activeJobs.length,runIds:activeRunIds,reserved:reservations.length,queued:w.queue?.length??0,availableSlots:Math.max(0,w.parallelism-activeJobs.length-reservations.length),duplicateTasks:[...byTask].filter(([,ids])=>ids.length>1).map(([number,runIds])=>({number,runIds}))},
+      workers:{target:w.parallelism,active:activeRunIds.length,executing:executingRunIds.length,waitingForInput:waitingRunIds.length,executingRunIds,waitingRunIds,runStates,activeAssignments:activeJobs.length,runIds:activeRunIds,reserved:reservations.length,queued:w.queue?.length??0,availableSlots:Math.max(0,w.parallelism-activeJobs.length-reservations.length),duplicateTasks:[...byTask].filter(([,ids])=>ids.length>1).map(([number,runIds])=>({number,runIds}))},
       recovery:{dispatches:reservations,releases:w.releases.filter(r=>['executing','uncertain','failed'].includes(r.state)).map(r=>({id:r.id,state:r.state,sha:r.sha,action:r.action})),workers:w.jobs.filter(j=>['blocked','checkpointed','review-checkpointed','interrupted'].includes(j.state)).map(j=>({runId:j.runId,number:j.number,state:j.state}))},
       stages:Object.values(w.workflow?.cards??{}).map(c=>({number:c.number,stageId:c.stageId,enteredAt:c.enteredAt,ageMs:age(c.enteredAt),waiting:c.waiting??null})),
       pendingRequests:(w.requests??[]).filter(r=>r.state!=='completed').map(r=>({id:r.id,kind:r.kind,state:r.state,ageMs:age(r.createdAt)})),
       eventWindow:{firstCursor:w.events[0]?.cursor??null,lastCursor:w.events.at(-1)?.cursor??null,from:w.events[0]?.at??null,through:w.events.at(-1)?.at??null,retained:w.events.length,truncated:(w.events[0]?.cursor??1)>1,counts},
-      limits:'Current worker counts are a snapshot. Event counts cover only the retained window, not lifetime totals. Merge/PR completion is not verified deployment. Unknown or future timestamps have null age.'};
+      limits:'Current worker counts are a snapshot. Active assignments include awaiting-input runs and are not a count of executing agents. Process attachment is recorded metadata, not a liveness probe. Event counts cover only the retained window, not lifetime totals. Merge/PR completion is not verified deployment. Unknown or future timestamps have null age.'};
   }
   async uiAction(action:string,args:any={},ownReceipt=false):Promise<any>{
     const w=this.current();

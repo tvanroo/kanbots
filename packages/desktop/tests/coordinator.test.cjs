@@ -759,3 +759,15 @@ test('queued stage persona honors owner wait across restart and dispatches once 
   assert.equal(f.startInputs[0].personaId,'reviewer');
  }finally{f.cleanup();}
 });
+
+test('metrics distinguish parked input waits from executing workers without releasing ownership',async()=>{
+ const f=fixture();try{
+  const c=await control(f);await write(f,c,'dispatchTask',{number:1,qa:false});
+  f.runs.get(1).status='awaiting_input';f.runs.get(1).pid=null;
+  const restored=f.reload();const result=await restored.call(c.actor,c.id,'getCoordinationMetrics',{workspaceId:c.id});
+  assert.equal(result.workers.active,1);assert.equal(result.workers.executing,0);assert.equal(result.workers.waitingForInput,1);
+  assert.deepEqual(result.workers.waitingRunIds,[1]);assert.equal(result.workers.runStates[0].processAttached,false);
+  assert.equal(result.workers.activeAssignments,1);assert.equal(f.starts,1);
+  assert.match(result.limits,/not a liveness probe/);
+ }finally{f.cleanup();}
+});
