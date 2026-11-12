@@ -30,10 +30,10 @@ test('historical quota confidence declines without converting an outage into exh
  assert.match(result.snapshot.rows[0].detail,/Last known Weekly quota reset/);
  assert.equal(result.snapshot.rows[0].stale,true);
  });
- test('historical quota past its reset is not inferred to be replenished',async()=>{
+ test('past reset permits an authenticated attempt without inventing replenished quota',async()=>{
  const api=load({rows:[],catalogue:async()=>[],quota:{source:'unavailable',stale:true,checkedAt:new Date(Date.now()-3600000).toISOString(),windows:[{id:'seven_day',label:'Weekly quota',pct:.26,resetsAt:new Date(Date.now()-1000).toISOString()}]}});
  api.configureRoutingProviders(()=>[{id:'claude-code',enabled:true}]);
- assert.equal((await api.collectCapacity()).candidates.length,0);
+ const result=await api.collectCapacity();assert.equal(result.candidates.length,1);assert.equal(result.candidates[0].resetAt,undefined);assert.equal(result.snapshot.rows[0].remaining,74);assert.equal(result.snapshot.rows[0].stale,true);
  });
 
 test('saved Claude reset in sixteen hours takes precedence over an eighteen-day grant',async()=>{
@@ -58,3 +58,5 @@ test('Fable uses both budgets when selected and total exhaustion blocks it',asyn
  const f={rows:[],catalogue:async()=>[],quota:{source:'oauth',stale:false,checkedAt:new Date().toISOString(),windows:[{id:'seven_day',label:'Weekly',pct:.3,resetsAt:new Date(Date.now()+3600000).toISOString()},{id:'seven_day_fable',label:'Fable',pct:.5,resetsAt:new Date(Date.now()+3600000).toISOString()}]}};
  const api=load(f);api.configureRoutingProviders(()=>[{id:'claude-code',enabled:true,defaultModel:'fable'}]);assert.equal((await api.collectCapacity()).candidates[0].nativeModel,'fable');f.quota.windows[0].pct=1;assert.equal((await api.collectCapacity(false,true)).candidates.length,0);
 });
+
+test('signed-in Claude with missing or very stale quota stays eligible without reporting a fresh balance',async()=>{for(const quota of [{source:'unavailable',stale:true,windows:[]},{source:'unavailable',stale:true,checkedAt:new Date(Date.now()-7*86400000).toISOString(),windows:[{id:'seven_day',pct:1}]}]){const api=load({rows:[],catalogue:async()=>[],quota});api.configureRoutingProviders(()=>[{id:'claude-code',enabled:true}]);const result=await api.collectCapacity();assert.equal(result.candidates[0].id,'claude-sub');assert.match(result.snapshot.rows[0].detail,/Quota is unverified/);assert.equal(result.snapshot.rows[0].remaining,quota.windows.length?0:null);}});

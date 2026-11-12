@@ -29,3 +29,24 @@ test('corrupt staged replacement cannot retire the working credential',async()=>
  v=new SecretVault(dbPath,()=>Buffer.alloc(32,4));assert.throws(()=>v.activate(next.id));assert.equal(v.list('p').find(s=>s.id===old.id).state,'active');assert.equal(v.list('p').find(s=>s.id===next.id).state,'staged');assert.equal(await v.withLease(old.id,'p','trusted',1000,async b=>b.toString()),'working');
  }finally{v?.close();fs.rmSync(dir,{recursive:true,force:true});}
 });
+test('multiple consumer, repository and global grants persist and remain authenticated',async()=>{
+ const dir=fs.mkdtempSync(path.join(os.tmpdir(),'kanborg-vault-scopes-')),file=path.join(dir,'vault.db');let v;
+ try{
+  v=new SecretVault(file,()=>Buffer.alloc(32,9));v.initialize();
+  const scoped=v.stage('owner','multi','Selected consumers',Buffer.from('synthetic'),[{kind:'consumer',projectId:'cardbox',consumer:'importer'},{kind:'consumer',projectId:'cardbox',consumer:'reviewer'},{kind:'project',projectId:'other'}]);v.activate(scoped.id);
+  for(const [project,consumer] of [['cardbox','importer'],['cardbox','reviewer'],['other','new-consumer']])assert.equal(await v.withLease(scoped.id,project,consumer,1000,async b=>b.toString()),'synthetic');
+  for(const [project,consumer] of [['cardbox','unknown'],['unknown','importer']])await assert.rejects(v.withLease(scoped.id,project,consumer,1000,async()=>{}),/unavailable/);
+  assert.equal(v.list('owner')[0].authorizedScopes.length,3);
+  await v.backup(path.join(dir,'backup.db'));v.close();v=new SecretVault(path.join(dir,'backup.db'),()=>Buffer.alloc(32,9));
+  assert.equal(await v.withLease(scoped.id,'other','future',1000,async b=>b.toString()),'synthetic');
+  const all=v.stage('owner','global','All',Buffer.from('synthetic'),[{kind:'all'}]);v.activate(all.id);
+  assert.equal(await v.withLease(all.id,'future-repo','future-consumer',1000,async b=>b.toString()),'synthetic');
+  await assert.rejects(v.withLease(all.id,'future-repo','',1000,async()=>{}),/unavailable/);
+  v.revoke(all.id);await assert.rejects(v.withLease(all.id,'future-repo','future-consumer',1000,async()=>{}),/unavailable/);
+  assert.throws(()=>v.stage('owner','bad','scope',Buffer.from('synthetic'),[]),/Select/);
+  assert.throws(()=>v.stage('owner','bad','scope',Buffer.from('synthetic'),[{kind:'all',projectId:'unexpected'}]),/Invalid/);
+  v.close();v=null;
+  const Database=m.require('better-sqlite3'),db=new Database(path.join(dir,'backup.db'));db.prepare('UPDATE secrets SET scopes=? WHERE id=?').run(JSON.stringify([{kind:'all'}]),scoped.id);db.close();
+  v=new SecretVault(path.join(dir,'backup.db'),()=>Buffer.alloc(32,9));await assert.rejects(v.withLease(scoped.id,'unapproved','consumer',1000,async()=>{}));
+ }finally{v?.close();fs.rmSync(dir,{recursive:true,force:true});}
+});

@@ -1,7 +1,7 @@
 const {test}=require('node:test');const assert=require('node:assert/strict');const fs=require('node:fs');const path=require('node:path');const Module=require('node:module');const ts=require('typescript');
 function load(file,mocks={}){const mod=new Module(file);mod.paths=Module._nodeModulePaths(path.dirname(file));const original=mod.require.bind(mod);mod.require=id=>Object.hasOwn(mocks,id)?mocks[id]:original(id);mod._compile(ts.transpileModule(fs.readFileSync(file,'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText,file);return mod.exports;}
 const manifest={...load(path.resolve(__dirname,'../../mcp/src/app-controls.ts')),...load(path.resolve(__dirname,'../../mcp/src/coordinator.ts'),{'./app-controls.js':load(path.resolve(__dirname,'../../mcp/src/app-controls.ts')),'./workflow-schema.js':load(path.resolve(__dirname,'../../mcp/src/workflow-schema.ts'))}),...load(path.resolve(__dirname,'../../mcp/src/onboarding.ts'))};
-function fixture(){const vaultItems=[];const vaultCalls=[];let cancelVault=false;const root=fs.mkdtempSync('/private/tmp/kanbots-coordinator-test-');const {CoordinatorService}=load(path.resolve(__dirname,'../src/coordinator.ts'),{'./vault-runtime.js':{vaultAction:async(action,args,project)=>{vaultCalls.push({action,args,project});return {initialized:true,items:vaultItems,cancelled:cancelVault};}},'./performance-diagnostics.js':{recordPerformanceTiming:()=>{}},'./question-presentation.js':load(path.resolve(__dirname,'../src/question-presentation.ts')),'./providers-ipc.js':{getProviderHandlers:()=>({'providers:get':async()=>({source:'app-store'})})},'./routing-state.js':{routingState:()=>({}),saveRouting:c=>c},'./persona-library.js':load(path.resolve(__dirname,'../src/persona-library.ts')),'./coordinator-outbound.js':load(path.resolve(__dirname,'../src/coordinator-outbound.ts')),electron:{app:{getPath:()=>root,getVersion:()=>"test"}},'@kanborg/mcp':manifest,'./worker-checkpoint.js':load(path.resolve(__dirname,'../src/worker-checkpoint.ts')),'./workflow.js':load(path.resolve(__dirname,'../src/workflow.ts')),'@kanborg/core':load(path.resolve(__dirname,'../../core/src/labels.ts')), './routing-capacity.js':{collectCapacity:async()=>({snapshot:{rows:[]}})}});const svc=new CoordinatorService(root);let starts=0;const resumes=[];const startInputs=[];let issues=[{number:1,title:'Test task',body:'Acceptance: works',labels:[]}];const runs=new Map();let checks=[];const handlers={
+function fixture(){const vaultItems=[];const vaultCalls=[];let cancelVault=false;const root=fs.mkdtempSync('/private/tmp/kanbots-coordinator-test-');const {CoordinatorService}=load(path.resolve(__dirname,'../src/coordinator.ts'),{'./secret-vault.js':load(path.resolve(__dirname,'../src/secret-vault.ts')),'./vault-runtime.js':{vaultAction:async(action,args,project)=>{vaultCalls.push({action,args,project});return {initialized:true,items:vaultItems,cancelled:cancelVault};}},'./performance-diagnostics.js':{recordPerformanceTiming:()=>{}},'./question-presentation.js':load(path.resolve(__dirname,'../src/question-presentation.ts')),'./providers-ipc.js':{getProviderHandlers:()=>({'providers:get':async()=>({source:'app-store'})})},'./routing-state.js':{routingState:()=>({}),saveRouting:c=>c},'./persona-library.js':load(path.resolve(__dirname,'../src/persona-library.ts')),'./coordinator-outbound.js':load(path.resolve(__dirname,'../src/coordinator-outbound.ts')),electron:{app:{getPath:()=>root,getVersion:()=>"test"}},'@kanborg/mcp':manifest,'./worker-checkpoint.js':load(path.resolve(__dirname,'../src/worker-checkpoint.ts')),'./workflow.js':load(path.resolve(__dirname,'../src/workflow.ts')),'@kanborg/core':load(path.resolve(__dirname,'../../core/src/labels.ts')), './routing-capacity.js':{collectCapacity:async()=>({snapshot:{rows:[]}})}});const svc=new CoordinatorService(root);let starts=0;const resumes=[];const startInputs=[];let issues=[{number:1,title:'Test task',body:'Acceptance: works',labels:[]}];const runs=new Map();let checks=[];const handlers={
  'workspace:get':async()=>({id:'test-board'}),'autopilot:list-active':async()=>[], 'issues:list':async()=>issues,'issues:get':async a=>({issue:issues.find(i=>i.number===a.number)}),'issues:create':async a=>{const i={number:issues.length+1,...a};issues.push(i);return i;},'issues:patch':async a=>Object.assign(issues.find(i=>i.number===a.number),a.patch),
  'config:get':async()=>({owner:'local',repo:'test'}),'decisions:pending':async()=>[],
  'agent-runs:checks:run':async()=>{checks=[{id:1,kind:'tests',status:'running'}];return checks;},'agent-runs:checks:list':async()=>checks,
@@ -637,7 +637,7 @@ test('independent reviewer external wait never triggers implementation rework an
   f.svc.context.supervisor.resume=resume;
   await write(f,c,'followUpRun',{runId:job.reviewRunId,message:'Hosted evidence is now available; complete the remaining independent assessment',origin:'manual'});
   assert.equal(f.resumes.length,1);assert.equal(f.resumes[0].runId,job.reviewRunId);
-  assert.match(f.resumes[0].prompt,/Do not edit files/);assert.equal(f.svc.ui().jobs[0].reworks,0);assert.equal(f.starts,2);
+  assert.match(f.resumes[0].prompt,/Do not edit product files/);assert.equal(f.svc.ui().jobs[0].reworks,0);assert.equal(f.starts,2);
   f.runs.get(job.reviewRunId).status='complete';await f.svc.tick();assert.equal(f.svc.ui().jobs[0].state,'qa-passed');
  }finally{f.cleanup();}
 });
@@ -862,3 +862,36 @@ test('CI handoff preserves a saved answer until its coordinator receipt complete
  await f.svc.tick();assert.equal(reads,0);assert.equal(f.starts,1);assert.match(job.error,/reconciliation is pending/);assert.equal(w.requests[0].state,'queued');assert.equal(w.questions[0].reply,'Keep scope');
  }finally{f.cleanup();}
 });
+
+test('vault picker offers project and requested consumer scopes and rejects fabricated grants',async()=>{const f=fixture();try{
+ const c=await control(f);await write(f,c,'requestSecretEntry',{name:'Synthetic',consumer:'catalog-importer',reason:'Test requested consumer'});
+ const options=await f.svc.uiAction('vault-options');
+ assert.ok(options.some(o=>o.scope.kind==='all'));assert.ok(options.some(o=>o.scope.kind==='project'&&o.scope.projectId===c.id));
+ const consumer=options.find(o=>o.scope.kind==='consumer'&&o.scope.consumer==='catalog-importer');assert.ok(consumer);
+ await f.svc.uiAction('vault-stage',{name:'Synthetic',value:'synthetic-only',authorizedScopes:[consumer.scope,{kind:'project',projectId:c.id}]});
+ await assert.rejects(f.svc.uiAction('vault-stage',{name:'Synthetic',value:'synthetic-only',authorizedScopes:[{kind:'project',projectId:'unknown'}]}),/no longer available/);
+ }finally{f.cleanup();}});
+
+test('same-harness reviewer has owner merge authority without weakening exact-head gates',async()=>{const f=fixture();try{const c=await control(f);await write(f,c,'dispatchTask',{number:1,qa:true});f.runs.get(1).status='complete';await f.svc.tick();f.checks[0].status='pass';await f.svc.tick();const review=f.startInputs[1];assert.ok(review);assert.equal(review.provider,f.startInputs[0].provider);assert.match(review.prompt,/same harness, provider, model/);assert.match(review.prompt,/authorized to review and merge PRs/);assert.match(review.prompt,/required checks and applicable release gates pass/);assert.match(review.prompt,/Never approve your own implementation/);assert.doesNotMatch(review.prompt,/Do not edit files, commit, merge or push/);}finally{f.cleanup();}});
+
+test('Autopilot fills eleven Ready lanes, releases waiting capacity, and does not duplicate after restart',async()=>{const f=fixture();try{
+ const c=await control(f),w=f.svc.state.workspaces[0];w.mode='external';w.parallelism=11;w.autopilot={status:'active',parallelism:11,personas:[],effort:'medium',objective:'Ready work',updatedAt:'now',legacyWork:[]};w.qaDefault=false;
+ const start=f.supervisor.start;f.supervisor.start=async args=>{const r=await start(args);r.status='running';return r;};
+ for(let i=1;i<=12;i++){if(i>1)await write(f,c,'createIssue',{title:'Authorized task '+i});await f.svc.uiAction('workflow:card',{number:i,to:'todo',reason:'Owner authorized Ready work',evidence:'Task accepted'});}
+ await f.svc.tick();assert.equal(f.starts,11);assert.equal(f.svc.ui().workspace.autopilot.capacity.active,11);
+ f.runs.get(1).status='awaiting_input';f.runs.get(1).pid=null;await f.svc.tick();assert.equal(f.starts,12);assert.equal(f.svc.ui().workspace.autopilot.capacity.active,11);assert.equal(f.runs.get(1).status,'awaiting_input');
+ const restored=f.reload();await restored.tick();assert.equal(f.starts,12);assert.equal(restored.ui().workspace.releaseParallelism,4);
+ w.autopilot.status='paused';await write(f,c,'createIssue',{title:'Remain paused'});await f.svc.uiAction('workflow:card',{number:13,to:'todo',reason:'Ready',evidence:'Task accepted'});f.runs.get(2).status='complete';await f.svc.tick();assert.equal(f.starts,12);
+ }finally{f.cleanup();}});
+test('release lanes have a separate persisted limit and do not consume implementation capacity',async()=>{const f=fixture();try{
+ const c=await control(f),w=f.svc.state.workspaces[0];await write(f,c,'configureWorkflow',{parallelism:1,releaseParallelism:1});
+ await write(f,c,'upsertPersona',{persona:{id:'lane-reviewer',name:'Reviewer',tagline:'Review',emoji:'R',prompt:'Review the exact current head independently'},reason:'Owner assignment'});
+ const flow=await f.svc.uiAction('workflow:get');flow.config.stages.find(s=>s.id==='review').personaId='lane-reviewer';flow.config.stages.find(s=>s.id==='review').checks=[];await f.svc.uiAction('workflow:apply',{expectedVersion:flow.version,config:flow.config,reason:'Assign reviews'});
+ for(let i=2;i<=3;i++)await write(f,c,'createIssue',{title:'Review '+i});
+ const start=f.supervisor.start;f.supervisor.start=async args=>{const r=await start(args);r.status='running';return r;};
+ await write(f,c,'dispatchTask',{number:1,qa:false,origin:'manual'});
+ for(const number of [2,3])await f.svc.uiAction('workflow:card',{number,to:'review',reason:'Ready review',evidence:'Exact revision available'});
+ await f.svc.tick();assert.equal(f.starts,2);assert.equal(f.svc.laneUsage(w).implementation,1);assert.equal(f.svc.laneUsage(w).release,1);assert.match((await f.svc.uiAction('workflow:get')).cards[3].nextAction,/Waiting for a release lane/);
+ const restored=f.reload();await restored.tick();assert.equal(f.starts,2);assert.equal(restored.ui().workspace.releaseParallelism,1);
+ f.runs.get(2).status='awaiting_input';f.runs.get(2).pid=null;await restored.tick();assert.equal(f.starts,3);assert.equal(f.runs.get(1).status,'running');
+ }finally{f.cleanup();}});

@@ -5,6 +5,7 @@ export interface BoardFiltersStats {
   issues: number;
   runs: number;
   awaiting: number;
+  waitingCards: number;
   costToday: number;
 }
 
@@ -168,8 +169,8 @@ export function BoardFilters({ stats, controls }: BoardFiltersProps) {
         </label>
       ) : null}
       <span className="kb-stats-line">
-        {stats.issues} issue{stats.issues === 1 ? '' : 's'} · {stats.runs} active run
-        {stats.runs === 1 ? '' : 's'} · {stats.awaiting} awaiting
+        {stats.issues} issue{stats.issues === 1 ? '' : 's'} · {stats.runs} running worker
+        {stats.runs === 1 ? '' : 's'} · {stats.awaiting} workers awaiting input · {stats.waitingCards} cards waiting
         
       </span>
     </div>

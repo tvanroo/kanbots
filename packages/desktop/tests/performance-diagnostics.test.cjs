@@ -26,7 +26,7 @@ test('diagnostics retain IPC behavior and write only bounded timing metadata',as
  assert.equal(await handlers['test-read']({},'private payload'),'private payload');
  await assert.rejects(handlers['test-failure']({}),/private error text/);
  tick();const log=path.join(dir,'diagnostics/performance.jsonl');
- for(let i=0;i<100&&!fs.existsSync(log);i++)await new Promise(r=>setTimeout(r,10));
+ for(let i=0;i<100&&(!fs.existsSync(log)||!fs.readFileSync(log,'utf8').endsWith('\n'));i++)await new Promise(r=>setTimeout(r,10));
  const text=fs.readFileSync(log,'utf8');assert.ok(!text.includes('private'));const row=JSON.parse(text);
  assert.equal(row.timings['test-read'].count,1);assert.equal(row.timings['test-failure'].failures,1);assert.equal(row.inFlight,0);
  }finally{callbacks['will-quit']?.();global.setInterval=realInterval;global.clearInterval=realClear;fs.rmSync(dir,{recursive:true,force:true});}

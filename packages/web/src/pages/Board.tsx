@@ -1,3 +1,4 @@
+import {boardStatus} from '../components/board/board-status.js';
 import '../styles/board-focus.css';
 import { useWorkflow } from '../hooks/useWorkflow.js';
 import { WorkflowEditor } from '../components/modals/WorkflowEditor.js';
@@ -361,8 +362,7 @@ export function Board({ onOpenDetail, onOpenCreate, onOpenPalette, onOpenStats }
 
   const stats = {
     issues: list.length,
-    runs: list.filter((i) => i.agent === 'running').length,
-    awaiting: list.filter((i) => i.agent === 'blocked').length,
+    ...boardStatus(list,workflow?.cards),
     costToday: costToday?.totalUsd ?? 0,
   };
 
@@ -731,8 +731,9 @@ export function Board({ onOpenDetail, onOpenCreate, onOpenPalette, onOpenStats }
       <section className="kb-board-overview" aria-label="Visible task progress">
         <div><strong>{list.filter(i => i.status === 'done').length} / {list.length}</strong><span> visible tasks complete</span></div>
         <progress aria-label="Visible tasks complete" max={Math.max(1,list.length)} value={list.filter(i => i.status === 'done').length} />
-        <span>{list.filter(i => i.agent === 'running').length} running</span>
-        <span>{list.filter(i => workflow?.cards[i.number]?.waiting || i.agent === 'blocked').length} waiting</span>
+        <span>{stats.runs} running workers</span>
+        <span>{stats.awaiting} workers awaiting input</span>
+        <span>{stats.waitingCards} cards waiting</span>
       </section>
       {enabledStages?.length===0 && <p role="status">No stages selected. Toggle a stage below or choose All stages.</p>}
       <nav className="kb-stage-navigation" aria-label="Visible stages"><button aria-pressed={enabledStages===null} onClick={()=>setEnabledStages(null)}>All stages</button>{(workflow?.config.stages ?? COLUMNS.map(c=>({id:String(c.key),name:c.label}))).map((stage:any)=><button key={stage.id} aria-pressed={enabledStages===null||enabledStages.includes(stage.id)} onClick={()=>setEnabledStages(current=>{const all=(workflow?.config.stages ?? COLUMNS.map(c=>({id:String(c.key)}))).map((s:any)=>s.id);const selected=current??all;return selected.includes(stage.id)?selected.filter((id:string)=>id!==stage.id):[...selected,stage.id];})}>{stage.name}</button>)}</nav>

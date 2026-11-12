@@ -25,3 +25,8 @@
 :root[data-theme='paper'] .kb-provider-badge{background:#e4f4e9;color:#23643f;border-color:#97c4a7}
 .workspace-surface .kb-provider-card{background:var(--bg);padding:24px;border-radius:12px;margin-bottom:20px}
 .workspace-surface .kb-modal-providers .kb-modal-body{padding:24px;max-width:1200px;width:100%;margin:0 auto}
+
+.kb-release-lanes { margin-top:18px; padding:16px; border:1px solid var(--hairline); border-radius:12px; background:var(--bg-1); }
+.kb-release-lanes label { display:flex; flex-wrap:wrap; align-items:center; gap:12px; font-weight:600; }
+.kb-release-lanes input { width:84px; min-height:36px; padding:6px 10px; border:1px solid var(--hairline); border-radius:8px; color:var(--ink); background:var(--bg); font:inherit; }
+.kb-release-lanes p { color:var(--ink-2); font-size:13px; line-height:1.5; margin:8px 0 0; }

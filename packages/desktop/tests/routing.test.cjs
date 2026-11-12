@@ -158,7 +158,7 @@ test('renewable Claude CLI subscription can recover without presenting stale quo
  './subscription-resets.js':{manageCodexResets:async()=>null},
  './routing-state.js':{readRouting:()=>({config:{}}),routingState:()=>({}),charged:()=>0},
  './routing-models.js':{modelCatalogue:async()=>({}),selectApiModel:()=>null},
- });service.configureRoutingProviders(()=>[{id:'claude-code',enabled:true}]);const r=await service.collectCapacity();assert.equal(r.candidates.some(c=>c.id==='claude-sub'),hasKey);assert.equal(r.snapshot.rows[0].stale,true);if(hasKey)assert.match(r.snapshot.rows[0].detail,/growing safety margin/);
+ });service.configureRoutingProviders(()=>[{id:'claude-code',enabled:true}]);const r=await service.collectCapacity();assert.equal(r.candidates.some(c=>c.id==='claude-sub'),hasKey);assert.equal(r.snapshot.rows[0].stale,true);if(hasKey)assert.match(r.snapshot.rows[0].detail,/Quota is unverified/);
  }
 });
 

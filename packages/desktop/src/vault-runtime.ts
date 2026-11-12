@@ -2,7 +2,7 @@ import {app,safeStorage,dialog} from 'electron';
 import {existsSync,readFileSync,writeFileSync,mkdirSync,copyFileSync,rmSync,renameSync} from 'node:fs';
 import {join} from 'node:path';
 import {randomBytes,randomUUID} from 'node:crypto';
-import {SecretVault} from './secret-vault.js';
+import {SecretVault,validateVaultScopes} from './secret-vault.js';
 // An explicitly initialized, OS-protected wrapping key lives outside the vault DB.
 // Deployments may instead inject KANBORG_VAULT_KEY (base64) into the app process.
 const root=()=>join(app.getPath('userData'),'vault');
@@ -69,7 +69,7 @@ async function performVaultAction(action:string,args:any,project:string){
 
   if(action==='initialize')v.initialize();
   else if(action==='stage'){
-   const value=Buffer.from(String(args.value??''));try{v.stage(project,String(args.name??''),String(args.consumer??''),value);}finally{value.fill(0);}
+   const value=Buffer.from(String(args.value??''));try{v.stage(project,String(args.name??''),String(args.consumer??'Selected consumers'),value,args.authorizedScopes===undefined?undefined:validateVaultScopes(args.authorizedScopes));}finally{value.fill(0);}
   }else if(action==='activate'||action==='revoke'){
    if(!v.list(project).some(s=>s.id===args.id))throw Error('Secret is outside this project');
    v[action](args.id);
