@@ -943,3 +943,13 @@ test('owner-started task workers consume lanes without double-counting delegated
   assert.deepEqual(result.workers.duplicateTasks,[{number:1,runIds:[1,900]}]);assert.deepEqual(result.workers.waitingRunIds,[901]);
  }finally{f.cleanup();}
  });
+
+test('paused Autopilot does not wind down forever on a parked input wait',async()=>{
+ const f=fixture();try{
+  const c=await control(f);await f.svc.uiAction('autopilot',{action:'start',personas:[{id:'test',name:'Test',prompt:'Review'}]});await write(f,c,'dispatchTask',{number:1,qa:false});
+  f.runs.get(1).status='awaiting_input';f.runs.get(1).pid=null;await f.svc.uiAction('autopilot',{action:'pause'});
+  const session=f.svc.ui().workspace.autopilot;assert.equal(session.label,'Off');assert.equal(session.remaining,0);assert.equal(session.workers[0].state,'waiting for input');assert.equal(f.runs.get(1).status,'awaiting_input');
+  const restored=f.reload();assert.equal(restored.ui().workspace.autopilot.label,'Off');
+  f.runs.get(1).pid=123;assert.match(restored.ui().workspace.autopilot.label,/Winding down/);assert.equal(f.starts,1);
+ }finally{f.cleanup();}
+});
