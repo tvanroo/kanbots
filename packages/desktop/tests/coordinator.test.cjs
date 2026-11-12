@@ -912,3 +912,22 @@ test('same-run continuation retires stale update checkpoint and restores it on l
   assert.match(f.resumes.at(-1).prompt,/prior update\/stop checkpoint has ended/);assert.equal(f.resumes.at(-1).runId,1);assert.equal(f.starts,1);
  }finally{f.cleanup();}
 });
+
+test('owner-started task workers consume lanes without double-counting delegated review or counting chats',async()=>{
+ const f=fixture();try{
+  const c=await control(f),w=f.svc.current();w.autopilot={status:'active',parallelism:2,personas:[],effort:'medium',objective:'Ready work',updatedAt:'now',legacyWork:[]};
+  f.svc.context.store.agentRuns.listActive=()=>[
+   {id:900,issueNumber:90,status:'running',pid:123},
+   {id:901,issueNumber:91,status:'awaiting_input',pid:null},
+   {id:902,issueNumber:0,status:'running',pid:124},
+   ...[...f.runs.values()].map(run=>({...run,issueNumber:1})),
+  ];
+  await write(f,c,'dispatchTask',{number:1,qa:false,origin:'manual'});
+  assert.equal(f.svc.laneUsage(w).implementation,2);
+  await write(f,c,'createIssue',{title:'Ready task'});await f.svc.uiAction('workflow:card',{number:2,to:'todo',reason:'Authorized',evidence:'Owner direction'});
+  await f.svc.tick();assert.equal(f.starts,1);
+  const job=w.jobs[0];job.stageAssignment={stageId:'review'};
+  assert.equal(f.svc.laneUsage(w).implementation,1);assert.equal(f.svc.laneUsage(w).release,1);
+  f.svc.save();const restored=f.reload();assert.equal(restored.laneUsage(restored.current()).implementation,1);assert.equal(restored.laneUsage(restored.current()).release,1);
+ }finally{f.cleanup();}
+});

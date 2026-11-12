@@ -126,6 +126,10 @@ export class CoordinatorService{
     const implementation=new Set<number>(),release=new Set<number>();
     const occupying=(id:number)=>blocksUpdate(this.run(id));
     for(const job of w.jobs){if(occupying(job.runId))(this.releaseStage(w,job.stageAssignment?.stageId)?release:implementation).add(job.runId);if(job.reviewRunId&&occupying(job.reviewRunId))release.add(job.reviewRunId);}
+    // Owner-started card workers share execution capacity even before adoption
+    // into coordinator jobs. Device/coordinator chats are not task lanes.
+    const liveTasks=this.context?.store.agentRuns.listActive?.()??[];
+    for(const run of liveTasks){if(run.issueNumber>0&&blocksUpdate(run)&&!release.has(run.id))implementation.add(run.id);}
     const reservations=Object.values(w.dispatchReservations??{});
     return {implementation:implementation.size+reservations.filter(r=>r.lane!=='release').length,release:release.size+reservations.filter(r=>r.lane==='release').length};
   }
