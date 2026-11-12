@@ -5,7 +5,7 @@ description: Connect Claude Desktop (or Claude Code) to the KanBorg app on this 
 
 # Connect Claude to KanBorg
 
-This plugin supplies workflows only. The tools come from KanBorg's own local stdio MCP server, which the KanBorg app installs and pairs. This plugin bundles no MCP configuration, client ID or credentials, matching the Codex/ChatGPT `kanborg-connect` plugin.
+The KanBorg tools come from KanBorg's own local stdio MCP server, which the KanBorg app installs and pairs. This plugin adds workflows plus one local server of its own, `kanborg-wake`, that only wakes this session (see `kanborg-wake`). It bundles no KanBorg credentials.
 
 ## Check first
 
@@ -52,5 +52,7 @@ Pairing is installation-level and persists across app, Claude and Mac restarts. 
 | Only legacy tools (`listIssues`, `dispatchAgent`…) | Server started without a coordinator client | Use the Coordinators configuration, not an old bridge URL/token snippet |
 
 Remote-only connector screens (claude.ai web "custom connectors") cannot run this local command. Do not expose KanBorg's loopback port publicly to work around that; use Claude on the Mac, or the Mac-hosted phone route in `kanborg-mobile`.
+
+To let KanBorg wake chats, also put the same connection ID in the plugin's `kanborg_connection_id` setting and start Claude Code with the channel enabled; see `kanborg-wake`.
 
 Once connected, use `kanborg-projects` for projects/settings, `kanborg-coordinate` for running work, `kanborg-handoff` for coordinator transfers and `kanborg-mobile` for phone access.
