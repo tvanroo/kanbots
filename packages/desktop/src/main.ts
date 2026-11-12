@@ -48,6 +48,7 @@ import {
   createPrDescriptionDrafter,
   createSentryAnalyzer,
   createSuggester,
+  removeLegacyAgentPushHook,
 } from '@kanborg/dispatcher';
 import {
   describeKanBorgDir,
@@ -494,6 +495,10 @@ async function openWorkspaceInternal(repoPath: string): Promise<ActiveWorkspaceI
   // events into durable learnings. Cheap by default (Haiku, per-day budget cap)
   // and gracefully no-ops when the run signal isn't `completed_clean`/`promoted`.
   const curator = createCurator({ store, cwd: gitRoot });
+
+  await removeLegacyAgentPushHook(gitRoot).catch((error) => {
+    console.warn('Could not remove legacy KanBorg push hook:', error);
+  });
 
   const rawSupervisor = await createSupervisor({
     startAgentRun: startRoutedRun,
