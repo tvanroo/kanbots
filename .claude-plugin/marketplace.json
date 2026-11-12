@@ -1,0 +1,19 @@
+{
+  "name": "kanborg",
+  "owner": {
+    "name": "Toby vanRoojen",
+    "url": "https://github.com/tvanroo"
+  },
+  "metadata": {
+    "description": "KanBorg plugins for Claude Desktop and Claude Code."
+  },
+  "plugins": [
+    {
+      "name": "kanborg-connect",
+      "source": "./plugins/kanborg-connect-claude",
+      "description": "Operate KanBorg projects from any Claude chat on the paired Mac through KanBorg's local MCP connection.",
+      "version": "0.2.0",
+      "category": "development"
+    }
+  ]
+}
