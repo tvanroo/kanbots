@@ -719,7 +719,7 @@ Never approve your own pairing. No provider API keys are needed.\n\nClaude Deskt
     }
     if(control.action==='routing-get')return routingState();
     if(control.action==='routing-save'){const result=saveRouting(input.config);invalidateCapacity();return result;}
-    if(control.action==='capacity-refresh')return (await collectCapacity(false,true)).snapshot;
+    if(control.action==='capacity-refresh')return compactCapacity((await collectCapacity(false,true)).snapshot);
     if(control.action==='connections-list')return this.state.clients.filter(c=>c.workspaceId===w.id).map(({tokenHash,...c})=>c);
     if(control.action==='handoff-status')return {epoch:w.epoch,controller:w.controller,handoff:w.handoff??null,schedules:w.schedules??{}};
     if(control.action==='templates-list')return Object.values(this.state.templates??{});
