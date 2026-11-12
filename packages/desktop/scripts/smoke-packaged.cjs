@@ -52,6 +52,26 @@ const net=require('node:net');
    if(!registry.workspaces.some(w=>fs.realpathSync(w.path)===fs.realpathSync(receipt.repoPath)&&w.events.some(e=>e.type==='application-updated')))throw Error('Recovery event or workspace missing');
    console.log(JSON.stringify({updateRecovery:true,workspaceRestored:true,readyReceipt:true}));
   }
+  if(process.argv.includes('--personas')){
+   const evaluate=async expression=>{const r=await call('Runtime.evaluate',{expression,awaitPromise:true,returnByValue:true});if(r.exceptionDetails)throw Error(r.exceptionDetails.text+': '+JSON.stringify(r.exceptionDetails.exception));return r.result.value;};
+   await new Promise(r=>setTimeout(r,1200));
+   await evaluate(`[...document.querySelectorAll('.workspace-destinations button')].find(b=>b.textContent==='Settings').click()`);
+   await new Promise(r=>setTimeout(r,300));
+   await evaluate(`[...document.querySelectorAll('.workspace-settings-grid button')].find(b=>b.textContent.startsWith('Personas')).click()`);
+   await new Promise(r=>setTimeout(r,700));
+   const before=await evaluate(`window.kanbots.coordinatorState().then(s=>({requests:s.workspace.requests.length,persona:s.workspace.personas.items[0]}))`);
+   await evaluate(`document.querySelector('[aria-label="Edit '+${JSON.stringify(before.persona.name)}+'"]').click()`);
+   await new Promise(r=>setTimeout(r,200));
+   const prompt='Packaged UI acceptance: preserve exact evidence and existing permissions. This is an isolated synthetic test.';
+   await evaluate(`(()=>{const e=document.querySelector('[aria-label="Persona prompt"]');Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value').set.call(e,${JSON.stringify(prompt)});e.dispatchEvent(new Event('input',{bubbles:true}));})()`);
+   await evaluate(`[...document.querySelectorAll('button')].find(b=>b.textContent==='Save persona').click()`);
+   await new Promise(r=>setTimeout(r,500));
+   const after=await evaluate(`window.kanbots.coordinatorState().then(s=>({requests:s.workspace.requests.length,persona:s.workspace.personas.items.find(p=>p.id===${JSON.stringify(before.persona.id)})}))`);
+   if(after.persona.prompt!==prompt||after.requests!==before.requests)throw Error('Persona edit failed or triggered suggestion');
+   fs.mkdirSync(path.resolve('output'),{recursive:true});
+   const shot=await call('Page.captureScreenshot',{format:'png'});fs.writeFileSync(path.resolve('output/packaged-personas.png'),Buffer.from(shot.data,'base64'));
+   console.log(JSON.stringify({personasSettingsEntry:true,promptSaved:true,noSuggestionStarted:true,isolatedProfile:true}));
+  }
   if(process.argv.includes('--navigation')){
    await new Promise(r=>setTimeout(r,1800));
    for(const name of ['Coordinator','Questions','Activity','Development','Providers','Autopilot','Settings','Board']){

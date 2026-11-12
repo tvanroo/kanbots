@@ -56,3 +56,9 @@ Owner added explicit workspace persona assignment for Review (Code Reviewer) and
 Every changed UI surface must undergo rendered visual inspection using the actual app styles at desktop and narrow widths before release, in addition to interaction checks. The local vault has been restyled with shared buttons, theme tokens, spaced labels and responsive inputs. Synthetic vault initialization, entry clearing, activation and revocation passed; desktop and narrow screenshots were inspected. These changes are not yet packaged.
 
 Installed 1.2.45 was verified by getApplicationUpdate as completed at 2026-11-12T18:11:46.150Z. CardBox controller remained fb6a8e0e-bdce-4f9c-8530-38c5fa3810e0; Autopilot and the confirmed schedule remained paused, and question-answer:98 remained queued. CardBox deployment 43275539475 completed successfully for 143eb8c3461e18ee4fccade379c86ff3887006b3; runtime and functional acceptance are still separate open gates.
+
+## 1.2.46 candidate verification
+
+Candidate source df5581f91f4e89fac0fb41b64e292f7d386fe296 includes editable stage personas, protected deletion and the branded vault surface. All 208 desktop tests passed (including 99 coordinator tests). Type checks and dependency/desktop build passed. Signing/notarization is running under the existing bounded helper; no published or installed 1.2.46 claim yet.
+
+CardBox deployment workflow success was inspected at log level: 43275539475 retained status `held`, blocker `catalog-api:scoped_gate_open_pre_activation`, compatibility `release_manager_digest_review_required`, and `catalog_maintenance_held` / `108_requires_catalog_maintenance`. Thus workflow success does NOT prove activation of 143eb8c3461e18ee4fccade379c86ff3887006b3. Existing owner-designated release authority must resolve the maintenance and digest gate; no duplicate deployment was started.

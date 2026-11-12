@@ -27,6 +27,7 @@ function errorMessage(error: unknown) {
 export function QuestionsQueue({ inline = false }: { inline?: boolean }) {
   const [items, setItems] = useState<Question[]>([]);
   const [open, setOpen] = useState(inline);
+  const [view, setView] = useState<'pending' | 'history'>('pending');
   const [drafts, setDrafts] = useState<Record<number, string>>({});
   const [errors, setErrors] = useState<Record<number, string>>({});
   const [receipt, setReceipt] = useState('');
@@ -160,9 +161,12 @@ export function QuestionsQueue({ inline = false }: { inline?: boolean }) {
   }
 
   if (!action) return null;
+  const pending = items.filter(question => question.state === 'pending' || question.state === 'sending');
+  const history = items.filter(question => question.state === 'answered');
+  const visible = view === 'pending' ? pending : history;
   return <>
     {!inline && <button className="kb-btn kb-questions-launch" onClick={() => setOpen(!open)}>
-      Questions for you · {items.filter(q=>q.state==='pending').length}
+      Questions for you · {pending.length}
     </button>}
     {open && <aside className="kb-questions-panel" aria-label="Questions for you">
       <header>
@@ -175,10 +179,14 @@ export function QuestionsQueue({ inline = false }: { inline?: boolean }) {
         </div>
       </header>
       <p>Answers are saved for your current coordinator, with the original question and thread attached. You can reply while workers are busy.</p>
-      {receipt && <p role="status">{receipt}</p>}
+      <nav className="kb-coordinator-actions" aria-label="Question views">
+        <button className={`kb-btn ${view === 'pending' ? 'primary' : ''}`} aria-pressed={view === 'pending'} onClick={() => setView('pending')}>Needs your answer · {pending.length}</button>
+        <button className={`kb-btn ${view === 'history' ? 'primary' : ''}`} aria-pressed={view === 'history'} onClick={() => setView('history')}>Answered · {history.length}</button>
+      </nav>
+      {receipt && <p role="status">{receipt} {history.length > 0 && <button className="kb-btn ghost" onClick={() => setView('history')}>View answers and responses</button>}</p>}
       {refreshError && <p role="alert">Couldn’t refresh questions. {refreshError}</p>}
-      {!items.length && !refreshError && <p>{refreshing ? 'Checking for questions…' : 'No unanswered questions.'}</p>}
-      {items.map(question => {
+      {!visible.length && !refreshError && <p>{refreshing ? 'Checking for questions…' : view === 'pending' ? 'You’re all caught up. No questions need your answer.' : 'No answered questions yet.'}</p>}
+      {visible.map(question => {
         const { id, threadId } = question;
         const submitting = sending[id];
         const disabled = Boolean(submitting) || question.state !== 'pending';
