@@ -78,6 +78,9 @@ test('authoritative refresh unlocks a lost reply receipt without replay or stale
   assert.equal(find(render(),'Yes 8'),undefined);
   rows=[{...question(8),state:'answered',reply:'My free text answer',response:'Your change is saved',answerStatus:'completed'}];
   find(render(),'Refresh questions').props.onClick();await flush();
+  assert.doesNotMatch(JSON.stringify(render()),/My free text answer/);
+  assert.match(JSON.stringify(render()),/No questions need your answer/);
+  find(render(),'View answers and responses').props.onClick();
   const history=JSON.stringify(render());assert.match(history,/My free text answer/);assert.match(history,/Your change is saved/);assert.match(history,/Open originating chat/);assert.equal(find(render(),'Send answer'),undefined);
  }finally{
   for(const resolve of pending)resolve();
