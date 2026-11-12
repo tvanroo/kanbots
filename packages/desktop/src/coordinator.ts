@@ -993,7 +993,7 @@ Never approve your own pairing. No provider API keys are needed.\n\nClaude Deskt
     if(!flow||!card||!current||!['inProgress','review'].includes(current.category))return;
     if(Date.now()-(j.ciCheckedAt??0)<60000)return;
     j.ciCheckedAt=Date.now();
-    if(card.waiting?.owner==='user'){j.error='Owner decision required: '+card.waiting.trigger;card.nextAction=j.error;this.save();return;}
+    if(card.waiting&&(card.waiting.owner==='user'||card.waiting.reason!=='CI')){j.error='Waiting for '+card.waiting.owner+': '+card.waiting.trigger;card.nextAction=j.error;this.save();return;}
     try{
       const ci=await this.readRequiredPullRequestChecks(j.runId);
       if(!ci.checks.length)throw Error('Required GitHub checks could not be established; configure or verify the PR required checks.');
@@ -1021,7 +1021,7 @@ Never approve your own pairing. No provider API keys are needed.\n\nClaude Deskt
       if(assignment.state!=='queued')continue;
       const card=w.workflow?.cards[assignment.number],stage=w.workflow?.config.stages.find(s=>s.id===assignment.stageId);
       if(!card||card.stageId!==assignment.stageId||assignment.entry!==stage?.id+':'+card.history.length+':'+card.enteredAt||!stage?.personaId){assignment.state='superseded';continue;}
-      if(card.waiting?.owner==='user')continue;
+      if(card.waiting){assignment.error='Waiting for '+card.waiting.owner+': '+card.waiting.trigger;card.nextAction=assignment.error;this.save();continue;}
       if(w.jobs.some(j=>j.number===assignment.number && (active(this.run(j.runId).status) || (j.reviewRunId && active(this.run(j.reviewRunId).status)) || ['implementing','checks','reviewing'].includes(j.state))))continue;
       const implementation=[...w.jobs].reverse().find(j=>j.number===assignment.number&&!j.stageAssignment&&j.role==='implementation');
       if(implementation&&['checkpointed','awaiting-review'].includes(implementation.state)){
@@ -1041,7 +1041,7 @@ Never approve your own pairing. No provider API keys are needed.\n\nClaude Deskt
       if(!persona){assignment.state='blocked';assignment.error='Assigned persona is missing';continue;}
       assignment.state='starting';this.save();
       try{const result=await this.dispatch(w,assignment.number,w.budgetUsd,false,0,false,true,false,{workflowVersion:w.workflow!.version,stageId:stage.id,entry:assignment.entry,personaId:persona.id,personaVersion:persona.version,prompt:persona.prompt});if(result.runId===undefined)throw Error('Stage dispatch did not create a run');assignment.runId=result.runId;assignment.state='dispatched';this.event(w,'stage-persona-dispatched',{...assignment,personaId:persona.id,personaVersion:persona.version});}
-      catch(e){assignment.state='blocked';assignment.error=e instanceof Error?e.message:'Stage dispatch failed';this.event(w,'stage-persona-blocked',{...assignment});}
+      catch(e){assignment.state='blocked';assignment.error=e instanceof Error?e.message:'Stage dispatch failed';card.nextAction=assignment.error;this.event(w,'stage-persona-blocked',{...assignment});}
       this.save();
     }
   }

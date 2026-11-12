@@ -846,3 +846,11 @@ test('manual QA uses the assigned reviewer and reuses that exact revision review
   assert.equal(f.starts,2);assert.equal(f.svc.current().jobs[0].reviewRunId,2);assert.equal(f.svc.current().jobs[0].state,'review-delegated');
  }finally{f.cleanup();}
 });
+
+test('green CI never overrides a recorded dependency hold',async()=>{
+ const f=fixture();try{const c=await control(f);await write(f,c,'dispatchTask',{number:1,qa:true});const w=f.svc.current(),job=w.jobs[0];job.state='checkpointed';f.runs.get(1).status='stopped';
+ w.workflow.cards[1].waiting={reason:'Dependency',owner:'source-owner',trigger:'Upstream artifact accepted'};
+ let reads=0;f.svc.readRequiredPullRequestChecks=async()=>{reads++;return {head:'a'.repeat(40),url:'https://github.com/example/repo/pull/1',checks:[{name:'test',bucket:'pass'}]};};
+ await f.svc.tick();assert.equal(reads,0);assert.equal(f.starts,1);assert.equal(w.workflow.cards[1].stageId,'inProgress');assert.match(job.error,/Upstream artifact accepted/);
+ }finally{f.cleanup();}
+});
