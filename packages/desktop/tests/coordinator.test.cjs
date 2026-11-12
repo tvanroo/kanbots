@@ -731,7 +731,7 @@ test('saved stage personas dispatch separate runs and hand off without coordinat
 
 test('stage routing waits for update drain and reconciles a lost start receipt',async()=>{const f=fixture();try{const c=await control(f);await write(f,c,'upsertPersona',{persona:{id:'reviewer',name:'Reviewer',tagline:'Review',emoji:'🔎',prompt:'Review exact evidence and preserve all release permissions.'},reason:'Owner config'});const flow=await f.svc.uiAction('workflow:get',{});const stage=flow.config.stages.find(s=>s.id==='review');stage.personaId='reviewer';stage.checks=[];await f.svc.uiAction('workflow:apply',{expectedVersion:flow.version,config:flow.config,reason:'Assign review'});await f.svc.uiAction('workflow:card',{number:1,to:'review',reason:'Ready',evidence:'Implementation artifact'});f.svc.beginUpdateWindDown();await f.svc.tick();assert.equal(f.starts,0);f.svc.endUpdateWindDown();const start=f.supervisor.start;f.supervisor.start=async args=>{await start(args);throw Error('lost start receipt');};await f.svc.tick();assert.equal(f.starts,1);const restored=f.reload();await restored.tick();assert.equal(f.starts,1);const reservation=restored.ui().workspace.dispatchReservations[1];await restored.call(c.actor,c.id,'reconcileDispatch',{workspaceId:c.id,revision:restored.ui().workspace.revision,requestId:'stage-start-reconcile',number:1,reservationId:reservation.id,evidence:'One exact new run recorded'});await restored.tick();assert.equal(f.starts,1);assert.equal(Object.values(restored.ui().workspace.stageAssignments)[0].state,'dispatched');}finally{f.cleanup();}});
 
-for(const scenario of ['missing','stale','reserved','gate'])test('stage disposition rejects '+scenario+' evidence without dispatching a successor',async()=>{
+for(const scenario of ['missing','stale','reserved','gate','owner-wait'])test('stage disposition rejects '+scenario+' evidence without dispatching a successor',async()=>{
  const f=fixture();try{
   const c=await control(f);await write(f,c,'upsertPersona',{persona:{id:'reviewer',name:'Reviewer',tagline:'Review',emoji:'🔎',prompt:'Review exact evidence.'},reason:'Owner config'});
   const flow=await f.svc.uiAction('workflow:get',{});flow.config.stages.find(s=>s.id==='review').personaId='reviewer';flow.config.stages.find(s=>s.id==='review').checks=[];
@@ -739,8 +739,23 @@ for(const scenario of ['missing','stale','reserved','gate'])test('stage disposit
   if(scenario==='gate')flow.config.stages.find(s=>s.id==='delivery').checks=[{id:'independent',label:'Independent evidence',mode:'required'}];
   await f.svc.uiAction('workflow:apply',{expectedVersion:flow.version,config:flow.config,reason:'Assign review'});await f.svc.uiAction('workflow:card',{number:1,to:'review',reason:'Ready',evidence:'Implementation artifact'});await f.svc.tick();
   const job=f.svc.ui().jobs[0];const {checkpointDirectory}=load(path.resolve(__dirname,'../src/worker-checkpoint.ts'));
+  if(scenario==='owner-wait')f.svc.current().workflow.cards[1].waiting={reason:'User decision',owner:'user',trigger:'Owner confirms release scope'};
   if(scenario!=='missing')fs.writeFileSync(path.join(checkpointDirectory(f.root,job.controlId),'stage-disposition.json'),JSON.stringify({id:job.controlId,entry:job.stageAssignment.entry,workflowVersion:job.stageAssignment.workflowVersion+(scenario==='stale'?1:0),to:'delivery',reason:'Review result',evidence:'Exact revision reviewed',checks:[]}));
   f.runs.get(1).status='complete';await f.svc.tick();await f.svc.tick();
   assert.equal(f.starts,1);assert.equal((await f.svc.uiAction('workflow:get',{})).cards[1].stageId,'review');assert.notEqual(f.svc.ui().jobs[0].state,'completed');
+ }finally{f.cleanup();}
+});
+
+test('queued stage persona honors owner wait across restart and dispatches once after it clears',async()=>{
+ const f=fixture();try{
+  const c=await control(f);await write(f,c,'upsertPersona',{persona:{id:'reviewer',name:'Reviewer',tagline:'Review',emoji:'🔎',prompt:'Review exact evidence.'},reason:'Owner config'});
+  const flow=await f.svc.uiAction('workflow:get',{});flow.config.stages.find(s=>s.id==='review').personaId='reviewer';flow.config.stages.find(s=>s.id==='review').checks=[];
+  await f.svc.uiAction('workflow:apply',{expectedVersion:flow.version,config:flow.config,reason:'Assign review'});
+  await f.svc.uiAction('workflow:card',{number:1,to:'review',reason:'Owner hold',evidence:'Implementation artifact',waiting:{reason:'User decision',owner:'user',trigger:'Owner confirms scope'}});
+  await f.svc.tick();assert.equal(f.starts,0);
+  const restored=f.reload();await restored.tick();assert.equal(f.starts,0);
+  await restored.uiAction('workflow:card',{number:1,reason:'Owner confirmed scope',evidence:'Recorded owner decision',clearWaiting:true});
+  await restored.tick();await restored.tick();assert.equal(f.starts,1);
+  assert.equal(f.startInputs[0].personaId,'reviewer');
  }finally{f.cleanup();}
 });

@@ -931,6 +931,7 @@ Never approve your own pairing. No provider API keys are needed.\n\nClaude Deskt
     if(!receipt){j.state='awaiting-review';j.error='Stage worker finished without a saved disposition. Record acceptance or corrections before handoff.';this.event(w,'stage-disposition-needed',{runId:j.runId,number:j.number});return;}
     const from=flow.config.stages.find(s=>s.id===a.stageId);
     if(!card||receipt.entry!==a.entry||receipt.workflowVersion!==flow.version||a.workflowVersion!==flow.version||card.stageId!==a.stageId||a.entry!==card.stageId+':'+card.history.length+':'+card.enteredAt||from?.personaId!==a.personaId)throw Error('Stage disposition is stale; reconcile the current assignment before handoff');
+    if(card.waiting?.owner==='user')throw Error('Stage handoff is waiting for the recorded owner decision: '+card.waiting.trigger);
     if(!flow.config.transitions.some(t=>t.from===from.id&&t.to===receipt.to&&t.actor===from.actor&&!['coordinator','user'].includes(t.actor)))throw Error('Stage worker is not authorized for this transition');
     const target=flow.config.stages.find(s=>s.id===receipt.to);
     if(!target||receipt.to===from.id)throw Error('Choose a distinct configured target stage');
@@ -949,6 +950,7 @@ Never approve your own pairing. No provider API keys are needed.\n\nClaude Deskt
       if(assignment.state!=='queued')continue;
       const card=w.workflow?.cards[assignment.number],stage=w.workflow?.config.stages.find(s=>s.id===assignment.stageId);
       if(!card||card.stageId!==assignment.stageId||assignment.entry!==stage?.id+':'+card.history.length+':'+card.enteredAt||!stage?.personaId){assignment.state='superseded';continue;}
+      if(card.waiting?.owner==='user')continue;
       if(w.jobs.some(j=>j.number===assignment.number && (active(this.run(j.runId).status) || (j.reviewRunId && active(this.run(j.reviewRunId).status)) || ['implementing','checks','reviewing'].includes(j.state))))continue;
       const running=w.jobs.filter(j=>active(this.run(j.runId).status)||(j.reviewRunId&&active(this.run(j.reviewRunId).status))).length+Object.keys(w.dispatchReservations??{}).length;
       if(running>=w.parallelism)break;
