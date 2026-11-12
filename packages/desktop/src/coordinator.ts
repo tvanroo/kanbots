@@ -991,6 +991,8 @@ Never approve your own pairing. No provider API keys are needed.\n\nClaude Deskt
     const card=w.workflow?.cards[j.number],flow=w.workflow;
     const current=flow?.config.stages.find(s=>s.id===card?.stageId);
     if(!flow||!card||!current||!['inProgress','review'].includes(current.category))return;
+    const unanswered=w.questions?.find(q=>q.runId===j.runId&&(q.state==='pending'||(q.state==='answered'&&q.answerRequestId&&w.requests?.find(r=>r.id===q.answerRequestId)?.state!=='completed')));
+    if(unanswered){j.error=unanswered.state==='pending'?'Question '+unanswered.id+' still needs an answer.':'Answer '+unanswered.id+' is saved; coordinator reconciliation is pending.';card.nextAction=j.error;this.save();return;}
     if(Date.now()-(j.ciCheckedAt??0)<60000)return;
     j.ciCheckedAt=Date.now();
     if(card.waiting&&(card.waiting.owner==='user'||card.waiting.reason!=='CI')){j.error='Waiting for '+card.waiting.owner+': '+card.waiting.trigger;card.nextAction=j.error;this.save();return;}

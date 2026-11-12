@@ -854,3 +854,11 @@ test('green CI never overrides a recorded dependency hold',async()=>{
  await f.svc.tick();assert.equal(reads,0);assert.equal(f.starts,1);assert.equal(w.workflow.cards[1].stageId,'inProgress');assert.match(job.error,/Upstream artifact accepted/);
  }finally{f.cleanup();}
 });
+
+test('CI handoff preserves a saved answer until its coordinator receipt completes',async()=>{
+ const f=fixture();try{const c=await control(f);await write(f,c,'dispatchTask',{number:1,qa:true});const w=f.svc.current(),job=w.jobs[0];job.state='checkpointed';f.runs.get(1).status='stopped';
+ w.mode='external';w.questions=[{id:98,runId:1,threadId:1,state:'answered',question:'Next action?',options:[],reply:'Keep scope',answerRequestId:'question-answer:98'}];w.requests=[{id:'question-answer:98',kind:'workflow-action',state:'queued',createdAt:new Date().toISOString(),prompt:'Reconcile owner answer'}];
+ let reads=0;f.svc.readRequiredPullRequestChecks=async()=>{reads++;throw Error('Not needed');};
+ await f.svc.tick();assert.equal(reads,0);assert.equal(f.starts,1);assert.match(job.error,/reconciliation is pending/);assert.equal(w.requests[0].state,'queued');assert.equal(w.questions[0].reply,'Keep scope');
+ }finally{f.cleanup();}
+});
