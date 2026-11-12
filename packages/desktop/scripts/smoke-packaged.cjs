@@ -72,6 +72,18 @@ const net=require('node:net');
    const shot=await call('Page.captureScreenshot',{format:'png'});fs.writeFileSync(path.resolve('output/packaged-personas.png'),Buffer.from(shot.data,'base64'));
    console.log(JSON.stringify({personasSettingsEntry:true,promptSaved:true,noSuggestionStarted:true,isolatedProfile:true}));
   }
+  if(process.argv.includes('--questions')){
+   await new Promise(r=>setTimeout(r,1000));
+   await call('Runtime.evaluate',{expression:`[...document.querySelectorAll('.workspace-destinations button')].find(b=>b.textContent.startsWith('Questions')).click()`});
+   await new Promise(r=>setTimeout(r,900));
+   const result=await call('Runtime.evaluate',{expression:`(()=>{const e=document.querySelector('.workspace-main');return {text:e.innerText,active:e.querySelector('[aria-label="Question views"] [aria-pressed="true"]')?.textContent,articles:e.querySelectorAll('article').length};})()`,returnByValue:true});
+   if(!result.result.value.text.includes('No questions need your answer')||result.result.value.active!=='Needs your answer · 0'||result.result.value.articles!==0)throw Error('Questions empty inbox disagrees with count: '+JSON.stringify(result));
+   for(const [name,width,height] of [['desktop',1280,900],['narrow',390,844]]){
+    await call('Emulation.setDeviceMetricsOverride',{width,height,deviceScaleFactor:1,mobile:false});await new Promise(r=>setTimeout(r,300));
+    fs.mkdirSync(path.resolve('output'),{recursive:true});const shot=await call('Page.captureScreenshot',{format:'png'});fs.writeFileSync(path.resolve('output/packaged-questions-'+name+'.png'),Buffer.from(shot.data,'base64'));
+   }
+   console.log(JSON.stringify({questionsEmptyInbox:true,countMatches:true,viewports:2,isolatedProfile:true}));
+  }
   if(process.argv.includes('--navigation')){
    await new Promise(r=>setTimeout(r,1800));
    for(const name of ['Coordinator','Questions','Activity','Development','Providers','Autopilot','Settings','Board']){

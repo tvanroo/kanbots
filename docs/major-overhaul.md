@@ -62,3 +62,11 @@ Installed 1.2.45 was verified by getApplicationUpdate as completed at 2026-11-12
 Candidate source df5581f91f4e89fac0fb41b64e292f7d386fe296 includes editable stage personas, protected deletion and the branded vault surface. All 208 desktop tests passed (including 99 coordinator tests). Type checks and dependency/desktop build passed. Signing/notarization is running under the existing bounded helper; no published or installed 1.2.46 claim yet.
 
 CardBox deployment workflow success was inspected at log level: 43275539475 retained status `held`, blocker `catalog-api:scoped_gate_open_pre_activation`, compatibility `release_manager_digest_review_required`, and `catalog_maintenance_held` / `108_requires_catalog_maintenance`. Thus workflow success does NOT prove activation of 143eb8c3461e18ee4fccade379c86ff3887006b3. Existing owner-designated release authority must resolve the maintenance and digest gate; no duplicate deployment was started.
+
+## 1.2.47 release verification
+
+1.2.46 was published (df5581f91f4e89fac0fb41b64e292f7d386fe296), with Apple notarization and packaged persona edit/restart checks. The installed application remained 1.2.45 before the next update request.
+
+1.2.47 source 682f1485e2b5138013cbf015b31f1990f92ef565 separates unanswered questions from retained answer/response history. Component interaction/reload/history and regression checks passed. Actual packaged Questions count/empty state passed at desktop and narrow widths; narrow rendering was inspected. Packaged update recovery restored its synthetic workspace and healthy receipt. Apple notarization and Gatekeeper passed. Installer SHA-256 3078955c48a1afb6c19c57596f04a04bf41d5bc0571f544bd272e0ac591228c8. Live update request install-kanborg-147-questions-history-20261112 was accepted; installed acceptance remains pending. Autopilot/schedule remain paused and question-answer:98 retained.
+
+Packaged testing also exposed an unrelated saved-view delta serialization issue (Missing activeViewId). The Questions mismatch itself was a test selector reading hidden Board state and passed after scoping it to Question views. Investigate the preference delta contract separately; do not treat its repeated retries as harmless completion.
