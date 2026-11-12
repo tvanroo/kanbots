@@ -1,3 +1,4 @@
+import {getBridge} from '../../desktop-bridge.js';
 import { QuotaMeter } from '../usage/QuotaMeter.js';
 import { zonedInput, zonedIso } from './connection-time.js';
 import { useEffect, useId, useRef, useState, type ReactNode } from 'react';
@@ -47,7 +48,7 @@ export function ApiConnections({ provider, connections, onChanged, openaiReport,
 }
 function ConnectionEditor({ provider, initial, onChanged, onCancel, openaiReport, anthropicReport }: { anthropicReport?: ProvidersPayload['anthropicReporting']; openaiReport?: OpenAIReporting | undefined; provider: Props['provider']; initial?: ApiConnection; onChanged: Props['onChanged']; onCancel?: () => void }) {
   const [form, setForm] = useState<ApiConnectionInput>(() => ({
-    id: initial?.id ?? crypto.randomUUID(), provider, name: initial?.name ?? '', enabled: initial?.enabled ?? true,
+    vaultReference:initial?.vaultReference??null, id: initial?.id ?? crypto.randomUUID(), provider, name: initial?.name ?? '', enabled: initial?.enabled ?? true,
     priority: initial?.priority ?? 1, funding: !initial || initial.funding === 'unknown' ? 'paid' : initial.funding, budget: initial?.budget ?? null,
     grantBillingDay: initial?.grantBillingDay, grantFirstStart: initial?.grantFirstStart ?? null,
     rollover: initial?.rollover ?? false, afterGrant: initial?.afterGrant ?? 'stop',
@@ -58,6 +59,8 @@ function ConnectionEditor({ provider, initial, onChanged, onCancel, openaiReport
     renewal: initial?.renewal ?? 'monthly', renewsAt: initial?.renewsAt ?? null,
     expired: initial?.expired ?? false, pool: initial?.pool ?? '', defaultModel: initial?.defaultModel ?? null,
   }));
+  const [vaultOptions,setVaultOptions]=useState<Array<{id:string;project:string;name:string;version:number}>>([]);
+  useEffect(()=>{let mounted=true;void getBridge()?.coordinatorAction?.('vault-status').then((result:any)=>{if(mounted)setVaultOptions((result.items??[]).filter((item:any)=>item.state==='active'&&item.consumer===`api:${provider}`).map((item:any)=>({...item,project:result.project})));}).catch(()=>{});return()=>{mounted=false;};},[provider]);
   const [savedForm, setSavedForm] = useState(form);
   const [key, setKey] = useState('');
   const [expanded, setExpanded] = useState(!initial);
@@ -82,7 +85,7 @@ function ConnectionEditor({ provider, initial, onChanged, onCancel, openaiReport
   function validate(): Errors {
     const next: Errors = { ...errors };
     if (form.name.trim().length > 100) next.name = 'Use 100 characters or fewer.';
-    if ((!initial && !key.trim()) || (key.trim() && (key.trim().length < 11 || key.trim().length > 2000 || /\s/.test(key.trim())))) next.apiKey = 'Paste a complete API key without spaces.';
+    if ((!initial && !key.trim() && !form.vaultReference) || (key.trim() && (key.trim().length < 11 || key.trim().length > 2000 || /\s/.test(key.trim())))) next.apiKey = 'Paste a complete API key without spaces.';
     for (const field of ['budget', 'remaining'] as const) {
       const value = form[field];
       if (value !== null && (!Number.isFinite(value) || value < 0)) next[field] = 'Enter an amount of zero or more, or leave it empty.';
@@ -208,7 +211,8 @@ function ConnectionEditor({ provider, initial, onChanged, onCancel, openaiReport
       <div className="kb-api-grid">
         {field('name', 'Name (optional)', <input {...attributes('name')} type="text" value={form.name} onChange={e => change('name', e.target.value)} placeholder={`${providerName(provider)} API`} />)}
         <label className="kb-api-toggle"><input type="checkbox" checked={form.enabled} onChange={e => change('enabled', e.target.checked)} />Enabled</label>
-        {field('apiKey', initial ? 'Replace API key (optional)' : 'API key', <input {...attributes('apiKey')} type="password" autoComplete="off" spellCheck={false} value={key} onChange={e => { setKey(e.target.value); setErrors(old => { const next = { ...old }; delete next.apiKey; return next; }); }} placeholder={initial ? 'Leave empty to keep the saved key' : 'Paste API key'} />, true)}
+        <label>Credential source<select value={form.vaultReference?.id??''} onChange={event=>{const entry=vaultOptions.find(v=>v.id===event.target.value);setForm(old=>({...old,vaultReference:entry?{project:entry.project,id:entry.id}:null}));setKey('');}}><option value="">Saved or pasted API key</option>{form.vaultReference&&!vaultOptions.some(v=>v.id===form.vaultReference?.id)?<option value={form.vaultReference.id}>Current vault entry</option>:null}{vaultOptions.map(v=><option key={v.id} value={v.id}>{v.name} · version {v.version}</option>)}</select></label><p>To use the local vault, save and activate a secret in Settings with authorized consumer <code>{`api:${provider}`}</code>. Existing credentials stay unchanged until you save a selection.</p>
+        {field('apiKey', initial ? 'Replace API key (optional)' : 'API key', <input {...attributes('apiKey')} type="password" disabled={!!form.vaultReference} autoComplete="off" spellCheck={false} value={key} onChange={e => { setKey(e.target.value); setErrors(old => { const next = { ...old }; delete next.apiKey; return next; }); }} placeholder={initial ? 'Leave empty to keep the saved key' : 'Paste API key'} />, true)}
       </div>
       <p className="kb-provider-desc">Saving a new key automatically checks models and available organization costs. No model request is made.</p>
       <div className="kb-api-grid">

@@ -24,7 +24,7 @@ async function safePath(cwd:string,path:string,write=false){
 export async function apiTurn(candidate:Candidate,opts:StartAgentRunOptions,transcript:TranscriptEntry[],signal:AbortSignal,emit:(event:StreamEvent)=>void,runRemaining:number):Promise<{done:boolean;usd:number;input:number;output:number}> {
   const row=candidate.row!;const model=candidate.model!;
   const current=listApiConnections().find(r=>r.id===row.id);
-  const policy=(r:typeof row)=>JSON.stringify([r.enabled,r.keyPreview,r.funding,r.afterGrant,r.budget,r.remaining,r.expiresAt,r.keyExpiresAt,r.expired,r.renewsAt,r.grantBillingDay,r.rollover]);
+  const policy=(r:typeof row)=>JSON.stringify([r.enabled,r.keyPreview,r.vaultReference,r.funding,r.afterGrant,r.budget,r.remaining,r.expiresAt,r.keyExpiresAt,r.expired,r.renewsAt,r.grantBillingDay,r.rollover]);
   if(!current||policy(current)!==policy(row))throw new RouteUnavailable('Payment settings changed; re-evaluate this connection.');
   if(candidate.deadline!==undefined&&Date.now()>=candidate.deadline)throw new RouteUnavailable('Grant use-by deadline reached.');
   const tools=opts.env?.KANBOTS_COORDINATOR==='1'?[...COORDINATOR_TOOLS]:opts.env?.KANBOTS_TOOL_BRIDGE_URL?[...fileTools,...KANBOTS_TOOLS]:fileTools;
@@ -38,9 +38,16 @@ export async function apiTurn(candidate:Candidate,opts:StartAgentRunOptions,tran
   if(reservation>runRemaining)throw new RouteUnavailable('Run API spending limit reached.');
   const charge=reserveCharge(candidate.pool!,row.id,reservation,candidate.available!,candidate.since!,candidate.funding);
   if(!charge)throw new RouteUnavailable('This funding pool cannot cover the next request.');
+  let key:string;
+  try{signal.throwIfAborted();key=await unlockApiConnection(row.id);signal.throwIfAborted();}catch{
+    // No request has been attempted. Release the reservation and let routing
+    // select another eligible source without implying an uncertain charge.
+    settleCharge(charge,0);
+    if(signal.aborted)throw Error('Task stopped.');
+    throw new RouteUnavailable('API credential could not be unlocked. Reconnect this source in provider settings.');
+  }
   let response:Response;
   try{
-    const key=unlockApiConnection(row.id);
     const anthropic=row.provider==='anthropic';
     const body=anthropic?{model:model.id,max_tokens:outputLimit,system:instructions,messages:[{role:'user',content:prompt}],tools:tools.map(t=>({name:t.name,description:t.description,input_schema:t.inputSchema}))}
       :{model:model.id,max_output_tokens:outputLimit,instructions,input:[{role:'user',content:prompt}],store:false,tools:tools.map(t=>({type:'function',name:t.name,description:t.description,parameters:t.inputSchema,strict:false}))};

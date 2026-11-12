@@ -38,6 +38,7 @@ const PROVIDER_ID_SCHEMA = z.enum([
 ]);
 
 const connectionSchema = z.object({
+  vaultReference: z.object({project:z.string().min(1).max(200),id:z.string().uuid()}).strict().nullable().optional(),
   id: z.string().uuid(), provider: z.enum(['openai', 'anthropic']), name: z.string().trim().max(100),
   enabled: z.boolean(), priority: z.number().int().min(0).max(999),
   apiKey: z.string().trim().min(11).max(2000).optional(),

@@ -249,6 +249,7 @@ export interface ProviderSettingsPayload {
 }
 
 export interface ApiConnection {
+  vaultReference?: {project:string;id:string} | null | undefined;
   balanceUpdatedAt?: string;
   organizationId?: string | null;
   workspaceId?: string | null;

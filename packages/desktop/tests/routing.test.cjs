@@ -208,3 +208,24 @@ test('grant routing compares natural resets with grant deadlines and observed sp
  assert.equal(await preferred({charges:[],expiryHours:48,resetHours:72}), 'grant');
  assert.equal(await preferred({remaining:0}), 'codex-sub');
 });
+
+test('locked API credential releases unused reservation and permits route fallback',async()=>{
+ const original=global.fetch;let calls=0;const settled=[];try{
+ const mocks={'@kanborg/mcp':{KANBOTS_TOOLS:[]},'./api-connections.js':{unlockApiConnection:()=>{throw Error('private storage detail');},listApiConnections:()=>[{id:'key',provider:'openai'}]},'./routing-state.js':{reserveCharge:()=> 'held',settleCharge:(...a)=>settled.push(a)}};
+ const {apiTurn,RouteUnavailable}=load('api-task',mocks);global.fetch=async()=>{calls++;throw Error('must not send');};
+ const route={row:{id:'key',provider:'openai'},model:{id:'gpt-test',input:1,output:5,context:64000,maxOutput:4096},pool:'org',available:20,since:0};
+ await assert.rejects(apiTurn(route,{cwd:'/tmp',prompt:'test'},[{role:'user',text:'test'}],new AbortController().signal,()=>{},5),error=>error instanceof RouteUnavailable&&/Reconnect/.test(error.message)&&!error.message.includes('private'));
+ assert.equal(calls,0);assert.deepEqual(settled,[['held',0]]);
+ }finally{global.fetch=original;}
+});
+
+test('repeating provider pagination stops and preserves last verified models and spend',async()=>{
+ const dir=fs.mkdtempSync('/private/tmp/kanborg-pages-'),original=global.fetch;let calls=0;
+ try{const api=load('api-connections',{electron:{app:{getPath:()=>dir},safeStorage:{decryptString:()=> 'synthetic'}}});
+ fs.writeFileSync(path.join(dir,'api-connections.json'),JSON.stringify([{id:'test',provider:'openai',encryptedKey:'synthetic',models:[{id:'last-good'}],reportedSpend:17}]));
+ global.fetch=async url=>{calls++;return {ok:true,headers:{get:()=>null},json:async()=>url.includes('/models')?{data:[{id:'partial'}],has_more:true,last_id:'same'}:{data:[],has_more:true,next_page:'same'}};};
+ await api.refreshApiConnection('test');const result=api.listApiConnections()[0];assert.equal(calls,4);assert.deepEqual(result.models,[{id:'last-good'}]);assert.equal(result.reportedSpend,17);assert.match(result.status,/stale/);assert.match(result.billingStatus,/could not be retrieved/);
+ }finally{global.fetch=original;fs.rmSync(dir,{recursive:true,force:true});}
+});
+
+test('explicit vault binding uses scoped consumer and never returns values in connection metadata',async()=>{const dir=fs.mkdtempSync('/private/tmp/kanborg-vault-binding-');try{let leased=0;const api=load('api-connections',{electron:{app:{getPath:()=>dir},safeStorage:{decryptString:()=>{throw Error('must use vault');}}},'./vault-runtime.js':{vaultAction:async()=>({items:[{id:'entry',state:'active',consumer:'api:anthropic'}]}),withVaultSecret:async(id,project,consumer,use)=>{assert.equal(id,'entry');assert.equal(project,'workspace');assert.equal(consumer,'api:anthropic');leased++;return use(Buffer.from('synthetic-vault-value'));}}});const input={id:'connection',provider:'anthropic',name:'Vault provider',enabled:true,vaultReference:{project:'workspace',id:'entry'},remaining:10};await api.saveApiConnection(input);assert.equal(await api.unlockApiConnection('connection'),'synthetic-vault-value');assert.equal(leased,1);assert.ok(!JSON.stringify(api.listApiConnections()).includes('synthetic-vault-value'));const {vaultReference,...legacyEdit}=input;await api.saveApiConnection(legacyEdit);assert.equal(api.listApiConnections()[0].vaultReference.id,'entry');await assert.rejects(api.saveApiConnection({...input,vaultReference:null}),/replacement/);await assert.rejects(api.saveApiConnection({...input,apiKey:'do-not-store'}),/not both/);await assert.rejects(api.saveApiConnection({...input,id:'other',provider:'openai'}),/authorized/);}finally{fs.rmSync(dir,{recursive:true,force:true});}});

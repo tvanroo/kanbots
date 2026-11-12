@@ -1,0 +1,46 @@
+# Major overhaul completion contract
+
+Owner requested full implementation and deployed acceptance, November 12, 2026.
+
+## Required work
+
+- Optional local encrypted secrets: write-only entry, scoped consumers, external root key, versioned staged rotation/rollback, revocation, metadata/audit, verified backup/recovery and optional BSM adapter. Never automatically migrate existing credentials.
+- Durable task checkpoints and compact evidence receipts; explicit worker capability/authority transitions.
+- Dependency-aware concurrency with reservations and duplicate prevention.
+- PR/release lifecycle from independent review and checks through exact runtime and functional acceptance; serialize deployments and preserve existing owners.
+- Stable request IDs for side effects and recovery after uncertain responses.
+- Explicit provider/GitHub access states, bounded retries, delta events and actionable blockers.
+- Metrics for utilization, duplicates, recovery, PR age, stage latency and verified delivery.
+- Failure injection: lost responses, duplicates, stale review head, rate limits, restart, event ordering and wrong runtime SHA.
+- Build, sign, notarize, publish, install, restore workflows and verify app interactions.
+- CardBox workflow 43259186068 and intended main 143eb8c3461e18ee4fccade379c86ff3887006b3 remain unverified; fresh evidence may supersede them. GitHub access currently blocks this lane, not local development. Preserve question 98, Autopilot off and paused schedule.
+
+## In-progress implementation
+
+Local vault core uses SQLite with AES-256-GCM per-version data keys wrapped by an external root key. Owner initialization may store an OS-encrypted root-key envelope separately from the database; deployments can inject the root key. Metadata reads do not reveal values. Scoped trusted main-process callback leases zero buffers on completion/timeout; these are not a sandbox for an untrusted consumer and cannot revoke a copy already taken by a trusted consumer. No arbitrary shell-command or MCP value delivery is provided.
+
+Tests currently cover staged rotation, retained rollback, wrong project/consumer, lease expiry, buffer clearing, revocation, wrong root-key rejection, ciphertext-at-rest and restoring a SQLite backup with the original key. App entry, verified recovery packages with retained rollback, read-only MCP status and owner-mediated MCP activation/revocation/recovery requests are wired. Cancelled native recovery stays pending. External-key restore requires the original injected key. Remaining: optional BSM adapter, remote entry handoff, rendered provider-vault UI verification and further failure-injection tests. Provider binding is implemented below. Coordinator regression suite: 92 passing; synthetic vault tests: 4 passing; routing suite: 15 passing. The alternate GitHub connector returned 404 for workflow 43259186068; this is not evidence that the run completed or disappeared. No production secret has been created or migrated; this development version is not released.
+
+## Dispatch and publication recovery
+
+Dispatch reserves worker capacity before asynchronous preparation. Reservations survive restart and block duplicate task starts. `reconcileDispatch` adopts a single newly recorded worker or clears a reservation only when no worker was recorded. Concurrent dispatch and lost-response/restart tests pass.
+
+Release validation now reserves the workspace release slot before revision reads. Interrupted read-only validation restores its prior state; uncertain side effects block subsequent publication. `reconcileRelease` reads exact merge parents or matching PR plus remote branch SHA without repeating publication. A completed release plan means its merge or draft PR completed, never deployment or functional acceptance. Concurrent release and mismatched/exact merge-parent tests pass. PR reconciliation still needs dedicated failure-injection coverage and rendered controls need verification before release.
+
+Provider preflight failures release unused charge reservations; ambiguous network outcomes retain them. Repeated/missing pagination cursors stop refresh while retaining prior verified model/cost readings.
+
+## Answered question continuity
+
+Owner reported answered cards disappearing on text submission. The UI now requests answered history and retains the submitted card. Durable history includes the answer, coordinator delivery state, originating-chat link and a saved response supplied through `recordUserQuestionResponse`. Default pending-only queries still keep sidebar counts accurate. Regression coverage verifies retained answers and responses across restart and rendered history after refresh.
+
+## Latest verification
+
+All 202 desktop tests passed under the packaged Electron runtime (synthetic fixtures). The Questions component was rendered with application styles in isolated headless Chrome at 1280x900 and 390x844: text submission, answer/response visibility after reload, originating chat and return navigation passed without console errors or framework overlays. This uses a mock desktop bridge; it does not prove installed-app IPC or live coordinator response delivery. Screenshots and fixture scripts are outside the repository in /private/tmp. Full dependency and desktop build passed before the latest metrics addition; rebuild before packaging.
+
+## Provider vault binding
+
+Provider settings now offer explicit selection of an active project vault entry scoped to `api:openai` or `api:anthropic`. Existing OS-encrypted keys remain the default and are not migrated. Saving a vault selection validates its active state and consumer, invalidates the old account/model observations, and persists only a reference. Model discovery and inference resolve that reference in the main process; values never return through metadata/MCP. Main-process HTTP consumers necessarily create in-memory header strings, so buffer clearing is not a guarantee of immediate erasure of every string copy. Disabling/revoking the selected version prevents subsequent reads. Changing away from the vault requires a replacement key. Metadata-only edits from older clients preserve the reference. Concurrent saves are checked after asynchronous validation. Sixteen routing tests, desktop/web typechecks and a full build passed; no live credential was migrated or used in these tests.
+
+## Owner entry and final regression pass
+
+`requestSecretEntry` accepts only name, consumer and reason. The app embeds a write-only vault form in the owner request; verification requires a new matching staged or active version and returns metadata only. Existing entries cannot satisfy a new request accidentally. Recovery re-verifies the staged copy after owner confirmation before swapping directories, preventing a changed backup from replacing the working vault. All 204 desktop tests pass under the packaged Electron runtime; desktop and web typechecking pass. No real credential or running workspace was mutated by this pass.

@@ -10,6 +10,9 @@ type Question = {
   options: Array<{ value: string; label: string }>;
   state: string;
   busy: boolean;
+  reply?: string;
+  response?: string;
+  answerStatus?: string;
   explanation?: string;
   issueNumber?: number;
   commands?: Array<{title:string;code:string;language:string;where:string;expected:string}>;
@@ -48,7 +51,7 @@ export function QuestionsQueue({ inline = false }: { inline?: boolean }) {
     let timer: ReturnType<typeof setTimeout> | undefined;
     try {
       const rows = await Promise.race([
-        action('questions-list'),
+        action('questions-list', {includeAnswered:true}),
         new Promise<never>((_, reject) => {
           timer = setTimeout(() => reject(new Error('KanBorg did not respond in time.')), 8000);
         }),
@@ -56,7 +59,7 @@ export function QuestionsQueue({ inline = false }: { inline?: boolean }) {
       if (sequence !== refreshSequence.current) return;
       const questions: Question[] = rows ?? [];
       for (const [questionId, delivery] of sendingQuestions.current) {
-        if (questions.some(question => question.id === delivery.questionId && !question.explanationPending)) continue;
+        if (questions.some(question => question.id === delivery.questionId && question.state === 'pending' && !question.explanationPending)) continue;
         // Authoritative refresh confirms this question has left the queue.
         // Release a lost IPC wait without replaying the answer.
         sendingQuestions.current.delete(questionId);
@@ -113,7 +116,7 @@ export function QuestionsQueue({ inline = false }: { inline?: boolean }) {
       ]);
       setReceipt(explain ? 'Explanation requested from your coordinator. You can keep answering questions.' : 'Answer saved and queued for your coordinator.');
       if (!explain) {
-        setItems(current => current.filter(item => item.id !== id));
+        setItems(current => current.map(item => item.id === id ? {...item,state:'answered',reply:reply??'',answerStatus:'queued'} : item));
         setDrafts(current => {
           const next = { ...current };
           delete next[id];
@@ -159,7 +162,7 @@ export function QuestionsQueue({ inline = false }: { inline?: boolean }) {
   if (!action) return null;
   return <>
     {!inline && <button className="kb-btn kb-questions-launch" onClick={() => setOpen(!open)}>
-      Questions for you · {items.length}
+      Questions for you · {items.filter(q=>q.state==='pending').length}
     </button>}
     {open && <aside className="kb-questions-panel" aria-label="Questions for you">
       <header>
@@ -179,7 +182,7 @@ export function QuestionsQueue({ inline = false }: { inline?: boolean }) {
         const { id, threadId } = question;
         const submitting = sending[id];
         const disabled = Boolean(submitting) || question.state !== 'pending';
-        const status = submitting === 'slow'
+        const status = question.state === 'answered' ? (question.answerStatus === 'completed' ? 'Coordinator marked this answer handled.' : question.answerStatus === 'received' ? 'Your coordinator received your answer.' : 'Answer saved · waiting for your coordinator.') : submitting === 'slow'
           ? 'Checking whether your response was saved. Refresh questions to recover; other questions remain available.'
           : submitting || question.state === 'sending'
             ? 'Sending a response to this thread…'
@@ -203,12 +206,12 @@ export function QuestionsQueue({ inline = false }: { inline?: boolean }) {
           {status && <p role="status">{status}</p>}
           {errors[id] && <p role="alert">{errors[id]}</p>}
           {question.explanation && <section className="kb-question-explanation" aria-label="Explanation"><h5>What this means</h5><div dangerouslySetInnerHTML={{ __html: renderMarkdown(question.explanation) }} /></section>}
-          <form onSubmit={event => { event.preventDefault(); void respond(question, drafts[id]); }}>
+          {question.state === 'answered' ? <section aria-label="Answer and response"><h5>Your answer</h5><p style={{whiteSpace:'pre-wrap'}}>{question.reply}</p><h5>Coordinator response</h5>{question.response?<div dangerouslySetInnerHTML={{__html:renderMarkdown(question.response)}}/>:<p>No response posted yet. Open the originating chat to follow the work.</p>}</section> : <form onSubmit={event => { event.preventDefault(); void respond(question, drafts[id]); }}>
             <textarea aria-label={`Reply to: ${question.question}`} placeholder="Or answer in your own words…"
               className="kb-coordinator-input" maxLength={4000} value={drafts[id] ?? ''}
               onChange={event => setDrafts(current => ({ ...current, [id]: event.target.value }))} />
             <button className="kb-btn primary" disabled={disabled || !drafts[id]?.trim()}>Send answer</button>
-          </form>
+          </form>}
         </article>;
       })}
     </aside>}

@@ -7,6 +7,7 @@ import {WorkflowEditor} from '../modals/WorkflowEditor.js';
 import {QuestionsQueue} from '../QuestionsQueue.js';
 import {ActivitySection} from '../rail/ActivitySection.js';
 import './workspace-navigation.css';
+import {SecretVaultPanel} from '../SecretVaultPanel.js';
 type Destination='Board'|'Coordinator'|'Questions'|'Activity'|'Development'|'Providers'|'Autopilot'|'Settings';
 export function WorkspaceNavigation({board,development,project,onTask,settings}:{board:ReactNode;development:ReactNode;project:string;onTask:(n:number)=>void;settings:Array<{name:string;description:string;open:()=>void}>}){
  const [view,setView]=useState<Destination>('Board');const [count,setCount]=useState(0);const [controller,setController]=useState('Checking coordinator…');
@@ -23,6 +24,6 @@ export function WorkspaceNavigation({board,development,project,onTask,settings}:
  {view==='Questions'?<QuestionsQueue inline/>:null}
  {view==='Activity'?<section className="workspace-page"><h1>Activity</h1><p>Recent worker events. Open an event to inspect the task and its evidence.</p><ActivitySection onSelectIssue={onTask}/></section>:null}
  {view==='Development'?<section className="workspace-page"><h1>Development</h1><p>Files, worktrees, live agents and saved chats.</p><div className="workspace-development">{development}</div></section>:null}
- {view==='Settings'?<section className="workspace-page"><h1>Settings</h1><p>Configure your project and how work moves forward.</p><div className="workspace-settings-grid">{settings.map(s=><button key={s.name} onClick={s.name==='Workflow'?()=>setWorkflowOpen(true):s.open}><strong>{s.name}</strong><span>{s.description}</span><span>Open →</span></button>)}</div></section>:null}
+ {view==='Settings'?<section className="workspace-page"><h1>Settings</h1><p>Configure your project and how work moves forward.</p><div className="workspace-settings-grid">{settings.map(s=><button key={s.name} onClick={s.name==='Workflow'?()=>setWorkflowOpen(true):s.open}><strong>{s.name}</strong><span>{s.description}</span><span>Open →</span></button>)}</div><SecretVaultPanel/></section>:null}
  {workflowOpen?<WorkflowEditor onClose={()=>setWorkflowOpen(false)}/>:null}</main></div>;
 }
