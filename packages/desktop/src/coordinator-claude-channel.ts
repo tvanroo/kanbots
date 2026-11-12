@@ -32,12 +32,12 @@ export function defaultRegistryDir(){return join(homedir(),'.kanborg-connect','c
 // One request line, one reply line. Rejects with code 'SENT' once the request
 // has been written, so callers can tell "maybe delivered" from "never sent".
 const exchange:Exchange=(socket,line,timeoutMs)=>new Promise((resolveReply,reject)=>{
-  let buf='',sent=false;
+  let buf='',sent=false,settled=false;
   const s=connect(socket);
-  const fail=(e:Error)=>{s.destroy();reject(Object.assign(e,{sent}));};
+  const fail=(e:Error)=>{if(settled)return;settled=true;s.destroy();reject(Object.assign(e,{sent}));};
   s.setTimeout(timeoutMs,()=>fail(Error('timeout')));
-  s.on('connect',()=>{s.write(line+'\n',()=>{sent=true;});});
-  s.on('data',c=>{buf+=c;if(buf.length>65536)fail(Error('reply too large'));const i=buf.indexOf('\n');if(i>=0){s.end();resolveReply(buf.slice(0,i));}});
+  s.on('connect',()=>{sent=true;s.write(line+'\n');});
+  s.on('data',c=>{if(settled)return;buf+=c;if(buf.length>65536){fail(Error('reply too large'));return;}const i=buf.indexOf('\n');if(i>=0){settled=true;s.destroy();resolveReply(buf.slice(0,i));}});
   s.on('error',e=>fail(e));
   s.on('end',()=>{if(!buf.includes('\n'))fail(Error('no reply'));});
 });
