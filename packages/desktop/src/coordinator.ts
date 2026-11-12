@@ -268,15 +268,20 @@ export class CoordinatorService{
   private coordinationMetrics(w:Workspace){
     const now=Date.now();const age=(at:string|undefined)=>{const time=Date.parse(at??'');return Number.isFinite(time)&&time<=now?now-time:null;};
     const activeJobs=w.jobs.filter(j=>[j.runId,j.reviewRunId].some(id=>id!==undefined&&active(this.context!.store.agentRuns.findById(id)?.status??'')));
-    const activeRunIds=[...new Set(activeJobs.flatMap(j=>[j.runId,j.reviewRunId].filter((id):id is number=>id!==undefined&&active(this.context!.store.agentRuns.findById(id)?.status??''))))];
+    const liveTasks=(this.context?.store.agentRuns.listActive?.()??[]).filter(run=>run.issueNumber>0);
+    const activeRunIds=[...new Set([...activeJobs.flatMap(j=>[j.runId,j.reviewRunId].filter((id):id is number=>id!==undefined&&active(this.context!.store.agentRuns.findById(id)?.status??''))),...liveTasks.map(run=>run.id)])];
     const runStates=activeRunIds.map(runId=>{const run=this.run(runId);return {runId,status:run.status,processAttached:run.pid!=null};});
     const waitingRunIds=runStates.filter(r=>r.status==='awaiting_input').map(r=>r.runId);
     const executingRunIds=runStates.filter(r=>r.status==='starting'||r.status==='running').map(r=>r.runId);
-    const byTask=new Map<number,number[]>();for(const job of activeJobs)byTask.set(job.number,[...(byTask.get(job.number)??[]),job.runId]);
+    const byTask=new Map<number,Set<number>>();
+    const addTask=(number:number,id:number)=>{const ids=byTask.get(number)??new Set<number>();ids.add(id);byTask.set(number,ids);};
+    for(const job of activeJobs)if(activeRunIds.includes(job.runId))addTask(job.number,job.runId);
+    const reviewIds=new Set(activeJobs.flatMap(job=>job.reviewRunId?[job.reviewRunId]:[]));
+    for(const run of liveTasks)if(!reviewIds.has(run.id))addTask(run.issueNumber,run.id);
     const reservations=Object.entries(w.dispatchReservations??{}).map(([number,r])=>({number:Number(number),id:r.id,state:r.state,ageMs:age(r.at)}));
     const counts:Record<string,number>={};for(const event of w.events)counts[event.type]=(counts[event.type]??0)+1;
     return {observedAt:new Date(now).toISOString(),workspaceId:w.id,revision:w.revision,
-      workers:{target:w.parallelism,active:activeRunIds.length,executing:executingRunIds.length,waitingForInput:waitingRunIds.length,executingRunIds,waitingRunIds,runStates,activeAssignments:activeJobs.length,runIds:activeRunIds,reserved:reservations.length,queued:w.queue?.length??0,activeRunLimit:null,availableSlots:null,autopilot:this.autopilotCapacity(w),duplicateTasks:[...byTask].filter(([,ids])=>ids.length>1).map(([number,runIds])=>({number,runIds}))},
+      workers:{target:w.autopilot?.parallelism??w.parallelism,active:activeRunIds.length,executing:executingRunIds.length,waitingForInput:waitingRunIds.length,executingRunIds,waitingRunIds,runStates,activeAssignments:activeJobs.length,runIds:activeRunIds,reserved:reservations.length,queued:w.queue?.length??0,activeRunLimit:null,availableSlots:null,autopilot:this.autopilotCapacity(w),duplicateTasks:[...byTask].filter(([,ids])=>ids.size>1).map(([number,runIds])=>({number,runIds:[...runIds]}))},
       recovery:{dispatches:reservations,releases:w.releases.filter(r=>['executing','uncertain','failed'].includes(r.state)).map(r=>({id:r.id,state:r.state,sha:r.sha,action:r.action})),workers:w.jobs.filter(j=>['blocked','checkpointed','review-checkpointed','interrupted'].includes(j.state)).map(j=>({runId:j.runId,number:j.number,state:j.state}))},
       stages:Object.values(w.workflow?.cards??{}).map(c=>({number:c.number,stageId:c.stageId,enteredAt:c.enteredAt,ageMs:age(c.enteredAt),waiting:c.waiting??null})),
       pendingRequests:(w.requests??[]).filter(r=>r.state!=='completed').map(r=>({id:r.id,kind:r.kind,state:r.state,ageMs:age(r.createdAt)})),

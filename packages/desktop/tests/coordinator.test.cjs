@@ -931,3 +931,15 @@ test('owner-started task workers consume lanes without double-counting delegated
   f.svc.save();const restored=f.reload();assert.equal(restored.laneUsage(restored.current()).implementation,1);assert.equal(restored.laneUsage(restored.current()).release,1);
  }finally{f.cleanup();}
 });
+
+ test('metrics include direct task workers, exclude chats and deduplicate adopted runs',async()=>{
+ const f=fixture();try{
+  const c=await control(f);await write(f,c,'dispatchTask',{number:1,qa:false});
+  f.runs.set(900,{id:900,status:'running',pid:123});f.runs.set(901,{id:901,status:'awaiting_input',pid:null});f.runs.set(902,{id:902,status:'running',pid:124});
+  f.svc.context.store.agentRuns.listActive=()=>[{...f.runs.get(1),issueNumber:1},{...f.runs.get(900),issueNumber:1},{...f.runs.get(901),issueNumber:2},{...f.runs.get(902),issueNumber:0}];
+  f.svc.current().autopilot={status:'active',parallelism:8,personas:[],effort:'medium',objective:'Work',updatedAt:'now',legacyWork:[]};
+  const result=await f.svc.call(c.actor,c.id,'getCoordinationMetrics',{workspaceId:c.id});
+  assert.equal(result.workers.target,8);assert.equal(result.workers.active,3);assert.equal(result.workers.executing,2);assert.equal(result.workers.waitingForInput,1);
+  assert.deepEqual(result.workers.duplicateTasks,[{number:1,runIds:[1,900]}]);assert.deepEqual(result.workers.waitingRunIds,[901]);
+ }finally{f.cleanup();}
+ });
