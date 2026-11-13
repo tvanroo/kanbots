@@ -136,6 +136,8 @@ export function Board({ onOpenDetail, onOpenCreate, onOpenPalette, onOpenStats }
   const [locateQuery,setLocateQuery]=useState('');
   const [locateRequest,setLocateRequest]=useState(0);
   const [locatedNumber,setLocatedNumber]=useState<number|null>(null);
+  const [compactCards, setCompactCards] = useState(() => { try { return localStorage.getItem('kanborg:compact-cards') === 'true'; } catch { return false; } });
+  useEffect(() => { try { localStorage.setItem('kanborg:compact-cards', String(compactCards)); } catch { /* Keep the current view for this session. */ } }, [compactCards]);
   const [trackedByWorkspace, setTrackedByWorkspace] = useState<Record<string, number[]>>(() => {
     try {
       const saved = JSON.parse(localStorage.getItem('kanborg:tracked-cards') ?? '{}');
@@ -738,13 +740,14 @@ export function Board({ onOpenDetail, onOpenCreate, onOpenPalette, onOpenStats }
       {enabledStages?.length===0 && <p role="status">No stages selected. Toggle a stage below or choose All stages.</p>}
       <nav className="kb-stage-navigation" aria-label="Visible stages"><button aria-pressed={enabledStages===null} onClick={()=>setEnabledStages(null)}>All stages</button>{(workflow?.config.stages ?? COLUMNS.map(c=>({id:String(c.key),name:c.label}))).map((stage:any)=><button key={stage.id} aria-pressed={enabledStages===null||enabledStages.includes(stage.id)} onClick={()=>setEnabledStages(current=>{const all=(workflow?.config.stages ?? COLUMNS.map(c=>({id:String(c.key)}))).map((s:any)=>s.id);const selected=current??all;return selected.includes(stage.id)?selected.filter((id:string)=>id!==stage.id):[...selected,stage.id];})}>{stage.name}</button>)}</nav>
       <section className="kb-board-locate" aria-label="Find a card on the board">
+        <button className="kb-btn" aria-pressed={compactCards} onClick={() => setCompactCards(value => !value)}>Compact cards{compactCards ? ' · On' : ''}</button>
         <label htmlFor="board-locate">Locate card</label>
         <input id="board-locate" className="kb-input" type="search" placeholder="Card number or title…" value={locateQuery} onChange={e=>setLocateQuery(e.target.value)} />
         {locateQuery.trim()&&<div className="kb-board-locate-results">{locateMatches.length?locateMatches.map(i=><button className="kb-btn" key={i.number} onClick={()=>{setLocatedNumber(i.number);setLocateRequest(n=>n+1);setLocateQuery('');}}>#{i.number} · {i.title} — {workflow?.config.stages.find((s:any)=>s.id===workflow.cards[i.number]?.stageId)?.name??i.status}</button>):<span role="status">No matching card</span>}</div>}
         {locatedIssue&&<span role="status">Located #{locatedIssue.number} in {workflow?.config.stages.find((s:any)=>s.id===locatedStage)?.name??locatedIssue.status}. <button className="kb-btn ghost" onClick={()=>setLocatedNumber(null)}>Clear highlight</button></span>}
         {trackedNumbers.size > 0 && <div className="kb-board-tracked" aria-label="Tracked cards"><strong>Tracking {trackedNumbers.size}</strong>{workflowIssues.filter(i => trackedNumbers.has(i.number)).map(i => <button className="kb-btn" key={i.number} onClick={() => {setLocatedNumber(i.number);setLocateRequest(n=>n+1); document.querySelector(`[data-board-card="${i.number}"]`)?.scrollIntoView({behavior:'smooth',block:'center',inline:'center'});}}>#{i.number} · {i.title}</button>)}</div>}
       </section>
-      <div className="kb-board kb-board-focus" data-located-card={locatedNumber??undefined} onClick={handleBoardBackgroundClick}>
+      <div className={`kb-board kb-board-focus${compactCards ? ' kb-board-compact' : ''}`} data-located-card={locatedNumber??undefined} onClick={handleBoardBackgroundClick}>
         {(workflow?workflow.config.stages.map((s:any)=>({key:s.id,label:s.name,status:s.category,purpose:s.purpose})):COLUMNS.filter((col) => filterApi.includeBacklog || col.key !== 'backlog')).filter((col:any)=>enabledStages===null||enabledStages.includes(String(col.key))||col.key===locatedStage||trackedStages.has(col.key)).map((col:any) => (
           <Column
             key={String(col.key)}

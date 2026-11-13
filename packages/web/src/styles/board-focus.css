@@ -63,3 +63,12 @@
 
 .kb-board-locate input[type="search"] { min-height:36px; width:240px; max-width:100%; padding:8px 12px; border:1px solid var(--hairline); border-radius:8px; background:var(--bg); color:var(--ink); font:inherit; }
 .kb-board-locate input[type="search"]:focus-visible { outline:2px solid var(--accent); outline-offset:2px; }
+
+/* Compact mode retains all card controls and lets details expand normally. */
+.kb-board-compact .kb-track-card { padding: 4px 10px 0; }
+.kb-board-compact .kb-card { padding: 5px 10px; }
+.kb-board-compact .kb-card-row1 { margin-bottom: 3px; }
+.kb-board-compact .kb-card-title { line-height: 1.25; }
+.kb-board-compact .kb-task-context { padding: 4px 10px; line-height: 1.25; }
+.kb-board-compact .kb-task-context details { margin-top: 1px; }
+.kb-board-compact .kb-task-context summary { padding: 1px 0; }
