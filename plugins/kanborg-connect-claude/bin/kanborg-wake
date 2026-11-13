@@ -1,0 +1,11 @@
+#!/bin/sh
+# Start the KanBorg wake channel with Node if available, otherwise with the
+# Node runtime inside the KanBorg app (Electron in Node mode).
+DIR=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+if command -v node >/dev/null 2>&1; then exec node "$DIR/wake/server.mjs"; fi
+for app in "/Applications/KanBorg.app" "$HOME/Applications/KanBorg.app"; do
+  bin="$app/Contents/MacOS/KanBorg"
+  if [ -x "$bin" ]; then ELECTRON_RUN_AS_NODE=1 exec "$bin" "$DIR/wake/server.mjs"; fi
+done
+echo "[kanborg-wake] Node.js not found; install Node 18+ or KanBorg.app" >&2
+exit 1
