@@ -1014,6 +1014,10 @@ async function ensureDeviceChat(): Promise<{
   const supervisor = await createSupervisor({
     store,
     repoPath: resolveChatCwd,
+    // Chat runs work in the repo checkout and never create worktrees. This
+    // store also can't see the workspace store's runs, so letting it scan
+    // .kanbots/worktrees would misclassify their worktrees as orphans.
+    worktreeGc: false,
   });
   deviceChatStore = store;
   deviceChatSupervisor = supervisor;

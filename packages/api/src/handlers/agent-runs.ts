@@ -14,6 +14,7 @@ import type {
   PromotePrResult,
   RunStatsResult,
 } from '../bridge.js';
+import { reclaimWorktree, repoFromWorktreeLayout } from '../agent-runs/worktree-gc.js';
 import { stopRunPreview } from './agent-preview.js';
 import { badRequest, notFound, parseArgs } from './errors.js';
 import type { HandlerDeps } from './types.js';
@@ -169,22 +170,22 @@ export async function fork(
     cwd: source.worktreePath,
   });
   const sha = headSha.trim();
-  const stamp = Date.now().toString(36);
-  const newBranch = `${source.branchName}-fork-${stamp}`;
-  const newWorktreePath = `${source.worktreePath}-fork-${stamp}`;
-  await mkdir(dirname(newWorktreePath), { recursive: true });
-  await execFileAsync(
-    'git',
-    ['worktree', 'add', '-b', newBranch, newWorktreePath, sha],
-    { cwd: source.worktreePath },
-  );
+  // The supervisor creates (and tracks) the forked run's worktree itself,
+  // branching from the source run's tip. Creating a worktree here as well
+  // used to leave an untracked checkout behind on every fork.
   const run = await deps.supervisor.start({
     threadId: thread.id,
     issueNumber: thread.issueNumber,
     prompt: `Continue from a fork of run #${parsed.runId} (branch ${source.branchName}).`,
+    baseRef: sha,
     ...(source.model ? { model: source.model } : {}),
   });
-  return { source: parsed.runId, run, worktree: newWorktreePath, branch: newBranch };
+  return {
+    source: parsed.runId,
+    run,
+    worktree: run.worktreePath ?? '',
+    branch: run.branchName ?? '',
+  };
 }
 
 export async function promoteCommit(
@@ -461,19 +462,24 @@ async function cleanupRunArtifacts(
   } catch {
     // best-effort
   }
-  try {
-    await execFileAsync(
-      'git',
-      ['worktree', 'remove', '--force', run.worktreePath],
-      { cwd: repoPath },
-    );
-    worktreeRemoved = true;
-  } catch {
-    // worktree may already be missing
+  // Uncommitted changes are snapshotted onto the branch first (and the
+  // branch is then kept), so cleaning up never silently destroys work.
+  const outcome = await reclaimWorktree(run.worktreePath, {
+    fallbackRepoPath: repoPath,
+    branch: run.branchName,
+    dirtyPolicy: 'snapshot',
+    deleteMergedBranch: false,
+  });
+  if (outcome.kind === 'kept') {
+    return { worktreeRemoved, branchDeleted };
   }
-  if (!opts.keepBranch) {
+  worktreeRemoved = outcome.kind === 'removed';
+  const keepBranch =
+    opts.keepBranch === true || (outcome.kind === 'removed' && outcome.snapshotted);
+  if (!keepBranch) {
+    const owningRepo = repoFromWorktreeLayout(run.worktreePath) ?? repoPath;
     try {
-      await execFileAsync('git', ['branch', '-D', run.branchName], { cwd: repoPath });
+      await execFileAsync('git', ['branch', '-D', run.branchName], { cwd: owningRepo });
       branchDeleted = true;
     } catch {
       // branch may already be gone
@@ -481,7 +487,7 @@ async function cleanupRunArtifacts(
   }
   deps.store.agentRuns.update(run.id, {
     worktreePath: null,
-    ...(opts.keepBranch ? {} : { branchName: null }),
+    ...(branchDeleted ? { branchName: null } : {}),
   });
   return { worktreeRemoved, branchDeleted };
 }

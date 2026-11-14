@@ -289,6 +289,15 @@ export class AgentRunsRepo {
     return rows.map(rowToAgentRun);
   }
 
+  /** Every run that still has a worktree path recorded, oldest first. Used by
+   *  the worktree garbage collector to find reclaimable checkouts. */
+  listWithWorktree(): AgentRun[] {
+    const rows = this.db
+      .prepare('SELECT * FROM agent_runs WHERE worktree_path IS NOT NULL ORDER BY id')
+      .all() as AgentRunRow[];
+    return rows.map(rowToAgentRun);
+  }
+
   listOrphans(): AgentRun[] {
     const rows = this.db
       .prepare(`SELECT * FROM agent_runs WHERE status IN ${ACTIVE_STATUSES} AND pid IS NOT NULL`)
