@@ -19,6 +19,8 @@ import type {
   ThreadPayload,
 } from '../bridge.js';
 import { bootstrapWorkspace } from '../workspace-bootstrap.js';
+import { defaultWorktreePath } from '@kanbots/dispatcher';
+import { restoreRunWorktree } from '../agent-runs/worktree-gc.js';
 import { sweepAllRunsForThread } from './agent-runs.js';
 import { alreadyActive, badRequest, notFound, parseArgs } from './errors.js';
 import type { HandlerDeps } from './types.js';
@@ -389,11 +391,34 @@ export async function postMessage(
       chatSessionId !== undefined
         ? deps.store.agentRuns.findActiveForChatSession(chatSessionId)
         : deps.store.agentRuns.findActiveForThread(thread.id);
-    const latest =
+    let latest =
       active ??
       (chatSessionId !== undefined
         ? deps.store.agentRuns.findLatestForChatSession(chatSessionId)
         : deps.store.agentRuns.findLatestForThread(thread.id));
+    // The worktree garbage collector may have removed an idle run's
+    // worktree while keeping its branch. Recreate it from the branch so the
+    // agent session resumes in place instead of starting over from base.
+    if (
+      active === null &&
+      latest !== null &&
+      latest.sessionId !== null &&
+      latest.branchName !== null &&
+      deps.config.repoPath
+    ) {
+      try {
+        const restored = await restoreRunWorktree(deps.store, latest, deps.config.repoPath, {
+          worktreePath: defaultWorktreePath({
+            repoPath: deps.config.repoPath,
+            issueNumber: thread.issueNumber,
+            runId: latest.id,
+          }),
+        });
+        if (restored !== null) latest = restored;
+      } catch {
+        // fall through to a fresh start
+      }
+    }
     const willResume =
       (active !== null && active.status === 'awaiting_input') ||
       (active === null &&

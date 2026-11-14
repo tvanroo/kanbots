@@ -22,6 +22,12 @@ import {
 import type { AgentEvent, AgentRun, AgentRunStatus, Card, Store } from '@kanbots/local-store';
 import { BRIEFING_MARKER, renderSiblingBriefing } from './sibling-briefing.js';
 import {
+  retentionDaysFromEnv,
+  scheduleWorktreeGc,
+  type WorktreeGcReport,
+  type WorktreeGcScheduler,
+} from './worktree-gc.js';
+import {
   describeReapOutcome,
   reapOrphanProcess,
   type ReapOptions,
@@ -97,6 +103,19 @@ export interface CreateSupervisorOptions {
    *  worktree. Default: 'warn'. */
   containmentMode?: ContainmentMode;
   onRunStatusChange?: (run: AgentRun) => Promise<void> | void;
+  /**
+   * Automatic worktree garbage collection (see worktree-gc.ts). Enabled by
+   * default; retention comes from `KANBOTS_WORKTREE_RETENTION_DAYS`
+   * (default 3, `0`/`off` disables). Pass `false` to disable entirely.
+   */
+  worktreeGc?:
+    | false
+    | {
+        retentionDays?: number | null;
+        initialDelayMs?: number;
+        intervalMs?: number;
+        onReport?: (report: WorktreeGcReport) => void;
+      };
 }
 
 const STOP_FORCE_RESOLVE_SLACK_MS = 2_000;
@@ -138,6 +157,12 @@ export interface StartRunInput {
    * drag-to-inProgress, autopilot children).
    */
   chatSessionId?: number;
+  /**
+   * Commit-ish the run's new worktree branch starts from (defaults to the
+   * repo's HEAD). Used by fork so the forked run continues from the source
+   * run's tip instead of creating a second, untracked worktree.
+   */
+  baseRef?: string;
 }
 
 export interface ResumeRunInput {
@@ -364,6 +389,28 @@ export async function createSupervisor(
   store.cards.dismissOrphanPendingDecisions();
 
   const active = new Map<number, ActiveRun>();
+
+  // Reclaim worktrees of finished runs so they don't accumulate on disk.
+  let worktreeGc: WorktreeGcScheduler | null = null;
+  if (opts.worktreeGc !== false) {
+    const gcOpts = opts.worktreeGc ?? {};
+    const retentionDays =
+      gcOpts.retentionDays === undefined ? retentionDaysFromEnv() : gcOpts.retentionDays;
+    if (retentionDays !== null && retentionDays > 0) {
+      worktreeGc = scheduleWorktreeGc({
+        store,
+        retentionDays,
+        // Repos referenced by run rows are scanned automatically; add the
+        // host repo so orphans are found even when no row points at it.
+        repoPaths: () => [resolveRepoPath()],
+        isRunActive: (runId) => active.has(runId),
+        ...(gcOpts.initialDelayMs !== undefined ? { initialDelayMs: gcOpts.initialDelayMs } : {}),
+        ...(gcOpts.intervalMs !== undefined ? { intervalMs: gcOpts.intervalMs } : {}),
+        ...(gcOpts.onReport ? { onReport: gcOpts.onReport } : {}),
+      });
+    }
+  }
+
   const emitter = new EventEmitter();
   emitter.setMaxListeners(0);
 
@@ -755,6 +802,11 @@ export async function createSupervisor(
         store.chatSessions.setStatus(updated.chatSessionId, sessionStatus);
       }
       emitter.emit(statusChannel(run.id), updated.status);
+      // A finished run may supersede older runs on the same thread, whose
+      // worktrees can now be reclaimed.
+      if (status !== 'awaiting_input' && worktreeGc !== null) {
+        void worktreeGc.runNow();
+      }
       if (status === 'complete' && opts.onRunComplete) {
         void Promise.resolve(opts.onRunComplete(updated)).catch(() => {
           // best-effort hook; failures must not crash the supervisor
@@ -996,7 +1048,12 @@ export async function createSupervisor(
 
     try {
       await prepareDir(worktreePath);
-      await makeWorktree({ repoPath, branch, worktreePath });
+      await makeWorktree({
+        repoPath,
+        branch,
+        worktreePath,
+        ...(input.baseRef !== undefined ? { baseRef: input.baseRef } : {}),
+      });
       await stampIdentity({
         worktreePath,
         runId: run.id,
