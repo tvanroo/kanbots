@@ -3631,3 +3631,19 @@
 .kb-api-reporting-body .kb-api-summary { padding: 4px 0; }
 
 .kb-persona-pick{display:block;width:100%;border:0;background:transparent;color:inherit;text-align:left;font:inherit;padding:0;cursor:pointer}.kb-persona-pick:focus-visible{outline:2px solid var(--accent);outline-offset:4px;border-radius:4px}
+
+.kb-status-log { max-width: 960px; margin: 0 auto; padding: 20px; color: var(--ink-1); }
+.kb-status-log[hidden] { display:none; }
+.kb-status-log header, .kb-status-entry-head { display:flex; align-items:flex-start; justify-content:space-between; gap:12px; flex-wrap:wrap; }
+.kb-status-log h3 { margin:0 0 6px; }
+.kb-status-log header p { margin:0; color:var(--ink-2); }
+.kb-status-log header > span, .kb-status-entry small { color:var(--ink-2); font-size:12px; }
+.kb-status-empty, .kb-status-entry { margin-top:16px; padding:16px; background:var(--bg-1); border:1px solid var(--hairline); border-radius:10px; }
+.kb-status-entry-head time { font-weight:600; }
+.kb-status-state { padding:3px 8px; border-radius:999px; background:var(--bg); color:var(--ink-2); font-size:12px; }
+.kb-status-metrics, .kb-status-stages { display:flex; flex-wrap:wrap; gap:8px; margin:12px 0; }
+.kb-status-metrics span, .kb-status-stages span { padding:5px 8px; border-radius:6px; background:var(--bg); color:var(--ink-2); }
+.kb-status-entry details { border-top:1px solid var(--hairline); padding:8px 0; }
+.kb-status-entry summary { cursor:pointer; font-weight:600; }
+.kb-status-message { white-space:pre-wrap; overflow-wrap:anywhere; }
+@media (max-width:600px) { .kb-status-log { padding:12px; } .kb-status-entry { padding:12px; } }
