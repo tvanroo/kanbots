@@ -1,6 +1,6 @@
 {
   "name": "@kanborg/desktop",
-  "version": "1.2.61",
+  "version": "1.2.62",
   "private": true,
   "description": "KanBorg desktop app (Electron)",
   "main": "./dist/main.cjs",
