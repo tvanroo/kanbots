@@ -1050,7 +1050,7 @@ export interface BridgeChannels {
     result: void;
   };
   'cards:resolve': {
-    args: { cardId: number; value: string };
+    args: { cardId: number; value: string; freeText?: boolean };
     result: ResolveCardResult;
   };
   'cards:dismiss': {

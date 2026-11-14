@@ -468,19 +468,24 @@ function DecisionActions({
   options: Array<{ value: string; label: string }>;
 }) {
   const [submitting, setSubmitting] = useState(false);
+  const [reply, setReply] = useState('');
+  const [error, setError] = useState<string | null>(null);
 
   function stop(e: MouseEvent<HTMLDivElement>): void {
     e.stopPropagation();
   }
 
-  async function pick(e: MouseEvent<HTMLButtonElement>, value: string): Promise<void> {
+  async function pick(e: { stopPropagation(): void }, value: string, freeText = false): Promise<void> {
     e.stopPropagation();
     if (submitting) return;
     setSubmitting(true);
+    setError(null);
     try {
-      await api.resolveCard(cardId, value);
+      await api.resolveCard(cardId, value, freeText);
       window.dispatchEvent(new CustomEvent(DECISION_RESOLVED_EVENT));
       dispatchIssuesRefetch();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
     } finally {
       setSubmitting(false);
     }
@@ -517,6 +522,11 @@ function DecisionActions({
           {submitting ? '…' : opt.label}
         </button>
       ))}
+      <form className="kb-decision-free-reply" onSubmit={e => { e.preventDefault(); e.stopPropagation(); if (reply.trim()) void pick(e, reply.trim(), true); }}>
+        <label>Reply in your own words<textarea aria-label="Free-form answer" maxLength={2000} value={reply} onChange={e => setReply(e.target.value)} disabled={submitting} onPointerDown={e => e.stopPropagation()} /></label>
+        <button type="submit" className="kb-btn primary" disabled={submitting || !reply.trim()}>Send answer</button>
+      </form>
+      {error && <span role="alert">{error}</span>}
       <button
         type="button"
         className="o dismiss"
@@ -563,22 +573,25 @@ function CardImpl({
   const stateCls = stateClassFor(issue);
   const setNodeRef = drag.setNodeRef;
 
-  function handleClick(e: MouseEvent<HTMLButtonElement>): void {
+  function handleClick(e: MouseEvent<HTMLDivElement>): void {
     e.preventDefault();
     onSelect?.(issue.number, {
       shiftKey: e.shiftKey,
       metaOrCtrlKey: e.metaKey || e.ctrlKey,
     });
   }
-  function handleDoubleClick(e: MouseEvent<HTMLButtonElement>): void {
+  function handleDoubleClick(e: MouseEvent<HTMLDivElement>): void {
     e.preventDefault();
     onOpen?.(issue.number);
   }
 
   const ringClass = multiSelected ? ' is-selected' : '';
   return (
-    <button
-      type="button"
+    <div
+      {...(draggable ? drag.attributes : {})}
+      role="button"
+      tabIndex={0}
+      onKeyDown={e => { if (e.target === e.currentTarget && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); onSelect?.(issue.number, {shiftKey:e.shiftKey, metaOrCtrlKey:e.metaKey || e.ctrlKey}); } }}
       ref={setNodeRef}
       className={`kb-card ${stateCls}${selected ? ' kb-card-selected' : ''}${ringClass}${
         drag.isDragging ? ' kb-card-source' : ''
@@ -586,10 +599,9 @@ function CardImpl({
       onClick={handleClick}
       onDoubleClick={handleDoubleClick}
       {...(draggable ? drag.listeners : {})}
-      {...(draggable ? drag.attributes : {})}
     >
       <CardBody issue={issue} liveTool={liveTool} />
-    </button>
+    </div>
   );
 }
 

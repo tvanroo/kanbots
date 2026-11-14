@@ -869,3 +869,8 @@
   border-radius: 6px;
   background: white;
 }
+
+.kb-decision-free-reply { display:flex; flex-direction:column; gap:6px; width:100%; margin-top:8px; }
+.kb-decision-free-reply label { display:flex; flex-direction:column; gap:4px; color:var(--ink-2); font-size:12px; }
+.kb-decision-free-reply textarea { width:100%; min-height:60px; resize:vertical; padding:8px; color:var(--ink); background:var(--bg); border:1px solid var(--hairline); border-radius:6px; font:inherit; }
+.kb-decision-free-reply button { align-self:flex-start; }

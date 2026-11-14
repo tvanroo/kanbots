@@ -720,17 +720,18 @@ function DecisionInline({
   onResolved: () => void;
 }) {
   const [submitting, setSubmitting] = useState<string | null>(null);
+  const [reply, setReply] = useState('');
   const [error, setError] = useState<string | null>(null);
   const isPending = card.status === 'pending';
   const isResolved = card.status === 'resolved';
   const isDismissed = card.status === 'dismissed';
 
-  async function pick(value: string): Promise<void> {
+  async function pick(value: string, freeText = false): Promise<void> {
     if (!isPending || submitting !== null) return;
     setSubmitting(value);
     setError(null);
     try {
-      await api.resolveCard(card.id, value);
+      await api.resolveCard(card.id, value, freeText);
       onResolved();
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -779,6 +780,10 @@ function DecisionInline({
           </button>
         ) : null}
       </div>
+      {isPending ? <form className="kb-decision-free-reply" onSubmit={e => { e.preventDefault(); if (reply.trim()) void pick(reply.trim(), true); }}>
+        <label>Reply in your own words<textarea aria-label="Free-form answer" maxLength={2000} value={reply} onChange={e => setReply(e.target.value)} disabled={submitting !== null} /></label>
+        <button type="submit" className="kb-btn primary" disabled={submitting !== null || !reply.trim()}>Send answer</button>
+      </form> : null}
       {isResolved ? <div className="kb-decision-resolved-note">resolved</div> : null}
       {isDismissed ? <div className="kb-decision-resolved-note">dismissed</div> : null}
       {error ? <div className="kb-decision-resolved-note">error: {error}</div> : null}

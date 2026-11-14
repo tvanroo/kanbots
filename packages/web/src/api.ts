@@ -857,8 +857,8 @@ export const api = {
     args: ChannelArgs<'analytics:recent-activity'> = {},
   ): Promise<ChannelResult<'analytics:recent-activity'>> =>
     invoke('analytics:recent-activity', args),
-  resolveCard: (cardId: number, value: string): Promise<ResolveCardResult> =>
-    invoke('cards:resolve', { cardId, value }),
+  resolveCard: (cardId: number, value: string, freeText = false): Promise<ResolveCardResult> =>
+    invoke('cards:resolve', { cardId, value, freeText }),
   dismissCard: (cardId: number): Promise<DismissCardResult> =>
     invoke('cards:dismiss', { cardId }),
   listCardTemplates: (): Promise<CardTemplatePayload[]> => {

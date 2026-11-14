@@ -8,6 +8,7 @@ const resolveSchema = z
   .object({
     cardId: z.number().int().positive(),
     value: z.string().min(1).max(2000),
+    freeText: z.boolean().optional(),
   })
   .strict();
 
@@ -20,6 +21,7 @@ const dismissSchema = z
 export interface ResolveCardArgs {
   cardId: number;
   value: string;
+  freeText?: boolean;
 }
 
 export interface DismissCardArgs {
@@ -41,8 +43,10 @@ export async function resolve(
     | { question?: string; options?: Array<{ value: string; label: string }> }
     | undefined;
   const options = payload?.options ?? [];
+  if (parsed.freeText) { parsed.value = parsed.value.trim(); if (!parsed.value) throw badRequest('Answer cannot be empty'); }
   const chosen = options.find((o) => o.value === parsed.value);
-  if (!chosen) throw badRequest('value not in options');
+  if (!chosen && !parsed.freeText) throw badRequest('value not in options');
+  const label = parsed.freeText ? parsed.value : chosen!.label;
 
   const message = deps.store.messages.findById(card.messageId);
   if (!message || message.agentRunId === null) {
@@ -58,10 +62,10 @@ export async function resolve(
 
   const resolved = deps.store.cards.resolve(card.id, {
     value: parsed.value,
-    label: chosen.label,
+    label,
   });
 
-  const resumePrompt = `User chose: ${chosen.label} (value: ${parsed.value}). Continue.`;
+  const resumePrompt = parsed.freeText ? `User replied to your question:\n${parsed.value}\nContinue.` : `User chose: ${label} (value: ${parsed.value}). Continue.`;
   const updatedRun = await deps.supervisor.resume({
     runId,
     prompt: resumePrompt,
