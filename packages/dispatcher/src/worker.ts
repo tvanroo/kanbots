@@ -1,4 +1,5 @@
 import { spawn as nodeSpawn } from 'node:child_process';
+import { withUserBinPath } from './user-path.js';
 import { EventEmitter } from 'node:events';
 import { acpAdapter } from './adapters/acp.js';
 import { ampCliAdapter } from './adapters/amp-cli.js';
@@ -159,7 +160,8 @@ export function startAgentRun(opts: StartAgentRunOptions): AgentRunHandle {
   // time.
   const detached = !IS_WINDOWS;
   const spawnOpts: Parameters<SpawnFn>[2] = { cwd: opts.cwd, detached };
-  if (opts.env) spawnOpts.env = { ...process.env, ...opts.env };
+  // Always pass an explicit env so a GUI-launched app still finds user-installed CLIs.
+  spawnOpts.env = withUserBinPath({ ...process.env, ...(opts.env ?? {}) });
   const child = spawnFn(command, args, spawnOpts);
   const emitter = new EventEmitter();
 
