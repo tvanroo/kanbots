@@ -305,6 +305,15 @@ export class AgentRunsRepo {
     return rows.map(rowToAgentRun);
   }
 
+  /** Rows the DB still calls live ('starting'/'running'), for the supervisor's
+   *  stranded-run sweep to check against its in-memory handles. */
+  listStartingOrRunning(): AgentRun[] {
+    const rows = this.db
+      .prepare(`SELECT * FROM agent_runs WHERE status IN ('starting', 'running')`)
+      .all() as AgentRunRow[];
+    return rows.map(rowToAgentRun);
+  }
+
   listPreviewOrphans(): AgentRun[] {
     const rows = this.db
       .prepare('SELECT * FROM agent_runs WHERE preview_pid IS NOT NULL')

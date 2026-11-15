@@ -257,6 +257,9 @@ export function makeStubSupervisor(store: Store): StubSupervisor {
     async waitForCooldown() {
       // no-op in tests
     },
+    sweepStrandedRuns() {
+      return [];
+    },
   };
 
   return Object.assign(supervisor, {

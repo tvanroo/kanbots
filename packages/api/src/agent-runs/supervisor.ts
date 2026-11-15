@@ -108,6 +108,21 @@ export interface CreateSupervisorOptions {
    * default; retention comes from `KANBOTS_WORKTREE_RETENTION_DAYS`
    * (default 3, `0`/`off` disables). Pass `false` to disable entirely.
    */
+  /**
+   * Periodic sweep for runs the DB still calls 'starting'/'running' that this
+   * supervisor is not driving (no in-memory handle) and whose pid is gone.
+   * Without it such a row holds a lane until the next app restart. Grace comes
+   * from `KANBOTS_STRANDED_RUN_GRACE_MINUTES` (default 15). Pass `false` to
+   * disable.
+   */
+  strandedRunSweep?:
+    | false
+    | {
+        graceMs?: number;
+        intervalMs?: number;
+        isPidAlive?: (pid: number) => boolean;
+        now?: () => number;
+      };
   worktreeGc?:
     | false
     | {
@@ -258,6 +273,9 @@ export interface AgentSupervisor {
   getCooldown(): CooldownState;
   subscribeCooldown(listener: CooldownListener): () => void;
   waitForCooldown(signal?: AbortSignal): Promise<void>;
+  /** Close out 'starting'/'running' rows that no supervisor handle is driving and
+   *  whose pid is gone (see `strandedRunSweep`). Returns the rows it closed. */
+  sweepStrandedRuns(): AgentRun[];
 }
 
 interface ActiveRun {
@@ -416,6 +434,45 @@ export async function createSupervisor(
 
   const eventChannel = (runId: number): string => `event:${runId}`;
   const statusChannel = (runId: number): string => `status:${runId}`;
+
+  // Stranded-run sweep: a DB row in 'starting'/'running' with no in-memory
+  // handle and no live pid is a run nobody is driving (2026-11-15: fifteen such
+  // rows held every lane for twelve hours after spawns that never reported back).
+  const sweepOpts = opts.strandedRunSweep === false ? null : (opts.strandedRunSweep ?? {});
+  const sweepNow = sweepOpts?.now ?? Date.now;
+  const sweepGraceMs = sweepOpts?.graceMs ?? strandedGraceMsFromEnv();
+  const sweepIsPidAlive = sweepOpts?.isPidAlive ?? defaultIsPidAlive;
+
+  function sweepStrandedRuns(): AgentRun[] {
+    const swept: AgentRun[] = [];
+    const cutoff = sweepNow() - sweepGraceMs;
+    for (const run of store.agentRuns.listStartingOrRunning()) {
+      if (active.has(run.id)) continue;
+      const startedMs = Date.parse(run.startedAt);
+      if (Number.isFinite(startedMs) && startedMs > cutoff) continue;
+      if (run.pid !== null && sweepIsPidAlive(run.pid)) continue;
+      const patch = strandedRunPatch(run, new Date(sweepNow()).toISOString());
+      const updated = store.agentRuns.update(run.id, patch);
+      store.cards.dismissPendingDecisionsForRun(run.id);
+      emitter.emit(statusChannel(run.id), updated.status);
+      if (opts.onRunStatusChange) {
+        void Promise.resolve(opts.onRunStatusChange(updated)).catch(() => undefined);
+      }
+      swept.push(updated);
+    }
+    return swept;
+  }
+
+  if (sweepOpts !== null) {
+    const timer = setInterval(() => {
+      try {
+        sweepStrandedRuns();
+      } catch {
+        // A failed sweep is retried on the next tick; it must never crash the app.
+      }
+    }, sweepOpts.intervalMs ?? 60_000);
+    timer.unref?.();
+  }
   const cardChannel = (runId: number): string => `card:${runId}`;
   const COOLDOWN_CHANNEL = 'cooldown:changed';
 
@@ -1248,6 +1305,44 @@ export async function createSupervisor(
     getCooldown,
     subscribeCooldown,
     waitForCooldown,
+    sweepStrandedRuns,
+  };
+}
+
+function strandedGraceMsFromEnv(): number {
+  const raw = process.env.KANBOTS_STRANDED_RUN_GRACE_MINUTES;
+  const minutes = raw === undefined || raw.trim() === '' ? 15 : Number(raw);
+  return Number.isFinite(minutes) && minutes > 0 ? minutes * 60_000 : 15 * 60_000;
+}
+
+function defaultIsPidAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (err) {
+    // EPERM: the pid exists but belongs to someone else, so treat it as alive.
+    return (err as NodeJS.ErrnoException).code === 'EPERM';
+  }
+}
+
+/**
+ * How a stranded row is closed out. A run whose worker reported a clean finish
+ * (successSignal 'completed_clean') but whose status was never closed is
+ * recorded as complete; everything else is a failed, interrupted run.
+ */
+export function strandedRunPatch(
+  run: AgentRun,
+  endedAt: string,
+): Parameters<Store['agentRuns']['update']>[1] {
+  if (run.successSignal === 'completed_clean') {
+    return { status: 'complete', endedAt: run.endedAt ?? endedAt, pid: null };
+  }
+  const why = run.pid === null ? 'no pid recorded' : `pid ${run.pid} not running`;
+  return {
+    status: 'failed',
+    endedAt,
+    pid: null,
+    exitReason: `interrupted: stranded run swept (${why}, no supervisor handle)`,
   };
 }
 

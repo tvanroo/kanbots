@@ -121,6 +121,101 @@ describe('createSupervisor', () => {
 
 });
 
+describe('stranded-run sweep', () => {
+  let store: Store;
+  let threadId: number;
+  // Rows are stamped with the real clock at creation; the sweep's clock is moved instead.
+  const LATER = (): number => Date.now() + 60 * 60_000;
+
+  beforeEach(() => {
+    store = openStoreInMemory();
+    threadId = store.threads.create({ repoOwner: 'a', repoName: 'b', issueNumber: 1 }).id;
+  });
+
+  afterEach(() => {
+    store.close();
+  });
+
+  function strandedRow(patch: Parameters<Store['agentRuns']['update']>[1]): number {
+    const run = store.agentRuns.create({ threadId });
+    store.agentRuns.update(run.id, patch);
+    return run.id;
+  }
+
+  async function supervisorAt(now: () => number, alive: (pid: number) => boolean = () => false) {
+    return createSupervisor({
+      store,
+      repoPath: '/tmp',
+      worktreeGc: false,
+      strandedRunSweep: { graceMs: 15 * 60_000, intervalMs: 3_600_000, isPidAlive: alive, now },
+    });
+  }
+
+  it('fails a running row with no pid and no handle once past the grace period', async () => {
+    const supervisor = await supervisorAt(LATER);
+    // Created after construction, so the startup reaper never saw it.
+    const id = strandedRow({ status: 'running', pid: null });
+
+    const swept = supervisor.sweepStrandedRuns();
+
+    expect(swept.map((r) => r.id)).toEqual([id]);
+    const row = store.agentRuns.findById(id);
+    expect(row?.status).toBe('failed');
+    expect(row?.pid).toBeNull();
+    expect(row?.exitReason).toMatch(/stranded run swept \(no pid recorded/);
+  });
+
+  it('closes a finished-but-unclosed run as complete, not interrupted', async () => {
+    const supervisor = await supervisorAt(LATER);
+    const id = strandedRow({
+      status: 'running',
+      pid: null,
+      successSignal: 'completed_clean',
+    });
+
+    supervisor.sweepStrandedRuns();
+
+    const row = store.agentRuns.findById(id);
+    expect(row?.status).toBe('complete');
+    expect(row?.exitReason).toBeNull();
+  });
+
+  it('leaves a row that is still inside the grace period', async () => {
+    const supervisor = await supervisorAt(() => Date.now());
+    const young = strandedRow({ status: 'starting', pid: null });
+
+    expect(supervisor.sweepStrandedRuns()).toEqual([]);
+    expect(store.agentRuns.findById(young)?.status).toBe('starting');
+  });
+
+  it('leaves a row whose pid is alive, and rows awaiting input', async () => {
+    const supervisor = await supervisorAt(LATER, (pid) => pid === 4242);
+    const alive = strandedRow({ status: 'running', pid: 4242 });
+    const waiting = strandedRow({ status: 'awaiting_input', pid: null });
+
+    expect(supervisor.sweepStrandedRuns()).toEqual([]);
+    expect(store.agentRuns.findById(alive)?.status).toBe('running');
+    expect(store.agentRuns.findById(waiting)?.status).toBe('awaiting_input');
+  });
+
+  it('never touches a run the supervisor is driving', async () => {
+    const handle = makeFakeHandle(7777);
+    const supervisor = await createSupervisor({
+      store,
+      repoPath: '/tmp',
+      worktreeGc: false,
+      // Far in the future, so every row is past grace; the pid is reported dead.
+      strandedRunSweep: { graceMs: 0, intervalMs: 3_600_000, isPidAlive: () => false, now: () => Date.now() + 86_400_000 },
+      startAgentRun: () => handle,
+    });
+    const run = await supervisor.startChat({ threadId, prompt: 'hi' });
+
+    expect(supervisor.sweepStrandedRuns()).toEqual([]);
+    expect(store.agentRuns.findById(run.id)?.status).toBe('running');
+    handle.emitClose();
+  });
+});
+
 describe('supervisor.stop', () => {
   let store: Store;
   let threadId: number;
