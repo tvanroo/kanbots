@@ -19,11 +19,13 @@ export function enqueueWake(out:Outbound,scope:{workspaceId:string;clientId:stri
  const e:Wake={...scope,id:randomUUID(),bindingId:b.id,createdAt:now,updatedAt:now,attempts:0,nextAttemptAt:now,state:'queued'};out.events.push(e);return e;
 }
 const terminal=new Set(['acted','failed','cancelled']);
-export function reconcileAuthority(out:Outbound,valid:(e:Wake)=>boolean){for(const e of out.events)if(!terminal.has(e.state)&&(!valid(e)||!out.bindings.some(b=>b.id===e.bindingId&&b.state==='approved'))){e.state='cancelled';e.error='Binding or controller authority changed';e.updatedAt=Date.now();}}
+/** Cancels wakes whose authority lapsed. Returns true when anything changed, so callers save only then. */
+export function reconcileAuthority(out:Outbound,valid:(e:Wake)=>boolean){let changed=false;for(const e of out.events)if(!terminal.has(e.state)&&(!valid(e)||!out.bindings.some(b=>b.id===e.bindingId&&b.state==='approved'))){e.state='cancelled';e.error='Binding or controller authority changed';e.updatedAt=Date.now();changed=true;}return changed;}
 export function acknowledgeWake(out:Outbound,actor:string,id:string,epoch:number,state:'received'|'acted',valid:(e:Wake)=>boolean){const e=out.events.find(e=>e.id===id&&e.clientId===actor&&e.epoch===epoch);if(!e||!valid(e)||e.state==='cancelled')throw Error('Wake target or authority is no longer current');if(!['sending','uncertain','accepted','received','acted'].includes(e.state))throw Error('Wake has not been delivered');if(e.state==='acted'||e.state===state)return e;if(state==='acted'&&e.state!=='received')throw Error('Acknowledge receipt before recording action');e.state=state;e.updatedAt=Date.now();return e;}
 async function bounded<T>(task:Promise<T>):Promise<T>{let timer:ReturnType<typeof setTimeout>;try{return await Promise.race([task,new Promise<T>((_,reject)=>{timer=setTimeout(()=>reject(Error('Delivery timeout')),5000);})]);}finally{clearTimeout(timer!);}}
 export async function deliverWake(out:Outbound,adapters:Map<string,HostAdapter>,save:()=>void,valid:(e:Wake)=>boolean,now=Date.now()){
- reconcileAuthority(out,valid);save();
+ // Runs every tick for every workspace: saving rewrites the whole registry, so do it only on change.
+ if(reconcileAuthority(out,valid))save();
  const e=out.events.find(e=>['queued','sending','uncertain'].includes(e.state)&&e.nextAttemptAt<=now&&adapters.has(out.bindings.find(b=>b.id===e.bindingId)?.adapterId??''));if(!e)return;
  const b=out.bindings.find(b=>b.id===e.bindingId&&b.state==='approved')!;const adapter=adapters.get(b.adapterId);if(!adapter)return; // Unsupported is not delivered.
  const uncertain=e.state==='sending'||e.state==='uncertain';
