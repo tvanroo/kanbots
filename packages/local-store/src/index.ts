@@ -1,4 +1,4 @@
-import { openDb, type Db } from './db.js';
+import { cachePreparedStatements, openDb, type Db } from './db.js';
 import { migrations } from './migrations/index.js';
 import { runMigrations } from './migrations/runner.js';
 import { AgentChecksRepo } from './repos/agent-checks.js';
@@ -61,7 +61,7 @@ export interface OpenStoreOptions {
 export function openStore(opts: OpenStoreOptions): Store {
   const db = openDb(opts.path);
   runMigrations(db, migrations);
-  return wrap(db);
+  return wrap(cachePreparedStatements(db));
 }
 
 export function openStoreInMemory(): Store {

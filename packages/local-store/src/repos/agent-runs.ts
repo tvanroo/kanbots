@@ -246,6 +246,26 @@ export class AgentRunsRepo {
     return row ? rowToAgentRun(row) : null;
   }
 
+  /** Batch form of findById for callers that resolve many runs at once. */
+  findByIds(ids: readonly AgentRunId[]): Map<AgentRunId, AgentRun> {
+    const out = new Map<AgentRunId, AgentRun>();
+    const unique = [...new Set(ids)];
+    // Fixed-size chunks keep the SQL text stable so the statement is reused.
+    const CHUNK = 200;
+    for (let i = 0; i < unique.length; i += CHUNK) {
+      const chunk = unique.slice(i, i + CHUNK);
+      while (chunk.length < CHUNK) chunk.push(-1 as AgentRunId);
+      const rows = this.db
+        .prepare(`SELECT * FROM agent_runs WHERE id IN (${new Array(CHUNK).fill('?').join(',')})`)
+        .all(...chunk) as AgentRunRow[];
+      for (const row of rows) {
+        const run = rowToAgentRun(row);
+        out.set(run.id, run);
+      }
+    }
+    return out;
+  }
+
   findActiveForThread(threadId: ThreadId): AgentRun | null {
     const row = this.db
       .prepare(

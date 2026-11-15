@@ -1,5 +1,22 @@
 /// <reference lib="dom" />
 import { contextBridge, ipcRenderer, type IpcRendererEvent } from 'electron';
+
+// Several views (navigation, usage row, Autopilot, coordinator, persona picker)
+// poll coordinator state every 2-5 s. Each call builds and copies the whole
+// coordinator snapshot, so overlapping polls share one in-flight request and
+// reuse a result for a moment. Any coordinator action other than a read drops the cached value so
+// views see its effect on their next read.
+const COORDINATOR_STATE_REUSE_MS = 1000;
+let coordinatorStateCache: { at: number; value: Promise<unknown> } | null = null;
+function sharedCoordinatorState(): Promise<unknown> {
+  const now = Date.now();
+  if (coordinatorStateCache && now - coordinatorStateCache.at < COORDINATOR_STATE_REUSE_MS) return coordinatorStateCache.value;
+  const entry = { at: Number.POSITIVE_INFINITY, value: ipcRenderer.invoke('kanbots:coordinator-state') as Promise<unknown> };
+  // Hold the entry while in flight and for the reuse window after it settles.
+  entry.value.then(() => { entry.at = Date.now(); }, () => { if (coordinatorStateCache === entry) coordinatorStateCache = null; });
+  coordinatorStateCache = entry;
+  return entry.value;
+}
 import type { ChannelArgs, ChannelName, ChannelResult } from '@kanborg/api';
 import type {
   AgentRunListResponse,
@@ -47,8 +64,8 @@ const api: KanBorgBridge = {
   toggleMaximizeWindow: () =>
     ipcRenderer.invoke('kanbots:window-toggle-maximize') as Promise<void>,
   closeWindow: () => ipcRenderer.invoke('kanbots:window-close') as Promise<void>,
-  coordinatorState: () => ipcRenderer.invoke('kanbots:coordinator-state'),
-  coordinatorAction: (action,args) => ipcRenderer.invoke('kanbots:coordinator-action',action,args),
+  coordinatorState: () => sharedCoordinatorState(),
+  coordinatorAction: (action,args) => { if (!/(^|[-:])(get|list)$/.test(String(action))) coordinatorStateCache = null; return ipcRenderer.invoke('kanbots:coordinator-action',action,args); },
   routingState: () => ipcRenderer.invoke('kanbots:routing-state'),
   saveRouting: (config) => ipcRenderer.invoke('kanbots:routing-save',config),
   capacity: (refresh?: boolean) => ipcRenderer.invoke('kanbots:capacity', refresh),

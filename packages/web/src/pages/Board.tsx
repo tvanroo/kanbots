@@ -146,7 +146,9 @@ export function Board({ onOpenDetail, onOpenCreate, onOpenPalette, onOpenStats }
   });
   const [workflowEditor,setWorkflowEditor]=useState<number|null>(null);
   useEffect(()=>{const open=()=>setWorkflowEditor(0);window.addEventListener('kanborg:open-workflow',open);return()=>window.removeEventListener('kanborg:open-workflow',open);},[]);
-  const workflowIssues:Issue[]=workflow?workflow.issues.map((i:Issue)=>{const card=workflow.cards[i.number];const stage=workflow.config.stages.find((s:any)=>s.id===card?.stageId);return stage?{...i,status:stage.category,state:stage.category==='done'?'closed':'open'}:i;}):issues;
+  // Memoized: every render otherwise produced new issue objects, which made the
+  // filters, grouping and every column re-run even when nothing changed.
+  const workflowIssues:Issue[]=useMemo(()=>workflow?workflow.issues.map((i:Issue)=>{const card=workflow.cards[i.number];const stage=workflow.config.stages.find((s:any)=>s.id===card?.stageId);return stage?{...i,status:stage.category,state:stage.category==='done'?'closed':'open'}:i;}):issues,[workflow,issues]);
   const filterApi = useBoardFilters(workflowIssues, !!workflow);
   const { focusedRepoId } = useFocusedRepo();
   const sortMode = usePrefsStore((s) => s.board.sortMode);

@@ -997,3 +997,15 @@ test('old receipts leave the registry but still stop a retried request from repl
   const restored=f.reload();assert.deepEqual(await restored.call(c.actor,c.id,'createIssue',args),first);
   assert.equal((await restored.call(c.actor,c.id,'listIssues',{workspaceId:c.id})).items.length,issues);
 }finally{f.cleanup();}});
+
+test('renderer state stays bounded on long-lived boards and keeps the first open request of each kind',async()=>{const f=fixture();try{await control(f);const w=f.svc.current();
+ for(let i=0;i<120;i++){f.runs.set(1000+i,{id:1000+i,threadId:1,status:'complete'});w.jobs.push({runId:1000+i,number:1,role:'implementation',qa:false,maxReworks:0,reworks:0,budgetUsd:1,state:'qa-passed'});}
+ w.requests=[{id:'discovery-1',kind:'discovery',state:'queued',createdAt:'',prompt:''},...Array.from({length:120},(_,i)=>({id:'wa-'+i,kind:'workflow-action',state:'received',createdAt:'',prompt:''}))];
+ const ui=f.svc.ui();assert.equal(ui.jobCount,120);assert.equal(ui.jobs.length,50);assert.equal(ui.jobs.at(-1).runId,1119);
+ assert.equal(ui.workspace.requestCount,121);assert.equal(ui.workspace.requests[0].id,'discovery-1');assert.equal(ui.workspace.requests.at(-1).id,'wa-119');assert.ok(ui.workspace.requests.length<=52);
+ assert.equal(w.jobs.length,120);assert.equal(w.requests.length,121);
+}finally{f.cleanup();}});
+
+test('board workflow view omits move history but keeps card stage and status',async()=>{const f=fixture();try{await control(f);const full=await f.svc.uiAction('workflow:get');const number=Object.keys(full.cards)[0];f.svc.current().workflow.cards[number].history.push({at:'',actor:'user',version:1,from:'a',to:'b',reason:'r',evidence:'e'});
+ const board=await f.svc.uiAction('workflow:board');assert.equal(board.cards[number].stageId,full.cards[number].stageId);assert.equal(board.cards[number].history,undefined);assert.equal(board.history,undefined);assert.ok(board.issues.length);
+ assert.equal((await f.svc.uiAction('workflow:get')).cards[number].history.length,1);}finally{f.cleanup();}});

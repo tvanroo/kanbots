@@ -62,6 +62,19 @@ type UserQuestion={response?:string;answeredAt?:string;commands?:QuestionCommand
 const RECEIPT_HOT_LIMIT=500,RECEIPT_ARCHIVE_BATCH=100;
 type Workspace={statusHistory?:Array<{id:number;at:string;data:unknown}>;statusReport?:{requestId:string;epoch:number;lastAttemptAt:number};releaseParallelism?:number;laneBlockers?:Array<{number?:number;reason:string}>;stageAssignments?:Record<string,{number:number;stageId:string;entry:string;state:string;runId?:number;error?:string}>;dispatchReservations?:Record<string,{lane?:'implementation'|'release';autopilot?:boolean;id:string;at:string;state:string;error?:string;threadId?:number;priorRunIds?:number[];job?:Omit<Job,'runId'>}>;replenishment?:{requestId:string;epoch:number;lastAttemptAt:number};sharedChats?:number[];ownerActions?:Array<{entry?:{name:string;consumer:string;previousIds:string[]};id:string;action:string;target:string;reason:string;epoch:number;state:string;result?:unknown;error?:string}>;uiPreferences?:{version:number;value:Record<string,any>};personas?:PersonaLibrary;outbound?:Outbound;questions?:UserQuestion[];chatOutbox?:ChatDraft[];updateDrain?:{priorStatus:string;at:string;requestId?:string};expediting?:boolean;autopilot?:{status:string;personas:Array<{id:string;name:string;prompt:string}>;effort:string;parallelism:number;objective:string;updatedAt:string;legacyWork:unknown[]};workflow?:WorkflowState;workflowSignals?:Record<string,string>;schedules?:Record<string,ScheduleReceipt>;requests?:CoordinatorRequest[];handoff?:Handoff;queue?:Array<{autopilot?:boolean;id:string;number:number;budgetUsd:number;qa:boolean;maxReworks:number;readOnly:boolean}>;onboardedAt?:string;inventory?:Record<string,{number:number;kind:string;evidence:string;verifiedAt:string;sourceHash?:string}>;id:string;path:string;revision:number;mode:'internal'|'external'|'off';controller:string|null;leaseUntil:number;epoch:number;conversationId?:number;objective:string;summary:string;parallelism:number;qaDefault:boolean;maxReworks:number;budgetUsd:number;dependencies:Record<string,number[]>;jobs:Job[];releases:Release[];decisions:Array<{id:string;cardId:number;value:string;question?:string;label?:string;state:string}>;events:Array<{cursor:number;at:string;type:string;data:unknown}>;nextCursor:number;snapshot?:string;runsChangedFormat?:'delta';receipts:Record<string,{digest:string;state:string;result?:unknown;resultFile?:string;error?:string}>};
 type Registry={templates?:Record<string,{id:string;name:string;version:number;config:WorkflowConfig;updatedAt:string;actor:string}>;clients:Client[];workspaces:Workspace[]};
+export const RENDERER_RECENT_ITEMS=50;
+/** Bounded copy of ui() for the renderer; see CoordinatorService.ui(). */
+type RendererRequest={kind:string};
+export function rendererView<T extends {jobs:unknown[];workspace:{requests?:RendererRequest[];requestCount?:number}|null}>(snapshot:T):T{
+  const recent=<V,>(items:V[])=>items.length>RENDERER_RECENT_ITEMS?items.slice(-RENDERER_RECENT_ITEMS):items;
+  const requests=snapshot.workspace?.requests;let workspace=snapshot.workspace;
+  if(requests&&requests.length>RENDERER_RECENT_ITEMS){
+    const keep=new Set<RendererRequest>(recent(requests));const kinds=new Set<string>();
+    for(const r of requests){if(!kinds.has(r.kind)){kinds.add(r.kind);keep.add(r);}}
+    workspace={...workspace,requests:requests.filter(r=>keep.has(r)),requestCount:requests.length};
+  }
+  return {...snapshot,workspace,jobs:recent(snapshot.jobs),jobCount:snapshot.jobs.length};
+}
 export class CoordinatorService{
   private appRuntime?: (action:string,args:Record<string,any>,path:string)=>Promise<any>;
   setAppRuntime(fn:(action:string,args:Record<string,any>,path:string)=>Promise<any>){this.appRuntime=fn;}
@@ -125,7 +138,8 @@ export class CoordinatorService{
   // Reconcile every tick, using persisted request identity and retry time so
   // restarts and acknowledgements cannot quietly disable an active target.
   private releaseStage(w:Workspace,stageId?:string){return !!stageId&&w.workflow?.config.stages.find(s=>s.id===stageId)?.actor==='reviewer';}
-  private laneUsage(w:Workspace){
+  private laneUsage(w:Workspace){return this.withJobRuns(w,()=>this.computeLaneUsage(w));}
+  private computeLaneUsage(w:Workspace){
     const implementation=new Set<number>(),release=new Set<number>();
     const occupying=(id:number)=>blocksUpdate(this.run(id));
     for(const job of w.jobs){if(occupying(job.runId))(this.releaseStage(w,job.stageAssignment?.stageId)?release:implementation).add(job.runId);if(job.reviewRunId&&occupying(job.reviewRunId))release.add(job.reviewRunId);}
@@ -144,29 +158,35 @@ export class CoordinatorService{
       message:suspended?'Replenishment paused':!missing?'Implementation target maintained':w.laneBlockers?.length?`${missing} implementation lanes open: ${w.laneBlockers[0]!.reason}`:`Filling ${missing} implementation lanes from authorized Ready work`};
   }
   private async refillReadyWork(w:Workspace){
-    if(this.autopilotCapacity(w).suspended)return;
+    let capacity=this.autopilotCapacity(w);
+    if(capacity.suspended)return;
+    // This runs on every tick; only rewrite the registry when the blockers it
+    // reports actually change.
+    const previousBlockers=JSON.stringify(w.laneBlockers??[]);
     w.laneBlockers=[];
-    if(!this.autopilotCapacity(w).missing)return;
+    if(!capacity.missing){if(previousBlockers!=='[]')this.save();return;}
     const issues=await this.h()['issues:list']({});w.workflow??=newWorkflow();materialize(w.workflow,issues);
     const ready=issues.filter(issue=>w.workflow!.config.stages.find(s=>s.id===w.workflow!.cards[issue.number]?.stageId)?.category==='todo');
     const ordered=prioritizeWorkflowQueue(ready.map(issue=>({number:issue.number})),w.workflow);
+    const latestJob=new Map<number,Job>();for(const j of w.jobs)latestJob.set(j.number,j);
     for(const candidate of ordered){
-      if(this.autopilotCapacity(w).suspended||!this.autopilotCapacity(w).missing)break;
+      if(capacity.suspended||!capacity.missing)break;
       const card=w.workflow.cards[candidate.number],stage=w.workflow.config.stages.find(s=>s.id===card?.stageId);
       let blocker=card?.waiting?`Waiting for ${card.waiting.owner}: ${card.waiting.trigger}`:undefined;
       if(stage?.actor==='user'||stage?.actor==='reviewer')blocker='Ready stage is reserved for a different actor';
       const unmet=(w.dependencies[candidate.number]??[]).filter(number=>w.workflow!.config.stages.find(s=>s.id===w.workflow!.cards[number]?.stageId)?.category!=='done');
       if(unmet.length)blocker='Dependencies are not complete: '+unmet.map(n=>'#'+n).join(', ');
-      const prior=[...w.jobs].reverse().find(j=>j.number===candidate.number);
+      const prior=latestJob.get(candidate.number);
       const attached=issues.find(i=>i.number===candidate.number)?.activeRun;
       if(w.dispatchReservations?.[candidate.number]||w.queue?.some(q=>q.number===candidate.number))continue;
       if(attached&&active(attached.status)||prior&&(active(this.run(prior.runId).status)||prior.reviewRunId&&active(this.run(prior.reviewRunId).status)||!['completed','qa-passed','review-delegated'].includes(prior.state)))blocker='Existing assignment '+(prior?.runId??attached?.id)+' needs continuation or reconciliation; no duplicate worker will be created';
       if(blocker){w.laneBlockers.push({number:candidate.number,reason:blocker});continue;}
       try{const result=await this.dispatch(w,candidate.number,w.budgetUsd,w.qaDefault,w.maxReworks,false,true,true);this.event(w,'autopilot-lane-filled',{number:candidate.number,runId:result.runId,trigger:'authorized-ready-work',lane:'implementation'});}
       catch(error){const reason=clip(error instanceof Error?error.message:'Dispatch failed');w.laneBlockers.push({number:candidate.number,reason});card!.nextAction=reason;}
+      capacity=this.autopilotCapacity(w);
     }
-    if(this.autopilotCapacity(w).missing&&!w.laneBlockers.length)w.laneBlockers.push({reason:'No unassigned authorized Ready work; coordinator must reconcile existing checkpoints or discover useful work'});
-    this.save();
+    if(capacity.missing&&!w.laneBlockers.length)w.laneBlockers.push({reason:'No unassigned authorized Ready work; coordinator must reconcile existing checkpoints or discover useful work'});
+    if(JSON.stringify(w.laneBlockers)!==previousBlockers)this.save();
   }
   // A single durable report is refreshed every ten minutes. A stale controller
   // cannot receive a report after a handoff; queued reports are coalesced.
@@ -327,7 +347,18 @@ export class CoordinatorService{
   private current(){if(!this.context)throw Error('Open a project in KanBorg first.');return this.state.workspaces.find(w=>w.path===this.context!.repoPath)!;}
   private resolve(id:string){const w=this.state.workspaces.find(w=>w.id===id);if(!w)throw Error('Workspace not found.');return w;}
   private h(){if(!this.context)throw Error('Workspace unavailable');return this.context.handlers;}
-  private run(id:number){const r=this.context!.store.agentRuns.findById(id);if(!r)throw Error('Run not found in this workspace');return r;}
+  private run(id:number){const r=this.prefetchedRuns?.get(id)??this.context!.store.agentRuns.findById(id);if(!r)throw Error('Run not found in this workspace');return r;}
+  // Per-job loops look up every job's runs (thousands on long-lived boards).
+  // Within one synchronous pass nothing else can change a run, so read them in
+  // one batch query for the pass instead of one query per lookup.
+  private prefetchedRuns:ReturnType<Store['agentRuns']['findByIds']>|null=null;
+  private withJobRuns<T>(w:Workspace,fn:()=>T):T{
+    if(this.prefetchedRuns||!this.context)return fn();
+    const ids=w.jobs.flatMap(j=>j.reviewRunId?[j.runId,j.reviewRunId]:[j.runId]);const store:Partial<Store['agentRuns']>=this.context.store.agentRuns;
+    // Test doubles may implement only findById; fall back to per-run lookups.
+    this.prefetchedRuns=typeof store.findByIds==='function'?store.findByIds(ids):null;
+    try{return fn();}finally{this.prefetchedRuns=null;}
+  }
   private async git(cwd:string,args:string[]){return (await exec('git',args,{cwd,timeout:30000,maxBuffer:2e6})).stdout.trim();}
   private async revision(runId:number){const r=this.run(runId);if(!r.worktreePath)throw Error('Worktree unavailable');if(active(r.status))throw Error('Wait for the worker to finish.');if(await this.git(r.worktreePath,['status','--porcelain']))throw Error('Worker has uncommitted changes. Ask it to commit before QA or release.');return this.git(r.worktreePath,['rev-parse','HEAD']);}
   private compactRun(id:number){const r=this.run(id);return {runId:r.id,status:r.status,branch:r.branchName,model:r.model,provider:r.provider,costUsd:r.totalCostUsd,costSource:'run-reported; may include estimates',exitReason:r.exitReason,successSignal:r.successSignal};}
@@ -342,7 +373,13 @@ export class CoordinatorService{
   }
   private personaLibrary(w:Workspace){if(!w.personas){w.personas=newPersonaLibrary(basename(w.path));this.save();}return w.personas;}
   private session(w:Workspace){const workers=w.jobs.filter(j=>j.autopilot||w.updateDrain).flatMap(j=>[j.runId,...(j.reviewRunId?[j.reviewRunId]:[])].map(runId=>{const controlId=runId===j.runId?j.controlId:j.reviewControlId;const report=controlId?readCheckpoint(this.root,controlId):null;if(report){if(runId===j.runId)j.checkpoint=report;else j.reviewCheckpoint=report;}return {runId,number:j.number,active:active(this.run(runId).status),state:j.state==='interrupted'?'interrupted—recovery needed':report?.state??(this.run(runId).status==='awaiting_input'?'waiting for input':active(this.run(runId).status)?w.expediting?(controlId?'requested':'waiting for worker to finish (legacy run)'):'finishing':'finished'),checkpoint:report??(runId===j.runId?j.checkpoint:j.reviewCheckpoint)};}));const remaining=w.jobs.filter(j=>j.autopilot&&(blocksUpdate(this.run(j.runId))||(j.reviewRunId&&blocksUpdate(this.run(j.reviewRunId))))).length;return {stageAssignments:w.stageAssignments??{},dispatchReservations:w.dispatchReservations??{},ownerActions:w.ownerActions??[],personas:this.personaLibrary(w),epoch:w.epoch,outbound:{adapterIds:[...this.adapters.keys()],bindings:this.outbound(w).bindings,events:this.outbound(w).events.slice(-50),supported:this.adapters.size>0},chatOutbox:w.chatOutbox??[],autopilot:w.autopilot?{...w.autopilot,capacity:this.autopilotCapacity(w),workers,expediting:!!w.expediting,remaining,label:w.autopilot.status==='active'?'On':remaining?`Winding down · ${remaining} tasks remaining`:'Off'}:null,workflowVersion:w.workflow?.version??1,workflowContract:w.workflow?.config??newWorkflow().config,stagePriority:w.workflow?.stageOrder??{},workspaceId:w.id,revision:w.revision,mode:w.mode,controller:w.controller,leaseUntil:w.leaseUntil,objective:w.objective,summary:w.summary,authority:{coordination:'assigned-controller',release:w.workflow?.config.releaseOwner==='user'?'owner decision required; tool authorization remains enforced':'assigned-controller within owner-authorized scope',pairing:'owner-only'},checkIn:this.checkinPolicy(w),parallelism:w.parallelism,releaseParallelism:w.releaseParallelism??4,qaDefault:w.qaDefault,budgetUsd:w.budgetUsd,maxReworks:w.maxReworks,conversationId:w.conversationId,onboardedAt:w.onboardedAt,handoff:w.handoff,requests:(w.requests??[]).filter(r=>r.state!=='completed')};}
-  ui(){const w=this.context?this.current():null;const stored=w?.statusHistory??[];const ids=new Set(stored.map(e=>e.id));const older=w?.events.filter(e=>e.type==='periodic-status'&&!ids.has(e.cursor)).map(e=>({id:e.cursor,at:e.at,data:e.data}))??[];const statusReports=w?[...older,...stored].sort((a,b)=>b.id-a.id).slice(0,100).map(e=>{const data=e.data as any;const request=w.requests?.find(r=>r.id===data.requestId);return {id:e.id,at:e.at,...data,requestState:request?.state??'unknown'};}):[];return {statusReports,workspace:w?this.session(w):null,workspaces:this.state.workspaces.map(w=>({id:w.id,name:basename(w.path),open:w.path===this.context?.repoPath})),clients:this.state.clients.map(({tokenHash,...c})=>c),jobs:this.context?this.current().jobs:[],queue:this.context?this.current().queue??[]:[],releases:this.context?this.current().releases:[],decisions:this.context?this.current().decisions:[],guide:COORDINATOR_GUIDE,applicationUpdate:this.updater?{...this.updater.status(),coordination:this.updateCoordination()}:null};}
+  // The renderer polls this every few seconds from several views and Electron
+  // copies the whole result across IPC each time. Long-lived boards hold
+  // thousands of jobs and unacknowledged requests (several MB), while the views
+  // read only the newest jobs and the first open request of each kind. Send
+  // those, plus totals; coordinator tools still read the full state.
+  ui(){const w=this.context?this.current():null;const snapshot=w?this.withJobRuns(w,()=>this.uiSnapshot(w)):this.uiSnapshot(null);return rendererView(snapshot);}
+  private uiSnapshot(w:Workspace|null){const stored=w?.statusHistory??[];const ids=new Set(stored.map(e=>e.id));const older=w?.events.filter(e=>e.type==='periodic-status'&&!ids.has(e.cursor)).map(e=>({id:e.cursor,at:e.at,data:e.data}))??[];const statusReports=w?[...older,...stored].sort((a,b)=>b.id-a.id).slice(0,100).map(e=>{const data=e.data as any;const request=w.requests?.find(r=>r.id===data.requestId);return {id:e.id,at:e.at,...data,requestState:request?.state??'unknown'};}):[];return {statusReports,workspace:w?this.session(w):null,workspaces:this.state.workspaces.map(w=>({id:w.id,name:basename(w.path),open:w.path===this.context?.repoPath})),clients:this.state.clients.map(({tokenHash,...c})=>c),jobs:this.context?this.current().jobs:[],queue:this.context?this.current().queue??[]:[],releases:this.context?this.current().releases:[],decisions:this.context?this.current().decisions:[],guide:COORDINATOR_GUIDE,applicationUpdate:this.updater?{...this.updater.status(),coordination:this.updateCoordination()}:null};}
   private coordinationMetrics(w:Workspace){
     const now=Date.now();const age=(at:string|undefined)=>{const time=Date.parse(at??'');return Number.isFinite(time)&&time<=now?now-time:null;};
     const activeJobs=w.jobs.filter(j=>[j.runId,j.reviewRunId].some(id=>id!==undefined&&active(this.context!.store.agentRuns.findById(id)?.status??'')));
@@ -1044,6 +1081,11 @@ Never approve your own pairing. No provider API keys are needed.\n\nClaude Deskt
     const issues=await this.h()['issues:list']({state:'all'});w.workflow??=newWorkflow();const flow=w.workflow;const countBefore=Object.keys(flow.cards).length;materialize(flow,issues);
     const view=()=>({version:flow.version,config:flow.config,cards:flow.cards,stageOrder:flow.stageOrder??{},history:flow.history,templates:Object.values(this.state.templates??{}),issues:issues.map(i=>({...i,running:!!i.activeRun})),undo:flow.history.length?undoWorkflowChange(flow,'Undo last workflow change'):null});
     if(action==='get'){if(Object.keys(flow.cards).length!==countBefore)this.save();return view();}
+    // The board re-reads the workflow on every issue change. It needs each card's
+    // current stage and status, not the per-card move history, workflow version
+    // history or undo preview, which grow without bound and made each read
+    // several MB to build and copy. The workflow editor still uses 'get'.
+    if(action==='board'){if(Object.keys(flow.cards).length!==countBefore)this.save();const cards:Record<number,unknown>={};for(const [number,{history:_history,...card}] of Object.entries(flow.cards))cards[Number(number)]=card;return {version:flow.version,config:flow.config,cards,stageOrder:flow.stageOrder??{},issues:issues.map(i=>({...i,running:!!i.activeRun}))};}
     const toolName=({preview:'previewWorkflowChange',apply:'applyWorkflowChange',undo:'undoWorkflowChange',card:'updateWorkflowCard',template:'saveWorkflowTemplate'} as Record<string,string>)[action];
     if(!toolName)throw Error('Unknown workflow action.');
     if(actor==='user')validateCoordinatorArgs(toolName,{workspaceId:w.id,...(action==='preview'?{}:{requestId:'app-workflow-edit',revision:w.revision}),...a});
@@ -1286,7 +1328,7 @@ Never approve your own pairing. No provider API keys are needed.\n\nClaude Deskt
       // Persist intent before dispatch; uncertain failures are surfaced, not replayed.
       w.queue=w.queue!.filter(x=>x.id!==q.id);this.save();try{await this.dispatch(w,q.number,q.budgetUsd,q.qa,q.maxReworks,q.readOnly,true,q.autopilot===true);}catch(e){this.event(w,'queued-task-blocked',{number:q.number,error:clip(e instanceof Error?e.message:'Dispatch failed')});}
     }
-    const state=w.jobs.map(j=>({run:this.compactRun(j.runId),review:j.reviewRunId?this.compactRun(j.reviewRunId):null}));const snap=JSON.stringify(state);if(w.snapshot!==snap){const changed=changedRunEntries(w.snapshot,state);w.snapshot=snap;w.runsChangedFormat='delta';this.event(w,'runs-changed',changed);}
+    const state=this.withJobRuns(w,()=>w.jobs.map(j=>({run:this.compactRun(j.runId),review:j.reviewRunId?this.compactRun(j.reviewRunId):null})));const snap=JSON.stringify(state);if(w.snapshot!==snap){const changed=changedRunEntries(w.snapshot,state);w.snapshot=snap;w.runsChangedFormat='delta';this.event(w,'runs-changed',changed);}
     for(const j of w.jobs){try{
       if (j.workflowStartPending) {
         try {
