@@ -30,3 +30,9 @@
 .kb-release-lanes label { display:flex; flex-wrap:wrap; align-items:center; gap:12px; font-weight:600; }
 .kb-release-lanes input { width:84px; min-height:36px; padding:6px 10px; border:1px solid var(--hairline); border-radius:8px; color:var(--ink); background:var(--bg); font:inherit; }
 .kb-release-lanes p { color:var(--ink-2); font-size:13px; line-height:1.5; margin:8px 0 0; }
+.kb-autopilot-checkpoint { display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; }
+.kb-autopilot-history { margin-top:18px; border-top:1px solid var(--hairline); padding-top:12px; color:var(--ink-2); }
+.kb-autopilot-history-toggle { display:inline-flex; align-items:center; gap:8px; padding:6px 0; border:0; background:none; color:var(--ink); font:inherit; font-weight:600; cursor:pointer; }
+.kb-autopilot-history-item { margin-top:12px; }
+.kb-autopilot-history-item p { margin:4px 0 0; overflow-wrap:anywhere; }
+.kb-autopilot-history-head { font-weight:600; }
