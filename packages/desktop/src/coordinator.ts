@@ -13,7 +13,7 @@ import type { WorkflowState, WorkflowConfig } from '@kanborg/core';
 import { app } from 'electron';
 import { createServer } from 'node:http';
 import { randomBytes,randomUUID,createHash } from 'node:crypto';
-import { mkdirSync,existsSync,readFileSync,writeFileSync,renameSync,chmodSync } from 'node:fs';
+import { mkdirSync,existsSync,readFileSync,writeFileSync,appendFileSync,renameSync,chmodSync } from 'node:fs';
 import { changedRunEntries,compactRunsChangedEvents } from './run-snapshot.js';
 import { join,basename } from 'node:path';
 import { execFile } from 'node:child_process';
@@ -59,6 +59,7 @@ type CoordinatorRequest={id:string;kind:'discovery'|'resume-workflows'|'workflow
 type ScheduleReceipt={id?:string;status:'active'|'paused'|'unsupported';cadenceMinutes?:number;cursor?:number;confirmedAt:string};
 type ChatDraft={id:string;body:string;steer:boolean;state:'queued'|'sending'|'sent'|'failed';createdAt:string;error?:string};
 type UserQuestion={response?:string;answeredAt?:string;commands?:QuestionCommand[];id:number;runId:number;threadId:number;question:string;options:Array<{value:string;label:string}>;state:string;reply?:string;responseRunId?:number;explanationAfter?:number;explanation?:string;explanationRequestId?:string;answerRequestId?:string;closedReason?:string};
+const RECEIPT_HOT_LIMIT=500,RECEIPT_ARCHIVE_BATCH=100;
 type Workspace={statusHistory?:Array<{id:number;at:string;data:unknown}>;statusReport?:{requestId:string;epoch:number;lastAttemptAt:number};releaseParallelism?:number;laneBlockers?:Array<{number?:number;reason:string}>;stageAssignments?:Record<string,{number:number;stageId:string;entry:string;state:string;runId?:number;error?:string}>;dispatchReservations?:Record<string,{lane?:'implementation'|'release';autopilot?:boolean;id:string;at:string;state:string;error?:string;threadId?:number;priorRunIds?:number[];job?:Omit<Job,'runId'>}>;replenishment?:{requestId:string;epoch:number;lastAttemptAt:number};sharedChats?:number[];ownerActions?:Array<{entry?:{name:string;consumer:string;previousIds:string[]};id:string;action:string;target:string;reason:string;epoch:number;state:string;result?:unknown;error?:string}>;uiPreferences?:{version:number;value:Record<string,any>};personas?:PersonaLibrary;outbound?:Outbound;questions?:UserQuestion[];chatOutbox?:ChatDraft[];updateDrain?:{priorStatus:string;at:string;requestId?:string};expediting?:boolean;autopilot?:{status:string;personas:Array<{id:string;name:string;prompt:string}>;effort:string;parallelism:number;objective:string;updatedAt:string;legacyWork:unknown[]};workflow?:WorkflowState;workflowSignals?:Record<string,string>;schedules?:Record<string,ScheduleReceipt>;requests?:CoordinatorRequest[];handoff?:Handoff;queue?:Array<{autopilot?:boolean;id:string;number:number;budgetUsd:number;qa:boolean;maxReworks:number;readOnly:boolean}>;onboardedAt?:string;inventory?:Record<string,{number:number;kind:string;evidence:string;verifiedAt:string;sourceHash?:string}>;id:string;path:string;revision:number;mode:'internal'|'external'|'off';controller:string|null;leaseUntil:number;epoch:number;conversationId?:number;objective:string;summary:string;parallelism:number;qaDefault:boolean;maxReworks:number;budgetUsd:number;dependencies:Record<string,number[]>;jobs:Job[];releases:Release[];decisions:Array<{id:string;cardId:number;value:string;question?:string;label?:string;state:string}>;events:Array<{cursor:number;at:string;type:string;data:unknown}>;nextCursor:number;snapshot?:string;runsChangedFormat?:'delta';receipts:Record<string,{digest:string;state:string;result?:unknown;resultFile?:string;error?:string}>};
 type Registry={templates?:Record<string,{id:string;name:string;version:number;config:WorkflowConfig;updatedAt:string;actor:string}>;clients:Client[];workspaces:Workspace[]};
 export class CoordinatorService{
@@ -247,7 +248,7 @@ export class CoordinatorService{
     return e.clientId===w.controller;
   }
   private outbound(w:Workspace){return w.outbound??={bindings:[],events:[]};}
-  private releaseInFlight=new Set<string>();private state:Registry;private context:CoordinatorContext|null=null;private url='';private inFlight=new Map<string,Promise<any>>();private polling=false;private closing=false;private internalTokens=new Map<string,{workspaceId:string;actor:string;epoch:number;expires:number;clientId?:string}>();private launcher='';private entry='';
+  private leaseSavedAt=new Map<string,number>();private releaseInFlight=new Set<string>();private state:Registry;private context:CoordinatorContext|null=null;private url='';private inFlight=new Map<string,Promise<any>>();private polling=false;private closing=false;private internalTokens=new Map<string,{workspaceId:string;actor:string;epoch:number;expires:number;clientId?:string}>();private launcher='';private entry='';
   constructor(private root=app.getPath('userData')){mkdirSync(root,{recursive:true,mode:0o700});this.state=existsSync(this.file())?JSON.parse(readFileSync(this.file(),'utf8')):{clients:[],workspaces:[]};for(const w of this.state.workspaces)for(const m of w.chatOutbox??[])if(m.state==='sending'){m.state='failed';m.error='Delivery was interrupted by restart. Check the transcript before resending.';}for(const w of this.state.workspaces){if(w.handoff?.delivery==='sending'){w.handoff.delivery='failed';w.handoff.deliveryError='Wrap-up delivery was interrupted. Review the conversation before retrying.';}}for(const w of this.state.workspaces)for(const q of w.questions??[])if(q.state==='sending')q.state='pending';for(const w of this.state.workspaces)for(const r of w.ownerActions??[])if(r.state==='executing'){r.state='uncertain';r.error='Restart interrupted this action. Verify its actual state before requesting it again; it will not be replayed.';}for(const w of this.state.workspaces){for(const r of Object.values(w.dispatchReservations??{}))r.state='uncertain';for(const r of w.releases)if(r.state==='validating'){r.state=r.validationPriorState??'ready';delete r.validationPriorState;}}for(const w of this.state.workspaces)if(w.runsChangedFormat!=='delta'){compactRunsChangedEvents(w.events);w.runsChangedFormat='delta';}this.save();}
   private file(){return join(this.root,'coordinators.json');}
   // Each tick re-derives the reason a job is waiting. Saving rewrites the whole
@@ -257,21 +258,61 @@ export class CoordinatorService{
     const started=performance.now();
     // Completed mutation results can contain full snapshots. Keep immutable retry
     // evidence outside the hot registry; a missing receipt must never replay work.
-    for(const w of this.state.workspaces) for(const [key,receipt] of Object.entries(w.receipts)) {
-      if(receipt.state!=='done'||receipt.result===undefined) continue;
-      const serialized=JSON.stringify(receipt.result);
-      if(serialized.length<16000) continue;
-      const directory=join(this.root,'coordinator-receipts',hash(w.id));
-      mkdirSync(directory,{recursive:true,mode:0o700});
-      const filename=hash(key)+'.json';
-      writeFileSync(join(directory,filename)+'.tmp',serialized,{mode:0o600});
-      renameSync(join(directory,filename)+'.tmp',join(directory,filename));
-      receipt.resultFile=filename;delete receipt.result;
+    for(const w of this.state.workspaces) {
+      for(const [key,receipt] of Object.entries(w.receipts)) {
+        if(receipt.state!=='done'||receipt.result===undefined) continue;
+        const serialized=JSON.stringify(receipt.result);
+        if(serialized.length<16000) continue;
+        const directory=join(this.root,'coordinator-receipts',hash(w.id));
+        mkdirSync(directory,{recursive:true,mode:0o700});
+        const filename=hash(key)+'.json';
+        writeFileSync(join(directory,filename)+'.tmp',serialized,{mode:0o600});
+        renameSync(join(directory,filename)+'.tmp',join(directory,filename));
+        receipt.resultFile=filename;delete receipt.result;
+      }
+      this.archiveReceipts(w);
     }
     writeFileSync(this.file()+'.tmp',JSON.stringify(this.state),{mode:0o600});renameSync(this.file()+'.tmp',this.file());
     recordPerformanceTiming('coordinator-state-save',performance.now()-started);
   }
-  private receiptResult(w:Workspace,receipt:Workspace['receipts'][string]){
+  // Receipts are permanent retry evidence, one per mutation, so they grow without
+  // bound. Only the newest stay in the registry that every save rewrites; older
+  // ones move to an append-only archive that is still consulted on every lookup,
+  // so an old request ID is never replayed.
+  private receiptArchives=new Map<string,Map<string,Workspace['receipts'][string]&{archived:true}>>();
+  private receiptArchiveFile(w:Workspace){return join(this.root,'coordinator-receipts',hash(w.id),'archive.jsonl');}
+  private receiptArchive(w:Workspace){
+    let archive=this.receiptArchives.get(w.id);
+    if(!archive){
+      archive=new Map();
+      if(existsSync(this.receiptArchiveFile(w)))for(const line of readFileSync(this.receiptArchiveFile(w),'utf8').split('\n')){
+        if(!line)continue;
+        try{const [key,receipt]=JSON.parse(line);archive.set(key,{digest:receipt.digest,state:receipt.state,...(receipt.error?{error:receipt.error}:{}),...(receipt.resultFile?{resultFile:receipt.resultFile}:{}),archived:true});}
+        catch{ /* A torn final line belongs to an append whose registry save never happened; that receipt is still in the registry. */ }
+      }
+      this.receiptArchives.set(w.id,archive);
+    }
+    return archive;
+  }
+  private archiveReceipts(w:Workspace){
+    const keys=Object.keys(w.receipts);
+    if(keys.length<RECEIPT_HOT_LIMIT+RECEIPT_ARCHIVE_BATCH)return;
+    const moving=keys.slice(0,keys.length-RECEIPT_HOT_LIMIT).filter(key=>w.receipts[key]!.state!=='pending');
+    if(!moving.length)return;
+    const archive=this.receiptArchive(w);
+    mkdirSync(join(this.root,'coordinator-receipts',hash(w.id)),{recursive:true,mode:0o700});
+    // Append before removing from the registry: after a crash a receipt may be in both, never in neither.
+    appendFileSync(this.receiptArchiveFile(w),'\n'+moving.map(key=>JSON.stringify([key,w.receipts[key]])).join('\n')+'\n',{mode:0o600});
+    for(const key of moving){const receipt=w.receipts[key]!;archive.set(key,{digest:receipt.digest,state:receipt.state,...(receipt.error?{error:receipt.error}:{}),...(receipt.resultFile?{resultFile:receipt.resultFile}:{}),archived:true});delete w.receipts[key];}
+  }
+  private findReceipt(w:Workspace,key:string){return w.receipts[key]??this.receiptArchive(w).get(key);}
+  private receiptResult(w:Workspace,receipt:Workspace['receipts'][string]&{archived?:true},key?:string){
+    if(receipt.archived&&!receipt.resultFile&&key!==undefined){
+      const prefix='['+JSON.stringify(key)+',';let found:any;
+      try{for(const line of readFileSync(this.receiptArchiveFile(w),'utf8').split('\n'))if(line.startsWith(prefix)){try{found=JSON.parse(line)[1];}catch{ /* torn line */ }}}catch{ /* reported below */ }
+      if(!found)throw Error('Saved outcome receipt is unavailable. Inspect the existing work; this request will not be replayed.');
+      return found.result;
+    }
     if(!receipt.resultFile)return receipt.result;
     if(!/^[a-f0-9]{64}\.json$/.test(receipt.resultFile))throw Error('Invalid saved receipt. Inspect outcome before retrying.');
     try{return JSON.parse(readFileSync(join(this.root,'coordinator-receipts',hash(w.id),receipt.resultFile),'utf8'));}
@@ -711,13 +752,15 @@ Never approve your own pairing. No provider API keys are needed.\n\nClaude Deskt
     }
     const isWrite=(COORDINATOR_TOOLS.find(t=>t.name===name)!.inputSchema.required as string[]).includes('requestId');
     // Reading state is not reconciliation acknowledgement.
-    if(w.controller===actor&&w.mode!=='off'){w.leaseUntil=Date.now()+30*60000;this.save();}
+    // The lease renews on every call, including reads. It is 30 minutes long, so persisting it at most
+    // once a minute (or with any other save) is enough; a full registry rewrite per read is not.
+    if(w.controller===actor&&w.mode!=='off'){const now=Date.now();w.leaseUntil=now+30*60000;if(now-(this.leaseSavedAt.get(w.id)??0)>=60000){this.leaseSavedAt.set(w.id,now);this.save();}}
     if(!isWrite){const result=await this.read(w,name,args);if(['getWorkspaceSummary','getCoordinationSession','openScopedWorkspace','listOwnerActionRequests','getControlCoverage'].includes(name)&&w.handoff?.from===actor&&w.handoff.state!=='requested')return {...result,coordinatorInstruction:pauseCheckins};return result;}
     if(w.handoff&&w.handoff.state!=='completed'&&!['updateCoordinationSession','completeHandoff','cancelCoordinatorHandoff','finishCoordinatorHandoff','retryCoordinatorHandoff'].includes(name))throw Error('Handoff requested. Stop new work and call completeHandoff with a current summary.');
     this.assertControl(w,actor);
     if(this.updater?.pending()&&['dispatchTask','followUpRun','runQA','executeRelease','prepareExternalCoordinator'].includes(name))throw Error('An application update is waiting. Existing runs can finish; new work resumes after restart.');
-    const key=actor+':'+args.requestId;const digest=hash(JSON.stringify({name,args}));const existing=w.receipts[key];
-    if(existing){if(existing.digest!==digest)throw Error('Request ID was already used with different arguments');const running=this.inFlight.get(key);if(running)return running;if(existing.state==='done')return this.receiptResult(w,existing);throw Error(existing.error??'Request outcome is uncertain. Inspect workspace and run history; do not blindly repeat.');}
+    const key=actor+':'+args.requestId;const digest=hash(JSON.stringify({name,args}));const existing=this.findReceipt(w,key);
+    if(existing){if(existing.digest!==digest)throw Error('Request ID was already used with different arguments');const running=this.inFlight.get(key);if(running)return running;if(existing.state==='done')return this.receiptResult(w,existing,key);throw Error(existing.error??'Request outcome is uncertain. Inspect workspace and run history; do not blindly repeat.');}
     if(args.revision!==w.revision)throw Error(`Stale revision. Current revision is ${w.revision}; refresh session.`);
     // Reserve synchronously before any await. Unknown outcomes are never replayed.
     w.receipts[key]={digest,state:'pending'};w.revision++;w.leaseUntil=Date.now()+30*60000;this.save();

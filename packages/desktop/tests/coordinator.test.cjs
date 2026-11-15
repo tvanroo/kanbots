@@ -975,3 +975,25 @@ test('runs-changed events carry only changed runs and old full snapshots are com
   assert.equal(before,3);assert.deepEqual(last.data.map(e=>e.run.runId),[51]);
   const count=saved.workspaces[0].events.length;await restored.tick();assert.equal(JSON.parse(fs.readFileSync(file,'utf8')).workspaces[0].events.length,count);
 }finally{f.cleanup();}});
+test('idle ticks and controller reads do not rewrite the registry',async()=>{const f=fixture();try{
+  const c=await control(f);await write(f,c,'dispatchTask',{number:1,qa:false});await f.svc.tick();await f.svc.tick();
+  let saves=0;const save=f.svc.save.bind(f.svc);f.svc.save=()=>{saves++;save();};
+  for(let i=0;i<5;i++)await f.svc.tick();
+  assert.equal(saves,0,'idle ticks saved '+saves+' times');
+  for(let i=0;i<5;i++)await f.svc.call(c.actor,c.id,'getCoordinationSession',{workspaceId:c.id});
+  assert.ok(saves<=1,'reads saved '+saves+' times');
+  assert.ok(f.svc.ui().workspace.leaseUntil>Date.now()+29*60000);
+}finally{f.cleanup();}});
+test('old receipts leave the registry but still stop a retried request from replaying, across restart',async()=>{const f=fixture();try{
+  const c=await control(f);const first=await write(f,c,'createIssue',{title:'Archived once'},'archived-request-0001');
+  const args={workspaceId:c.id,revision:f.svc.ui().workspace.revision-1,requestId:'archived-request-0001',title:'Archived once'};
+  for(let i=0;i<620;i++)await write(f,c,'updateCoordinationSession',{summary:'s'+i},'filler-request-'+i);
+  const file=path.join(f.root,'coordinators.json');const saved=JSON.parse(fs.readFileSync(file,'utf8')).workspaces[0];
+  assert.ok(Object.keys(saved.receipts).length<=600,'registry kept '+Object.keys(saved.receipts).length+' receipts');
+  assert.equal(saved.receipts[c.actor+':archived-request-0001'],undefined);
+  const issues=(await f.svc.call(c.actor,c.id,'listIssues',{workspaceId:c.id})).items.length;
+  assert.deepEqual(await f.svc.call(c.actor,c.id,'createIssue',args),first);
+  await assert.rejects(f.svc.call(c.actor,c.id,'createIssue',{...args,title:'Different'}),/already used with different arguments/);
+  const restored=f.reload();assert.deepEqual(await restored.call(c.actor,c.id,'createIssue',args),first);
+  assert.equal((await restored.call(c.actor,c.id,'listIssues',{workspaceId:c.id})).items.length,issues);
+}finally{f.cleanup();}});
